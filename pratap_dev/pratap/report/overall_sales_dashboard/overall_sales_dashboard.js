@@ -40,10 +40,22 @@ frappe.query_reports["Overall Sales Dashboard"] = {
 		},
 	],
 	formatter: function (value, row, column, data, default_formatter) {
-		value = default_formatter(value, row, column, data);
-		if (data && data.customer === __("Total") && column.df && column.df.fieldname === "customer") {
-			return value ? "<b>" + value + "</b>" : value;
+		// Total row: bind each column to the correct field so alignment is guaranteed
+		if (data && data.customer === __("Total") && column.df && column.df.fieldname) {
+			const fn = column.df.fieldname;
+			if (fn === "customer") {
+				value = default_formatter(value, row, column, data);
+				return value ? "<b>" + value + "</b>" : value;
+			}
+			if (fn === "revenue") return default_formatter(data.revenue, row, column, data);
+			if (fn === "order_count") return default_formatter(data.order_count, row, column, data);
+			if (fn === "target") return default_formatter(data.target, row, column, data);
+			if (fn === "achieved") return default_formatter(data.achieved, row, column, data);
+			// Empty columns in Total row (links, dates)
+			if (["sales_person", "enquiry_id", "sales_order_id", "invoice_id", "order_date", "invoice_date"].includes(fn)) {
+				return default_formatter("", row, column, data);
+			}
 		}
-		return value;
+		return default_formatter(value, row, column, data);
 	},
 };

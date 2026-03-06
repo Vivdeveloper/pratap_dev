@@ -135,6 +135,7 @@ def get_data(filters):
 			}
 
 	# 5) Build detail rows (one per Sales Invoice)
+	company_currency = frappe.get_cached_value("Company", filters["company"], "default_currency") or "INR"
 	order_ids_seen = set()
 	rows = []
 	for si in si_list:
@@ -144,8 +145,9 @@ def get_data(filters):
 		if so_id:
 			order_ids_seen.add(so_id)
 
+		# Row keys in same order as get_columns() for correct alignment
 		rows.append({
-			"customer": si.get("customer_name") or si.get("customer"),
+			"customer": si.get("customer") or "",
 			"sales_person": sales_person or "",
 			"enquiry_id": details.get("enquiry_id") or "",
 			"sales_order_id": so_id or "",
@@ -153,7 +155,10 @@ def get_data(filters):
 			"order_date": details.get("order_date"),
 			"invoice_date": si.get("posting_date"),
 			"revenue": flt(si.get("base_grand_total"), 2),
-			"currency": si.get("currency") or frappe.get_cached_value("Company", filters["company"], "default_currency"),
+			"currency": si.get("currency") or company_currency,
+			"order_count": 0,
+			"target": 0,
+			"achieved": 0,
 		})
 
 	# Apply sales person filter if set
@@ -209,6 +214,7 @@ def _build_summary_rows(detail_rows, filters, order_count=0, achieved=0):
 		)
 		target = sum(flt(t["target_amount"]) for t in target_result)
 
+	# Summary row: keys in exact order as get_columns() for correct column alignment
 	summary_row = {
 		"customer": _("Total"),
 		"sales_person": "",
@@ -217,9 +223,9 @@ def _build_summary_rows(detail_rows, filters, order_count=0, achieved=0):
 		"invoice_id": "",
 		"order_date": None,
 		"invoice_date": None,
-		"revenue": None,
+		"revenue": flt(achieved, 2),
 		"currency": company_currency,
-		"order_count": order_count,
+		"order_count": int(order_count),
 		"target": flt(target, 2),
 		"achieved": flt(achieved, 2),
 	}

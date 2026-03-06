@@ -37,7 +37,6 @@ def get_columns():
 			"options": "Territory",
 			"width": 150,
 		},
-		{"label": _("Industry"), "fieldname": "industry", "fieldtype": "Link", "options": "Industry Type", "width": 100},
 		{"label": _("Email"), "fieldname": "email_id", "fieldtype": "Data", "width": 120},
 		{"label": _("Mobile"), "fieldname": "mobile_no", "fieldtype": "Data", "width": 120},
 		{"label": _("Phone"), "fieldname": "phone", "fieldtype": "Data", "width": 120},
@@ -55,7 +54,6 @@ def get_columns():
 			"options": "Company",
 			"width": 200,
 		},
-		{"label": _("Address"), "fieldname": "address", "fieldtype": "Data", "width": 130},
 		{"label": _("Postal Code"), "fieldname": "pincode", "fieldtype": "Data", "width": 90},
 		{"label": _("City"), "fieldname": "city", "fieldtype": "Data", "width": 100},
 		{"label": _("State"), "fieldname": "state", "fieldtype": "Data", "width": 100},
@@ -75,7 +73,7 @@ def get_columns():
 			col = {"label": _(df.label or df.fieldname), "fieldname": df.fieldname, "fieldtype": df.fieldtype, "width": 100}
 			if df.get("options"):
 				col["options"] = df.options
-			columns.append(col)
+			# columns.append(col)
 	return columns
 
 

@@ -34,9 +34,16 @@ frappe.query_reports["Customer Product Health Index"] = {
 	],
 	formatter: function (value, row, column, data, default_formatter) {
 		value = default_formatter(value, row, column, data);
-		if (column.df && column.df.fieldname === "health_status" && value) {
-			var color = value === "Green" ? "#28a745" : value === "Amber" ? "#ffc107" : "#dc3545";
-			return "<span style='color:" + color + "; font-weight: bold;'>" + value + "</span>";
+		var status = data && data.health_status;
+		var rowBg = (status === "Green" && "#d4edda") || (status === "Amber" && "#fff3cd") || (status === "Red" && "#f8d7da") || "";
+		if (rowBg) {
+			value = "<span style='background-color:" + rowBg + "; display: block; margin: -4px -8px; padding: 4px 8px;'>" + value + "</span>";
+		}
+		if (column.df && column.df.fieldname === "health_status" && status) {
+			var textColor = status === "Green" ? "#28a745" : status === "Amber" ? "#ffc107" : "#dc3545";
+			value = rowBg
+				? "<span style='background-color:" + rowBg + "; display: block; margin: -4px -8px; padding: 4px 8px;'><span style='color:" + textColor + "; font-weight: bold;'>" + (data.health_status || "") + "</span></span>"
+				: "<span style='color:" + textColor + "; font-weight: bold;'>" + value + "</span>";
 		}
 		return value;
 	},

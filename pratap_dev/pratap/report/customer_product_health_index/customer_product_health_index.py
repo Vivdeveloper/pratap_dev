@@ -18,6 +18,8 @@ def get_columns():
 		{"label": _("Customer Name"), "fieldname": "customer_name", "fieldtype": "Link", "options": "Customer", "width": 230},
 		{"label": _("Product"), "fieldname": "product", "fieldtype": "Data", "width": 230},
 		{"label": _("Total Orders"), "fieldname": "total_orders", "fieldtype": "Int", "width": 140},
+		{"label": _("Total"), "fieldname": "total", "fieldtype": "Currency", "options": "currency", "width": 120},
+		{"fieldname": "currency", "hidden": 1},
 		{"label": _("Complaint Count"), "fieldname": "complaint_count", "fieldtype": "Int", "width": 140},
 		{"label": _("Rejection Count"), "fieldname": "rejection_count", "fieldtype": "Int", "width": 140},
 		{"label": _("Trial Success Rate"), "fieldname": "trial_success_rate", "fieldtype": "Percent", "width": 170},
@@ -43,19 +45,21 @@ def get_data(filters):
 	so_list = frappe.get_all(
 		"Sales Order",
 		filters=so_filters,
-		fields=["name", "customer", "customer_name"],
+		fields=["name", "customer", "customer_name", "total", "currency"],
 		order_by="customer, transaction_date asc",
 	)
 	if not so_list:
 		return []
 
-	# Total orders and repeat orders per customer
+	# Total orders, repeat orders, and sum of SO total per customer
 	customer_orders = {}
+	customer_total = {}
 	for so in so_list:
 		c = so.get("customer") or so.get("customer_name")
 		if not c:
 			continue
 		customer_orders[c] = customer_orders.get(c, 0) + 1
+		customer_total[c] = customer_total.get(c, 0) + flt(so.get("total"), 2)
 
 	# Products per customer (from Sales Order Item)
 	so_names = [s["name"] for s in so_list]
@@ -85,6 +89,7 @@ def get_data(filters):
 	trial_rate_by_customer = _get_trial_success_rate_by_customer(from_date, to_date)
 
 	# 5) Build rows: one per customer
+	company_currency = frappe.get_cached_value("Company", company, "default_currency") or "INR"
 	customers = sorted(customer_orders.keys())
 	rows = []
 	for customer in customers:
@@ -95,6 +100,7 @@ def get_data(filters):
 		complaint_count = complaint_by_customer.get(customer, 0)
 		rejection_count = rejection_by_customer.get(customer, 0)
 		trial_success_rate = trial_rate_by_customer.get(customer)  # None when no trials
+		total_amount = customer_total.get(customer, 0)
 
 		health_status = _calculate_health_status(
 			complaint_count=complaint_count,
@@ -107,6 +113,8 @@ def get_data(filters):
 			"customer_name": customer,
 			"product": product_str,
 			"total_orders": total_orders,
+			"total": flt(total_amount, 2),
+			"currency": company_currency,
 			"complaint_count": complaint_count,
 			"rejection_count": rejection_count,
 			"trial_success_rate": flt(trial_success_rate, 2) if trial_success_rate is not None else None,
