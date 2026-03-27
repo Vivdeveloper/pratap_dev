@@ -442,7 +442,7 @@ def complain_table_cal_by_weight(doc, method):
     doc.base_net_total = total_doc_amount
     
 
-    def tsa_table_cal_by_weight(doc, method):
+def tsa_table_cal_by_weight(doc, method):
 
     total_doc_amount = 0
 
