@@ -1,13 +1,12 @@
-frappe.ui.form.on('Opportunity', {
+function set_opportunity_from_options(frm) {
+    frm.set_df_property("opportunity_from", "options", "\nCustomer\nProspect");
+}
+
+frappe.ui.form.on("Opportunity", {
     setup(frm) {
-
-        // Completely override options
-        frm.fields_dict.opportunity_from.df.options = [
-            "",
-            "Customer",
-            "Prospect"   // or your "Customer Management"
-        ];
-
-        frm.refresh_field('opportunity_from');
-    }
+        set_opportunity_from_options(frm);
+    },
+    refresh(frm) {
+        set_opportunity_from_options(frm);
+    },
 });
