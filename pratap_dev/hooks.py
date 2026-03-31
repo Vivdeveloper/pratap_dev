@@ -243,6 +243,11 @@ app_license = "mit"
 # 	"Logging DocType Name": 30  # days to retain logs
 # }
 
+
+doctype_js = {
+    "Opportunity": "public/js/opportunity_override.js"
+}
+
 doc_events = {
     "Quotation": {
         "before_save": "pratap_dev.calculation.po_calculation_by_weight"

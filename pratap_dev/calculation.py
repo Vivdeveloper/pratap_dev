@@ -1140,16 +1140,3 @@ def tsa_table_cal_by_weight(doc, method):
     doc.net_total = total_doc_amount
     doc.base_total = total_doc_amount
     doc.base_net_total = total_doc_amount
-
-
-
-
-
-
-
-
-
-
-
-
-
