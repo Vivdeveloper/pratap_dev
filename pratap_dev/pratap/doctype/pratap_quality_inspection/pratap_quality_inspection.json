@@ -1,0 +1,256 @@
+{
+ "actions": [],
+ "allow_copy": 1,
+ "autoname": "naming_series:",
+ "creation": "2026-04-14 00:00:00",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "status",
+  "manual_inspection",
+  "work_order",
+  "stock_entry",
+  "inspection_date",
+  "company",
+  "column_break_unee",
+  "naming_series",
+  "rework_notes",
+  "section_break_1",
+  "production_item",
+  "item_name",
+  "reference_qty",
+  "column_break_nbam",
+  "custom_density",
+  "density_qty",
+  "process_loss",
+  "finished_qty",
+  "sales_uom",
+  "section_break_2",
+  "inspected_qty",
+  "column_break_1",
+  "inspector",
+  "remarks",
+  "amended_from",
+  "section_break_lbwt",
+  "quality_inspection_template",
+  "readings"
+ ],
+ "fields": [
+  {
+   "fieldname": "work_order",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Work Order",
+   "options": "Work Order",
+   "reqd": 1
+  },
+  {
+   "default": "Today",
+   "fieldname": "inspection_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Inspection Date",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "work_order.company",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_1",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fetch_from": "work_order.production_item",
+   "fieldname": "production_item",
+   "fieldtype": "Link",
+   "label": "Production Item",
+   "options": "Item",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "work_order.item_name",
+   "fieldname": "item_name",
+   "fieldtype": "Data",
+   "label": "Item Name",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "work_order.qty",
+   "fieldname": "reference_qty",
+   "fieldtype": "Float",
+   "label": "Batch Qty",
+   "precision": "6",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_2",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "inspected_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Inspected Qty",
+   "precision": "6",
+   "reqd": 1
+  },
+  {
+   "default": "Pending",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Pending\nAccepted\nRejected\nRework"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "inspector",
+   "fieldtype": "Link",
+   "label": "Inspector",
+   "options": "User"
+  },
+  {
+   "fieldname": "remarks",
+   "fieldtype": "Small Text",
+   "label": "Remarks"
+  },
+  {
+   "fieldname": "custom_density",
+   "fieldtype": "Float",
+   "label": "Density"
+  },
+  {
+   "fieldname": "column_break_nbam",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "density_qty",
+   "fieldtype": "Float",
+   "label": "Density Qty"
+  },
+  {
+   "fieldname": "quality_inspection_template",
+   "fieldtype": "Link",
+   "label": "Quality Inspection Template",
+   "options": "Quality Inspection Template"
+  },
+  {
+   "default": "1",
+   "fieldname": "manual_inspection",
+   "fieldtype": "Check",
+   "hidden": 1,
+   "label": "Manual Inspection",
+   "read_only": 1
+  },
+  {
+   "fieldname": "readings",
+   "fieldtype": "Table",
+   "label": "Readings",
+   "options": "Pratap Quality Inspection Reading"
+  },
+  {
+   "fetch_from": "production_item.stock_uom",
+   "fieldname": "sales_uom",
+   "fieldtype": "Link",
+   "label": "Sales UOM",
+   "options": "UOM"
+  },
+  {
+   "fieldname": "column_break_unee",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "naming_series",
+   "options": "PQIW-.YYYY.-.#####"
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Pratap Quality Inspection",
+   "print_hide": 1,
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "stock_entry",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Stock Entry",
+   "no_copy": 1,
+   "options": "Stock Entry"
+  },
+  {
+   "fieldname": "section_break_lbwt",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "rework_notes",
+   "fieldtype": "Long Text",
+   "label": "Rework Notes",
+   "mandatory_depends_on": "eval:doc.status == \"Rework\""
+  },
+  {
+   "fieldname": "process_loss",
+   "fieldtype": "Percent",
+   "label": "Process Loss"
+  },
+  {
+   "fieldname": "finished_qty",
+   "fieldtype": "Float",
+   "label": "Finished Qty"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "is_submittable": 1,
+ "links": [],
+ "modified": "2026-04-15 21:21:20.889611",
+ "modified_by": "Administrator",
+ "module": "pratap",
+ "name": "Pratap Quality Inspection",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Manufacturing User",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

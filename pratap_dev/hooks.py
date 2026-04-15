@@ -245,7 +245,12 @@ app_license = "mit"
 
 
 doctype_js = {
-    "Opportunity": "public/js/opportunity_override.js"
+    "Opportunity": "public/js/opportunity_override.js",
+    "Work Order": "public/js/work_order_override.js"
+}
+
+doctype_list_js = {
+    "Pratap Quality Inspection": "public/js/pratap_quality_inspection_list.js"
 }
 
 doc_events = {
@@ -275,6 +280,9 @@ doc_events = {
     },
      "TSA Request": {
         "before_save": "pratap_dev.calculation.tsa_table_cal_by_weight"
+    },
+    "Stock Entry": {
+        "before_submit": "pratap_dev.stock_entry_validation.validate_manufacture_batch_with_work_order"
     },
     
 }
