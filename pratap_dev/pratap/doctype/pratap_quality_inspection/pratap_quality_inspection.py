@@ -24,6 +24,9 @@ class PratapQualityInspection(Document):
 
 	def validate(self):
 		self._set_inspector()
+		self._validate_inspected_qty()
+		self._validate_total_raw_material_percentage()
+		self._set_raw_material_required_qty()
 		self._set_density_qty()
 		self._set_finished_qty()
 		self._set_readings_from_template()
@@ -45,6 +48,10 @@ class PratapQualityInspection(Document):
 		if not self.inspector or self.inspector == "frappe.session.user":
 			self.inspector = frappe.session.user
 
+	def _validate_inspected_qty(self):
+		if frappe.utils.flt(self.inspected_qty) <= 0:
+			frappe.throw("Inspected Qty must be greater than 0.")
+
 	def _set_density_qty(self):
 		reference_qty = frappe.utils.flt(self.reference_qty)
 		custom_density = frappe.utils.flt(self.custom_density)
@@ -59,6 +66,21 @@ class PratapQualityInspection(Document):
 		process_loss = frappe.utils.flt(self.process_loss)
 		multiplier = 1 - (process_loss / 100.0)
 		self.finished_qty = density_qty * multiplier if multiplier > 0 else 0
+
+	def _set_raw_material_required_qty(self):
+		reference_qty = frappe.utils.flt(self.reference_qty)
+		for row in self.raw_materials or []:
+			percentage = frappe.utils.flt(row.mat_req_in_pecentage)
+			row.total_req_qty = reference_qty * (percentage / 100.0)
+
+	def _validate_total_raw_material_percentage(self):
+		total_percentage = sum(
+			frappe.utils.flt(row.mat_req_in_pecentage) for row in (self.raw_materials or [])
+		)
+		if total_percentage > 100:
+			frappe.throw(
+				f"Total Raw Material % cannot be greater than 100. Current total is {total_percentage}."
+			)
 
 	def _set_readings_from_template(self):
 		if self.readings:
@@ -107,6 +129,9 @@ class PratapQualityInspection(Document):
 		if self.stock_entry:
 			return
 
+		if (self.status or "").strip() != "Accepted":
+			return
+
 		if not self.work_order or not self.production_item:
 			return
 
@@ -124,7 +149,28 @@ class PratapQualityInspection(Document):
 		stock_entry = frappe.get_doc(stock_entry_data)
 		stock_entry.insert(ignore_permissions=True)
 		stock_entry.submit()
+		self._set_batch_custom_density()
 		self.db_set("stock_entry", stock_entry.name, update_modified=False)
+
+	def _set_batch_custom_density(self):
+		batch_name = frappe.db.get_value(
+			"Batch",
+			{"batch_id": self.work_order, "item": self.production_item},
+			"name",
+		)
+		if not batch_name and frappe.db.exists("Batch", self.work_order):
+			batch_name = self.work_order
+
+		if not batch_name:
+			return
+
+		frappe.db.set_value(
+			"Batch",
+			batch_name,
+			"custom_density",
+			frappe.utils.flt(self.custom_density),
+			update_modified=False,
+		)
 
 	def _cancel_stock_entry(self):
 		if not self.stock_entry:
