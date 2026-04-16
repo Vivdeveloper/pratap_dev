@@ -11,6 +11,7 @@
   "uom",
   "mat_req_in_pecentage",
   "total_req_qty",
+  "column_break_hhzn",
   "source_warehouse",
   "actual_qty"
  ],
@@ -65,13 +66,17 @@
    "in_list_view": 1,
    "label": "Actual Qty",
    "read_only": 1
+  },
+  {
+   "fieldname": "column_break_hhzn",
+   "fieldtype": "Column Break"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-04-16 13:17:41.709518",
+ "modified": "2026-04-16 13:23:00.236479",
  "modified_by": "Administrator",
  "module": "pratap",
  "name": "Pratap Quality Inspection Raw Material",
