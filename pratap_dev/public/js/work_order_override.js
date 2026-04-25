@@ -4,9 +4,12 @@ frappe.ui.form.on("Work Order", {
             return;
         }
 
-        frm.add_custom_button(__("Create QC"), () => {
+        frm.add_custom_button(__("Create Pratap QC"), () => {
             frappe.new_doc("Pratap Quality Inspection", {
-                work_order: frm.doc.name,
+                inspection_type: "In Process",
+                reference_type: "Work Order",
+                reference_doctype: "Work Order",
+                reference_name: frm.doc.name,
                 company: frm.doc.company,
                 production_item: frm.doc.production_item,
                 item_name: frm.doc.item_name,

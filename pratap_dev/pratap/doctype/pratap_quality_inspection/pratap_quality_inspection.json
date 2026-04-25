@@ -9,7 +9,10 @@
  "field_order": [
   "status",
   "manual_inspection",
-  "work_order",
+  "inspection_type",
+  "reference_type",
+  "reference_doctype",
+  "reference_name",
   "stock_entry",
   "inspection_date",
   "company",
@@ -40,15 +43,6 @@
   "raw_materials"
  ],
  "fields": [
-  {
-   "fieldname": "work_order",
-   "fieldtype": "Link",
-   "in_list_view": 1,
-   "in_standard_filter": 1,
-   "label": "Work Order",
-   "options": "Work Order",
-   "reqd": 1
-  },
   {
    "default": "Today",
    "fieldname": "inspection_date",
@@ -164,6 +158,34 @@
    "read_only": 1
   },
   {
+   "fieldname": "inspection_type",
+   "fieldtype": "Select",
+   "label": "Inspection Type",
+   "options": "\nIncoming\nOutgoing\nIn Process",
+   "reqd": 1
+  },
+  {
+   "fieldname": "reference_type",
+   "fieldtype": "Select",
+   "label": "Reference Type",
+   "options": "\nGRN\nPurchase Invoice\nDelivery Note\nSales Invoice\nWork Order\nJob Card\nStock Entry",
+   "reqd": 1
+  },
+  {
+   "fieldname": "reference_doctype",
+   "fieldtype": "Link",
+   "hidden": 1,
+   "label": "reference_doctype",
+   "options": "DocType"
+  },
+  {
+   "fieldname": "reference_name",
+   "fieldtype": "Dynamic Link",
+   "label": "Reference Name",
+   "options": "reference_doctype",
+   "reqd": 1
+  },
+  {
    "fieldname": "readings",
    "fieldtype": "Table",
    "label": "Readings",
@@ -174,7 +196,7 @@
    "fieldname": "sales_uom",
    "fieldtype": "Link",
    "in_standard_filter": 1,
-   "label": "Sales UOM",
+   "label": "Sales UOM/Purchase UOM/Default UOM",
    "options": "UOM"
   },
   {
@@ -215,6 +237,8 @@
    "mandatory_depends_on": "eval:doc.status == \"Rework\""
   },
   {
+   "fetch_from": "production_item.custom_process_loss",
+   "fetch_if_empty": 1,
    "fieldname": "process_loss",
    "fieldtype": "Percent",
    "label": "Process Loss"
@@ -247,7 +271,7 @@
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-04-25 15:46:20.230286",
+ "modified": "2026-04-25 16:29:24.513225",
  "modified_by": "Administrator",
  "module": "pratap",
  "name": "Pratap Quality Inspection",

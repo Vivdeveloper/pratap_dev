@@ -2,6 +2,26 @@
 // For license information, please see license.txt
 
 frappe.ui.form.on("Pratap Quality Inspection", {
+	setup(frm) {
+		set_reference_doctype(frm);
+	},
+
+	refresh(frm) {
+		set_reference_doctype(frm);
+	},
+
+	reference_type(frm) {
+		const previous_doctype = frm.doc.reference_doctype;
+		set_reference_doctype(frm);
+		if (previous_doctype !== frm.doc.reference_doctype) {
+			frm.set_value("reference_name", "");
+		}
+	},
+
+	reference_name(frm) {
+		fetch_reference_item_details(frm);
+	},
+
 	reference_qty(frm) {
 		set_density_qty(frm);
 		set_raw_material_required_qty(frm);
@@ -99,4 +119,63 @@ function set_row_actual_qty(cdt, cdn) {
 			const actualQty = flt(r.message?.actual_qty);
 			frappe.model.set_value(cdt, cdn, "actual_qty", actualQty);
 		});
+}
+
+function set_reference_doctype(frm) {
+	const doctype_map = {
+		GRN: "Purchase Receipt",
+		"Purchase Invoice": "Purchase Invoice",
+		"Delivery Note": "Delivery Note",
+		"Sales Invoice": "Sales Invoice",
+		"Work Order": "Work Order",
+		"Job Card": "Job Card",
+		"Stock Entry": "Stock Entry",
+	};
+	const mapped_doctype = doctype_map[frm.doc.reference_type] || "";
+	if (frm.doc.reference_doctype !== mapped_doctype) {
+		frm.set_value("reference_doctype", mapped_doctype);
+	}
+}
+
+function fetch_reference_item_details(frm) {
+	if (!frm.doc.reference_type || !frm.doc.reference_name) {
+		return;
+	}
+
+	if (frm.doc.reference_type === "Work Order") {
+		frm.set_value("work_order", frm.doc.reference_name);
+		return;
+	}
+
+	const reference_doctype = frm.doc.reference_doctype;
+	if (!reference_doctype) {
+		return;
+	}
+
+	frappe.db.get_doc(reference_doctype, frm.doc.reference_name).then((doc) => {
+		const items = doc.items || [];
+		if (!items.length) {
+			return;
+		}
+		let selected_item = items[0];
+		if (frm.doc.production_item) {
+			selected_item =
+				items.find((row) => row.item_code === frm.doc.production_item) || selected_item;
+		}
+		if (frm.doc.work_order) {
+			selected_item =
+				items.find((row) => row.work_order && row.work_order === frm.doc.work_order) ||
+				selected_item;
+		}
+
+		frm.set_value("company", doc.company || "");
+		frm.set_value("production_item", selected_item.item_code || "");
+		frm.set_value("item_name", selected_item.item_name || "");
+		frm.set_value("sales_uom", selected_item.uom || selected_item.stock_uom || "");
+		frm.set_value("reference_qty", flt(selected_item.qty));
+
+		if (selected_item.work_order) {
+			frm.set_value("work_order", selected_item.work_order);
+		}
+	});
 }

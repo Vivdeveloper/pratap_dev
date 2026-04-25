@@ -132,6 +132,9 @@ class PratapQualityInspection(Document):
 		if (self.status or "").strip() != "Accepted":
 			return
 
+		if (self.reference_type or "").strip() != "Work Order":
+			return
+
 		if not self.work_order or not self.production_item:
 			return
 
