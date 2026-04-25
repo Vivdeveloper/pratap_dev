@@ -20,6 +20,7 @@
   "production_item",
   "item_name",
   "reference_qty",
+  "manufacturing_uom",
   "column_break_nbam",
   "custom_density",
   "density_qty",
@@ -147,6 +148,8 @@
    "label": "Density Qty"
   },
   {
+   "fetch_from": "production_item.quality_inspection_template",
+   "fetch_if_empty": 1,
    "fieldname": "quality_inspection_template",
    "fieldtype": "Link",
    "label": "Quality Inspection Template",
@@ -219,7 +222,7 @@
   {
    "fieldname": "finished_qty",
    "fieldtype": "Float",
-   "label": "Finished Qty"
+   "label": "Yield Qty"
   },
   {
    "fieldname": "section_break_kcls",
@@ -231,13 +234,20 @@
    "fieldtype": "Table",
    "label": "Raw Materials",
    "options": "Pratap Quality Inspection Raw Material"
+  },
+  {
+   "fetch_from": "production_item.custom_manufacturing_uom",
+   "fieldname": "manufacturing_uom",
+   "fieldtype": "Link",
+   "label": "Manufacturing UOM",
+   "options": "UOM"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-04-16 12:48:26.907499",
+ "modified": "2026-04-25 15:46:20.230286",
  "modified_by": "Administrator",
  "module": "pratap",
  "name": "Pratap Quality Inspection",
