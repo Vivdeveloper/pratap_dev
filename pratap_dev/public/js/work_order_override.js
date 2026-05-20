@@ -1,6 +1,6 @@
 frappe.ui.form.on("Work Order", {
     refresh(frm) {
-        if (frm.doc.docstatus != 1) {
+        if (![0, 1].includes(frm.doc.docstatus)) {
             return;
         }
 

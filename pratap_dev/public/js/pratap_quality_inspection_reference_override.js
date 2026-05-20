@@ -23,7 +23,7 @@ frappe.ui.form.on("Sales Invoice", {
 });
 
 function add_create_pratap_qc_button(frm) {
-	if (frm.doc.docstatus !== 1) {
+	if (![0, 1].includes(frm.doc.docstatus)) {
 		return;
 	}
 
