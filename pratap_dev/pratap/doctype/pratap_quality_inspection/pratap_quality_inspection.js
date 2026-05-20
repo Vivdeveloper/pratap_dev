@@ -4,10 +4,12 @@
 frappe.ui.form.on("Pratap Quality Inspection", {
 	setup(frm) {
 		set_reference_doctype(frm);
+		set_reference_name_query(frm);
 	},
 
 	refresh(frm) {
 		set_reference_doctype(frm);
+		set_reference_name_query(frm);
 	},
 
 	reference_type(frm) {
@@ -30,6 +32,14 @@ frappe.ui.form.on("Pratap Quality Inspection", {
 
 	custom_density(frm) {
 		set_density_qty(frm);
+	},
+
+	purchase_uom(frm) {
+		apply_density_for_same_uom(frm);
+	},
+
+	sales_uom(frm) {
+		apply_density_for_same_uom(frm);
 	},
 
 	process_loss(frm) {
@@ -137,6 +147,29 @@ function set_reference_doctype(frm) {
 	}
 }
 
+function set_reference_name_query(frm) {
+	frm.set_query("reference_name", () => {
+		if (frm.doc.reference_type === "GRN") {
+			return {
+				filters: {
+					docstatus: ["<", 2],
+				},
+			};
+		}
+		return {};
+	});
+}
+
+function apply_density_for_same_uom(frm) {
+	const purchase_uom = (frm.doc.purchase_uom || "").trim().toLowerCase();
+	const sales_uom = (frm.doc.sales_uom || "").trim().toLowerCase();
+
+	if (purchase_uom && sales_uom && purchase_uom === sales_uom) {
+		frm.set_value("custom_density", 1);
+		set_density_qty(frm);
+	}
+}
+
 function fetch_reference_item_details(frm) {
 	if (!frm.doc.reference_type || !frm.doc.reference_name) {
 		return;
@@ -176,6 +209,18 @@ function fetch_reference_item_details(frm) {
 
 		if (selected_item.work_order) {
 			frm.set_value("work_order", selected_item.work_order);
+		}
+
+		if (frm.doc.reference_type === "GRN" && selected_item.item_code) {
+			frappe.db.get_value(
+				"Item",
+				selected_item.item_code,
+				["purchase_uom"],
+				(r) => {
+					frm.set_value("purchase_uom", r.message?.purchase_uom || "");
+					apply_density_for_same_uom(frm);
+				}
+			);
 		}
 	});
 }

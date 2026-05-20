@@ -53,7 +53,13 @@ function open_create_grn_dialog(frm, items) {
 		],
 		primary_action_label: __("Create GRN"),
 		primary_action() {
-			const rows = dialog.get_value("items") || [];
+			const grid = dialog.fields_dict.items?.grid;
+			const rows = grid?.get_selected_children() || [];
+
+			if (!rows.length) {
+				frappe.throw(__("Please tick at least one item checkbox to create GRN."));
+			}
+
 			const payload = [];
 
 			for (const row of rows) {
@@ -94,7 +100,7 @@ function open_create_grn_dialog(frm, items) {
 			}
 
 			if (!payload.length) {
-				frappe.throw(__("Please enter No of Unit for at least one item."));
+				frappe.throw(__("Please enter No of Unit for at least one selected item."));
 			}
 
 			dialog.hide();
@@ -226,16 +232,12 @@ function get_grn_dialog_table_fields() {
 		{
 			fieldname: "balance_no_of_unit",
 			fieldtype: "Float",
-			label: __("Balance No of Unit"),
-			read_only: 1,
-			in_list_view: 1,
+			hidden: 1,
 		},
 		{
 			fieldname: "balance_grn_qty",
 			fieldtype: "Float",
-			label: __("Balance GRN Qty"),
-			read_only: 1,
-			in_list_view: 1,
+			hidden: 1,
 		},
 	];
 }
@@ -251,7 +253,7 @@ function prepare_grn_dialog_row(row) {
 	return prepared;
 }
 
-function recalculate_grn_row(row) {
+function recalculate_grn_row(row, options = {}) {
 	const packing = flt(row.custom_packing_qty) || 1;
 	const po_units = flt(row.po_no_of_unit);
 	const received_units = row.received_grn_qty / packing;
@@ -259,17 +261,29 @@ function recalculate_grn_row(row) {
 
 	row.balance_no_of_unit = Math.max(po_units - received_units - draft_units, 0);
 	row.balance_grn_qty = row.balance_no_of_unit * packing;
-
-	// Total Qty = Packing Qty × No of Unit (for this GRN)
-	row.qty = packing * flt(row.custom_total_qty);
-	row.grn_qty = row.qty;
 	row.pending_grn_qty = row.balance_grn_qty;
 
-	if (flt(row.custom_total_qty) > row.balance_no_of_unit) {
+	const entered_units = flt(row.custom_total_qty);
+	const was_over = entered_units > row.balance_no_of_unit;
+
+	if (was_over) {
 		row.custom_total_qty = row.balance_no_of_unit;
-		row.qty = packing * row.custom_total_qty;
-		row.grn_qty = row.qty;
+		if (options.show_cap_message) {
+			frappe.show_alert({
+				message: __(
+					"{0}: No of Unit cannot exceed {1} (balance on PO)",
+					[row.item_code || "", row.balance_no_of_unit]
+				),
+				indicator: "orange",
+			});
+		}
 	}
+
+	// Total Qty = Packing Qty × No of Unit (capped to PO balance)
+	row.qty = Math.min(packing * flt(row.custom_total_qty), row.balance_grn_qty);
+	row.grn_qty = row.qty;
+
+	return was_over;
 }
 
 function bind_grn_grid_events(dialog) {
@@ -279,9 +293,13 @@ function bind_grn_grid_events(dialog) {
 	}
 
 	const refresh_row_fields = (grid_row) => {
+		grid_row.refresh_field("custom_total_qty");
 		grid_row.refresh_field("qty");
-		grid_row.refresh_field("balance_no_of_unit");
-		grid_row.refresh_field("balance_grn_qty");
+	};
+
+	const on_no_of_unit_change = (grid_row) => {
+		recalculate_grn_row(grid_row.doc, { show_cap_message: true });
+		refresh_row_fields(grid_row);
 	};
 
 	grid.wrapper.on(
@@ -290,11 +308,21 @@ function bind_grn_grid_events(dialog) {
 		function () {
 			const row_name = $(this).closest(".grid-row").attr("data-name");
 			const grid_row = grid.grid_rows_by_docname[row_name];
-			if (!grid_row) {
-				return;
+			if (grid_row) {
+				on_no_of_unit_change(grid_row);
 			}
-			recalculate_grn_row(grid_row.doc);
-			refresh_row_fields(grid_row);
+		}
+	);
+
+	grid.wrapper.on(
+		"blur",
+		'input[data-fieldname="custom_total_qty"]',
+		function () {
+			const row_name = $(this).closest(".grid-row").attr("data-name");
+			const grid_row = grid.grid_rows_by_docname[row_name];
+			if (grid_row) {
+				on_no_of_unit_change(grid_row);
+			}
 		}
 	);
 }

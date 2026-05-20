@@ -2,6 +2,7 @@
 # For license information, please see license.txt
 
 import frappe
+from frappe import _
 from frappe.model.document import Document
 from frappe.utils import cint
 from erpnext.manufacturing.doctype.work_order.work_order import make_stock_entry
@@ -21,9 +22,12 @@ class PratapQualityInspection(Document):
 
 	def on_submit(self):
 		self._create_stock_entry()
+		self._submit_linked_grn()
 
 	def validate(self):
 		self._set_inspector()
+		self._validate_grn_reference()
+		self._set_density_for_same_uom()
 		self._validate_inspected_qty()
 		self._validate_total_raw_material_percentage()
 		self._set_raw_material_required_qty()
@@ -31,6 +35,62 @@ class PratapQualityInspection(Document):
 		self._set_finished_qty()
 		self._set_readings_from_template()
 		self._inspect_and_set_status()
+
+	def _validate_grn_reference(self):
+		if (self.inspection_type or "").strip() != "Incoming":
+			return
+
+		if (self.reference_type or "").strip() != "GRN":
+			return
+
+		if self.reference_doctype != "Purchase Receipt":
+			frappe.throw(_("Reference DocType must be Purchase Receipt when Reference Type is GRN."))
+
+		if not self.reference_name:
+			frappe.throw(_("Reference Name (GRN) is required for Incoming inspection."))
+
+		if not frappe.db.exists("Purchase Receipt", self.reference_name):
+			frappe.throw(_("Purchase Receipt {0} does not exist.").format(self.reference_name))
+
+		grn = frappe.get_doc("Purchase Receipt", self.reference_name)
+		if grn.docstatus == 2:
+			frappe.throw(_("Purchase Receipt {0} is cancelled.").format(self.reference_name))
+
+		if self.production_item:
+			matching_items = [row for row in grn.items if row.item_code == self.production_item]
+			if not matching_items:
+				frappe.throw(
+					_("Item {0} is not found in Purchase Receipt {1}.").format(
+						self.production_item, self.reference_name
+					)
+				)
+
+	def _set_density_for_same_uom(self):
+		purchase_uom = (self.purchase_uom or "").strip().lower()
+		sales_uom = (self.sales_uom or "").strip().lower()
+
+		if purchase_uom and sales_uom and purchase_uom == sales_uom:
+			self.custom_density = 1
+
+	def _submit_linked_grn(self):
+		if (self.inspection_type or "").strip() != "Incoming":
+			return
+
+		if (self.reference_type or "").strip() != "GRN":
+			return
+
+		if self.reference_doctype != "Purchase Receipt" or not self.reference_name:
+			return
+
+		if (self.status or "").strip() != "Accepted":
+			return
+
+		if not frappe.db.exists("Purchase Receipt", self.reference_name):
+			return
+
+		grn = frappe.get_doc("Purchase Receipt", self.reference_name)
+		if grn.docstatus == 0:
+			grn.submit()
 
 	def _validate_custom_density(self):
 		if self.custom_density in (None, ""):

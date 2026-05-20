@@ -24,6 +24,7 @@
   "item_name",
   "reference_qty",
   "manufacturing_uom",
+  "purchase_uom",
   "column_break_nbam",
   "custom_density",
   "density_qty",
@@ -196,7 +197,7 @@
    "fieldname": "sales_uom",
    "fieldtype": "Link",
    "in_standard_filter": 1,
-   "label": "Sales UOM/Purchase UOM/Default UOM",
+   "label": "Sales UOM/Default UOM",
    "options": "UOM"
   },
   {
@@ -265,13 +266,20 @@
    "fieldtype": "Link",
    "label": "Manufacturing UOM",
    "options": "UOM"
+  },
+  {
+   "fetch_from": "production_item.purchase_uom",
+   "fieldname": "purchase_uom",
+   "fieldtype": "Link",
+   "label": "Purchase UOM",
+   "options": "UOM"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-04-25 16:29:24.513225",
+ "modified": "2026-05-20 20:07:59.544529",
  "modified_by": "Administrator",
  "module": "pratap",
  "name": "Pratap Quality Inspection",

@@ -35,7 +35,7 @@ function add_create_pratap_qc_button(frm) {
 			return;
 		}
 
-		frappe.new_doc("Pratap Quality Inspection", {
+		const qc_defaults = {
 			inspection_type,
 			reference_type,
 			reference_doctype: frm.doctype,
@@ -46,7 +46,25 @@ function add_create_pratap_qc_button(frm) {
 			item_name: selected_item.item_name || "",
 			reference_qty: flt(selected_item.qty),
 			sales_uom: selected_item.uom || selected_item.stock_uom || "",
-		});
+		};
+
+		if (selected_item.item_code) {
+			const item_fields = await frappe.db.get_value(
+				"Item",
+				selected_item.item_code,
+				["purchase_uom"]
+			);
+			qc_defaults.purchase_uom = item_fields?.message?.purchase_uom || "";
+			if (
+				qc_defaults.purchase_uom &&
+				qc_defaults.sales_uom &&
+				qc_defaults.purchase_uom.toLowerCase() === qc_defaults.sales_uom.toLowerCase()
+			) {
+				qc_defaults.custom_density = 1;
+			}
+		}
+
+		frappe.new_doc("Pratap Quality Inspection", qc_defaults);
 	});
 }
 
