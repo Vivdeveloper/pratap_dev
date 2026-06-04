@@ -13,12 +13,12 @@ frappe.ui.form.on("Purchase Receipt", {
 });
 
 frappe.ui.form.on("Purchase Receipt Item", {
-	item_code(frm, cdt, cdn) {
-		const row = locals[cdt][cdn];
-		if (row.qc_required){
-			frm.page.clear_primary_action();
-		}
-	},
+	// item_code(frm, cdt, cdn) {
+	// 	const row = locals[cdt][cdn];
+	// 	if (row.qc_required){
+	// 		frm.page.clear_primary_action();
+	// 	}
+	// },
 	custom_pratap_quality_inspection(frm, cdt, cdn) {
 		const row = locals[cdt][cdn];
 		if (!row.custom_pratap_quality_inspection) {
