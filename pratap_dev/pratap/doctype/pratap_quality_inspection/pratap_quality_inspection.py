@@ -26,6 +26,8 @@ class PratapQualityInspection(Document):
 		self._clear_grn_qc_reference(remove_reference=True)
 
 	def on_submit(self):
+		if self.reference_type == "GRN":
+			self._update_grn_item()
 		self._create_stock_entry()
 		self._submit_linked_grn()
 
@@ -395,6 +397,31 @@ class PratapQualityInspection(Document):
 		if (self.status or "").strip() != "Accepted":
 			frappe.throw("Only Accepted Pratap Quality Inspection can be submitted.")
 
+	def _update_grn_item(self):
+		# Considering always one item in GRN
+		grn_doc = frappe.get_doc("Purchase Receipt", self.reference_name)
+		self._update_batch_custom_density(grn_doc)
+		# Update grn item density
+		if grn_doc.items:
+			conversion_factor = self.density_qty / self.reference_qty
+			grn_doc.items[0].conversion_factor = conversion_factor
+			grn_doc.items[0].custom_density = self.custom_density
+			grn_doc.save(ignore_permissions=True)
+
+	def _update_batch_custom_density(self, grn_doc):
+		# considering only one item in GRN and updating items[0] batch with density
+		
+		if grn_doc.items:
+			item = grn_doc.items[0]
+			batch_name = item.batch_no
+			if batch_name:
+				frappe.db.set_value(
+					"Batch",
+					batch_name,
+					"custom_density",
+					frappe.utils.flt(self.custom_density),
+					update_modified=False,
+				)
 
 def _parse_float(value):
 	try:
