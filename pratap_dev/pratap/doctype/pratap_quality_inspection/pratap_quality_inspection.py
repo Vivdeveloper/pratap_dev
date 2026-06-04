@@ -18,7 +18,12 @@ class PratapQualityInspection(Document):
 		self._validate_status_for_submit()
 
 	def on_cancel(self):
+		self.ignore_linked_doctypes = ["Serial and Batch Bundle"]
 		self._cancel_stock_entry()
+		self._clear_grn_qc_reference()
+
+	def on_trash(self):
+		self._clear_grn_qc_reference(remove_reference=True)
 
 	def on_submit(self):
 		self._create_stock_entry()
@@ -35,6 +40,38 @@ class PratapQualityInspection(Document):
 		self._set_finished_qty()
 		self._set_readings_from_template()
 		self._inspect_and_set_status()
+		self._sync_accepted_qc_to_grn()
+		self._sync_density_to_grn_item()
+
+	def _sync_accepted_qc_to_grn(self):
+		if not self.name:
+			return
+
+		if (self.status or "").strip() != "Accepted":
+			return
+
+		from pratap_dev.purchase_receipt import link_pratap_qc_to_grn_item
+
+		link_pratap_qc_to_grn_item(self)
+
+	def _sync_density_to_grn_item(self):
+		if not self.name:
+			return
+
+		if (self.inspection_type or "").strip() != "Incoming":
+			return
+
+		if (self.reference_type or "").strip() != "GRN":
+			return
+
+		if self.reference_doctype != "Purchase Receipt" or not self.reference_name or not self.production_item:
+			return
+
+		from pratap_dev.purchase_receipt import sync_grn_item_density_from_pratap_qc
+
+		sync_grn_item_density_from_pratap_qc(
+			self.reference_name, self.production_item, self.name
+		)
 
 	def _validate_grn_reference(self):
 		if (self.inspection_type or "").strip() != "Incoming":
@@ -88,9 +125,17 @@ class PratapQualityInspection(Document):
 		if not frappe.db.exists("Purchase Receipt", self.reference_name):
 			return
 
+		from pratap_dev.purchase_receipt import link_pratap_qc_to_grn_item
+
+		link_pratap_qc_to_grn_item(self)
+
 		grn = frappe.get_doc("Purchase Receipt", self.reference_name)
 		if grn.docstatus == 0:
-			grn.submit()
+			frappe.flags.submitting_pratap_qc = self.name
+			try:
+				grn.submit()
+			finally:
+				frappe.flags.submitting_pratap_qc = None
 
 	def _validate_custom_density(self):
 		if self.custom_density in (None, ""):
@@ -234,6 +279,11 @@ class PratapQualityInspection(Document):
 			frappe.utils.flt(self.custom_density),
 			update_modified=False,
 		)
+
+	def _clear_grn_qc_reference(self, remove_reference=False):
+		from pratap_dev.purchase_receipt import clear_pratap_qc_from_grn_item
+
+		clear_pratap_qc_from_grn_item(self, remove_reference=remove_reference)
 
 	def _cancel_stock_entry(self):
 		if not self.stock_entry:

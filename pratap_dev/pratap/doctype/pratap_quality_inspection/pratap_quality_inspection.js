@@ -10,6 +10,7 @@ frappe.ui.form.on("Pratap Quality Inspection", {
 	refresh(frm) {
 		set_reference_doctype(frm);
 		set_reference_name_query(frm);
+		set_cancel_all_ignore_doctypes(frm);
 	},
 
 	reference_type(frm) {
@@ -129,6 +130,15 @@ function set_row_actual_qty(cdt, cdn) {
 			const actualQty = flt(r.message?.actual_qty);
 			frappe.model.set_value(cdt, cdn, "actual_qty", actualQty);
 		});
+}
+
+function set_cancel_all_ignore_doctypes(frm) {
+	// Same as ERPNext Quality Inspection: do not auto-cancel reference GRN / SABB via Cancel All.
+	const ignore = ["Serial and Batch Bundle"];
+	if (frm.doc.reference_doctype) {
+		ignore.push(frm.doc.reference_doctype);
+	}
+	frm.ignore_doctypes_on_cancel_all = ignore;
 }
 
 function set_reference_doctype(frm) {

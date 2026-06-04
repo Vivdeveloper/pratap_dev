@@ -130,9 +130,9 @@ app_license = "mit"
 # ---------------
 # Override standard doctype classes
 
-# override_doctype_class = {
-# 	"ToDo": "custom_app.overrides.CustomToDo"
-# }
+override_doctype_class = {
+	"Purchase Receipt": "pratap_dev.purchase_receipt.PratapPurchaseReceipt",
+}
 
 # Document Events
 # ---------------
@@ -243,6 +243,15 @@ app_license = "mit"
 # 	"Logging DocType Name": 30  # days to retain logs
 # }
 
+fixtures = [
+	{
+		"dt": "Custom Field",
+		"filters": [["module", "=", "pratap"]],
+	},
+]
+
+before_migrate = ["pratap_dev.fixture_export.setup_fixture_import"]
+after_install = ["pratap_dev.fixture_export.setup_fixture_import"]
 
 doctype_js = {
     "Opportunity": "public/js/opportunity_override.js",
@@ -289,5 +298,10 @@ doc_events = {
     "Stock Entry": {
         "before_submit": "pratap_dev.stock_entry_validation.validate_manufacture_batch_with_work_order"
     },
-    
+    "Pratap Quality Inspection": {
+        "on_update": "pratap_dev.purchase_receipt.link_pratap_qc_to_grn_item",
+    },
+    "Custom Field": {
+        "on_update": "pratap_dev.fixture_export.export_custom_field_on_save",
+    },
 }
