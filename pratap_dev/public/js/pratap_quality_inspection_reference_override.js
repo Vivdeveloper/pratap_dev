@@ -3,10 +3,22 @@ const PRATAP_QC_BUTTON_GROUP = __("Quality");
 frappe.ui.form.on("Purchase Receipt", {
 	refresh(frm) {
 		setup_pratap_qc_buttons(frm);
+		if (frm.doc.items) {
+			is_qc_checked = frm?.doc?.items[0].qc_required;
+			if (is_qc_checked && frm.doc.docstatus === 0) {
+				frm.page.clear_primary_action();
+			}
+		}
 	},
 });
 
 frappe.ui.form.on("Purchase Receipt Item", {
+	item_code(frm, cdt, cdn) {
+		const row = locals[cdt][cdn];
+		if (row.qc_required){
+			frm.page.clear_primary_action();
+		}
+	},
 	custom_pratap_quality_inspection(frm, cdt, cdn) {
 		const row = locals[cdt][cdn];
 		if (!row.custom_pratap_quality_inspection) {
