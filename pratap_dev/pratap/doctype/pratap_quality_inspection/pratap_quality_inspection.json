@@ -263,6 +263,7 @@
    "options": "Pratap Quality Inspection Raw Material"
   },
   {
+   "depends_on": "eval:doc.reference_type != \"GRN\"",
    "fetch_from": "production_item.custom_manufacturing_uom",
    "fieldname": "manufacturing_uom",
    "fieldtype": "Link",
@@ -282,7 +283,7 @@
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-06-05 11:31:26.287239",
+ "modified": "2026-06-05 12:29:14.616332",
  "modified_by": "Administrator",
  "module": "pratap",
  "name": "Pratap Quality Inspection",
