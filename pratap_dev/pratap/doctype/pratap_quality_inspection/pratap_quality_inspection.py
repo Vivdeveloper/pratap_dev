@@ -31,6 +31,10 @@ class PratapQualityInspection(Document):
 		self._create_stock_entry()
 		self._submit_linked_grn()
 
+	def on_update(self):
+		if self.status == "Rework" and self.reference_type == "Work Order":
+			self._update_rework_qc_in_work_order()
+
 	def validate(self):
 		self._set_inspector()
 		self._validate_grn_reference()
@@ -424,9 +428,71 @@ class PratapQualityInspection(Document):
 					update_modified=False,
 				)
 
+	def _update_rework_qc_in_work_order(self):
+		if not self.reference_name:
+			return
+
+		if (self.reference_type or "").strip() != "Work Order":
+			return
+		
+		frappe.db.set_value(
+			"Work Order",
+			self.reference_name,
+			"custom_rework_qc",
+			self.name,
+			update_modified=False,
+		)
+
+
+@frappe.whitelist()
+def get_rework_stock_entry(work_order_name):
+	if not work_order_name:
+		frappe.throw(_("Work Order is required."))
+
+	work_order = frappe.get_doc("Work Order", work_order_name)
+	qc_name = work_order.custom_rework_qc
+	if not qc_name:
+		frappe.throw(_("No Rework QC is linked to this Work Order."))
+
+	qc = frappe.get_doc("Pratap Quality Inspection", qc_name)
+	items = []
+	for row in qc.raw_materials or []:
+		qty = frappe.utils.flt(row.total_req_qty)
+		if not row.item_code or qty <= 0:
+			continue
+
+		items.append(
+			{
+				"doctype": "Stock Entry Detail",
+				"item_code": row.item_code,
+				"item_name": row.item_name or "",
+				"qty": qty,
+				"uom": row.uom or "",
+				"stock_uom": row.uom or "",
+				"s_warehouse": row.source_warehouse or work_order.source_warehouse or "",
+				"conversion_factor": 1,
+			}
+		)
+
+	if not items:
+		frappe.throw(_("No raw materials with quantity were found in the linked Pratap Quality Inspection."))
+
+	stock_entry = frappe.new_doc("Stock Entry")
+	stock_entry.company = work_order.company
+	stock_entry.work_order = work_order.name
+	stock_entry.posting_date = frappe.utils.today()
+	stock_entry.posting_time = frappe.utils.nowtime()
+	stock_entry.stock_entry_type = "Material Consumption for Manufacture"
+	stock_entry.purpose = "Material Consumption for Manufacture"
+	for item in items:
+		stock_entry.append("items", item)
+	stock_entry.set_stock_entry_type()
+	stock_entry.set_missing_values()
+	return stock_entry.as_dict()
+
+
 def _parse_float(value):
 	try:
 		return float(str(value).replace(",", ""))
 	except (TypeError, ValueError):
 		return 0.0
-
