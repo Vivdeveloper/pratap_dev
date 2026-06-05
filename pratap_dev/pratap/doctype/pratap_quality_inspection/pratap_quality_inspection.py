@@ -242,7 +242,8 @@ class PratapQualityInspection(Document):
 		if (self.reference_type or "").strip() != "Work Order":
 			return
 
-		if not self.work_order or not self.production_item:
+		if not self.reference_name or not self.production_item:
+			# from UI ity is not a work order field and it reference_name 
 			return
 
 		qty = frappe.utils.flt(self.finished_qty) or frappe.utils.flt(self.reference_qty)
@@ -252,7 +253,7 @@ class PratapQualityInspection(Document):
 			return
 
 		stock_entry_data = make_stock_entry(
-			work_order_id=self.work_order,
+			work_order_id=self.reference_name,
 			purpose="Manufacture",
 			qty=qty,
 		)
@@ -265,11 +266,11 @@ class PratapQualityInspection(Document):
 	def _set_batch_custom_density(self):
 		batch_name = frappe.db.get_value(
 			"Batch",
-			{"batch_id": self.work_order, "item": self.production_item},
+			{"batch_id": self.reference_name, "item": self.production_item},
 			"name",
 		)
-		if not batch_name and frappe.db.exists("Batch", self.work_order):
-			batch_name = self.work_order
+		if not batch_name and frappe.db.exists("Batch", self.reference_name):
+			batch_name = self.reference_name
 
 		if not batch_name:
 			return
