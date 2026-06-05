@@ -482,8 +482,8 @@ def get_rework_stock_entry(work_order_name):
 	stock_entry.work_order = work_order.name
 	stock_entry.posting_date = frappe.utils.today()
 	stock_entry.posting_time = frappe.utils.nowtime()
-	stock_entry.stock_entry_type = "Material Consumption for Manufacture"
-	stock_entry.purpose = "Material Consumption for Manufacture"
+	stock_entry.stock_entry_type = "Material Transfer for Manufacture"
+	stock_entry.purpose = "Material Transfer for Manufacture"
 	for item in items:
 		stock_entry.append("items", item)
 	stock_entry.set_stock_entry_type()
