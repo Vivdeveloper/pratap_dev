@@ -238,6 +238,7 @@
    "mandatory_depends_on": "eval:doc.status == \"Rework\""
   },
   {
+   "depends_on": "eval:doc.reference_type != \"GRN\"",
    "fetch_from": "production_item.custom_process_loss",
    "fetch_if_empty": 1,
    "fieldname": "process_loss",
@@ -245,6 +246,7 @@
    "label": "Process Loss"
   },
   {
+   "depends_on": "eval:doc.reference_type != \"GRN\"",
    "fieldname": "finished_qty",
    "fieldtype": "Float",
    "label": "Yield Qty"
@@ -261,6 +263,7 @@
    "options": "Pratap Quality Inspection Raw Material"
   },
   {
+   "depends_on": "eval:doc.reference_type != \"GRN\"",
    "fetch_from": "production_item.custom_manufacturing_uom",
    "fieldname": "manufacturing_uom",
    "fieldtype": "Link",
@@ -268,6 +271,7 @@
    "options": "UOM"
   },
   {
+   "depends_on": "eval:doc.reference_type != \"Work Order\"",
    "fetch_from": "production_item.purchase_uom",
    "fieldname": "purchase_uom",
    "fieldtype": "Link",
@@ -279,7 +283,7 @@
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-05-20 20:07:59.544529",
+ "modified": "2026-06-05 12:29:14.616332",
  "modified_by": "Administrator",
  "module": "pratap",
  "name": "Pratap Quality Inspection",

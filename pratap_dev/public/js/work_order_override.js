@@ -3,7 +3,9 @@ frappe.ui.form.on("Work Order", {
         if (![0, 1].includes(frm.doc.docstatus)) {
             return;
         }
-
+        if (frm.doc.custom_rework_qc) {
+            handle_rework_consumption(frm);
+        }
         frm.add_custom_button(__("Create Pratap QC"), () => {
             frappe.new_doc("Pratap Quality Inspection", {
                 inspection_type: "In Process",
@@ -16,6 +18,25 @@ frappe.ui.form.on("Work Order", {
                 reference_qty: frm.doc.qty,
             });
         });
-    },
+        },
 });
 
+
+function handle_rework_consumption(frm) {
+    frm.add_custom_button(__("Rework Consumption"), () => {
+        if (!frm.doc.custom_rework_qc) {
+            frappe.msgprint(__("No Rework QC is linked to this Work Order."));
+            return;
+        }
+
+        frappe.xcall(
+            "pratap_dev.pratap.doctype.pratap_quality_inspection.pratap_quality_inspection.get_rework_stock_entry",
+            {
+                work_order_name: frm.doc.name,
+            }
+        ).then((stock_entry) => {
+            frappe.model.sync(stock_entry);
+            frappe.set_route("Form", "Stock Entry", stock_entry.name);
+        });
+        }, "").addClass("btn-primary");
+}
