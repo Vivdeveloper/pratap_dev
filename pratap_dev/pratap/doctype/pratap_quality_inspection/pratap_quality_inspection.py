@@ -411,6 +411,7 @@ class PratapQualityInspection(Document):
 			conversion_factor = self.density_qty / self.reference_qty
 			grn_doc.items[0].conversion_factor = conversion_factor
 			grn_doc.items[0].custom_density = self.custom_density
+			grn_doc.items[0].custom_pratap_quality_inspection = self.name
 			grn_doc.save(ignore_permissions=True)
 
 	def _update_batch_custom_density(self, grn_doc):
@@ -502,8 +503,6 @@ class PratapQualityInspection(Document):
 
 		return stock_entry.as_dict()
 	
-
-
 @frappe.whitelist()
 def get_rework_stock_entry(work_order_name):
 	if not work_order_name:
