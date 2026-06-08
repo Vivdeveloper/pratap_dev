@@ -95,16 +95,14 @@ class PratapPurchaseReceipt(PurchaseReceipt):
         for row in self.items:
             if flt(row.qty) <= 0:
                 continue
-
-            qc_name = row.get("custom_pratap_quality_inspection")
-            if not qc_name:
+            if row.get("custom_qc_required"):
                 frappe.throw(
                     _(
-                        "Row {0}: Pratap Quality Inspection is required on item {1} before submitting GRN."
+                        "Row {0}: Quality Inspection is required on item {1} before submitting GRN."
                     ).format(row.idx, row.item_code or row.item_name)
                 )
 
-            _validate_pratap_qc_for_row(qc_name, row, self.name)
+            # _validate_pratap_qc_for_row(qc_name, row, self.name)
 
     def _create_uom_in_items(self, items: list):
         for item in items:
