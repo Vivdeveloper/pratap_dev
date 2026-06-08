@@ -5,9 +5,9 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 from frappe.utils import cint
-from erpnext.manufacturing.doctype.work_order.work_order import make_stock_entry
+# from erpnext.manufacturing.doctype.work_order.work_order import make_stock_entry
 from erpnext.stock.doctype.quality_inspection_template.quality_inspection_template import (
-	get_template_details,
+	get_template_details
 )
 
 
@@ -256,7 +256,7 @@ class PratapQualityInspection(Document):
 		if qty <= 0:
 			return
 
-		stock_entry_data = make_stock_entry(
+		stock_entry_data = self.make_stock_entry(
 			work_order_id=self.reference_name,
 			purpose="Manufacture",
 			qty=qty,
@@ -442,6 +442,66 @@ class PratapQualityInspection(Document):
 			self.name,
 			update_modified=False,
 		)
+
+
+	def make_stock_entry(
+		self,
+		work_order_id: str,
+		purpose: str,
+		qty: float | None = None,
+		target_warehouse: str | None = None,
+		source_stock_entry: str | None = None,
+	):
+		work_order = frappe.get_doc("Work Order", work_order_id)
+		if not frappe.db.get_value("Warehouse", work_order.wip_warehouse, "is_group"):
+			wip_warehouse = work_order.wip_warehouse
+		else:
+			wip_warehouse = None
+
+		stock_entry = frappe.new_doc("Stock Entry")
+		stock_entry.purpose = purpose
+		stock_entry.work_order = work_order_id
+		stock_entry.company = work_order.company
+		stock_entry.from_bom = 1
+		stock_entry.bom_no = work_order.bom_no
+		stock_entry.use_multi_level_bom = work_order.use_multi_level_bom
+		# accept 0 qty as well
+		# finished good qty if fetching from  Pratap Quality Inspection batch \\(Override)
+		stock_entry.fg_completed_qty = self.reference_qty
+
+		if work_order.bom_no:
+			stock_entry.inspection_required = frappe.db.get_value("BOM", work_order.bom_no, "inspection_required")
+
+		if purpose == "Material Transfer for Manufacture":
+			stock_entry.to_warehouse = wip_warehouse
+			stock_entry.project = work_order.project
+		else:
+			stock_entry.from_warehouse = (
+				work_order.source_warehouse
+				if work_order.skip_transfer and not work_order.from_wip_warehouse
+				else wip_warehouse
+			)
+			stock_entry.to_warehouse = work_order.fg_warehouse
+			stock_entry.project = work_order.project
+
+		if purpose == "Disassemble":
+			stock_entry.from_warehouse = work_order.fg_warehouse
+			stock_entry.to_warehouse = target_warehouse or work_order.source_warehouse
+			if source_stock_entry:
+				stock_entry.source_stock_entry = source_stock_entry
+
+		stock_entry.set_stock_entry_type()
+		stock_entry.get_items()
+		# after child table created from stock entery modifying as per Pratap Quality Inspection requirements
+		for item in stock_entry.items:
+			if(item.is_finished_item):
+				item.qty = self.finished_qty
+
+		if purpose != "Disassemble":
+			stock_entry.set_serial_no_batch_for_finished_good()
+
+		return stock_entry.as_dict()
+	
 
 
 @frappe.whitelist()
