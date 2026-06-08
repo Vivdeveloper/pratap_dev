@@ -11,14 +11,28 @@ frappe.ui.form.on("Pratap Quality Inspection", {
 		set_reference_doctype(frm);
 		set_reference_name_query(frm);
 		set_cancel_all_ignore_doctypes(frm);
-	},
+		handle_status_values(frm);
+		// on amending removing fields that is not relevent
+		if (frm.doc.amended_from && frm.doc.__islocal){
+			frm.set_value("stock_entry", "");
+        }
 
+		// Debuge later and fix it
+		// frm.$wrapper.on("keyup", (frm) => {
+		// 	console.log("keyup event triggered");
+		// 	handel_submitted_buttons();
+		// });
+		// handel_submitted_buttons();
+
+
+	},
 	reference_type(frm) {
 		const previous_doctype = frm.doc.reference_doctype;
 		set_reference_doctype(frm);
 		if (previous_doctype !== frm.doc.reference_doctype) {
 			frm.set_value("reference_name", "");
 		}
+		handle_status_values(frm);
 	},
 
 	reference_name(frm) {
@@ -233,4 +247,26 @@ function fetch_reference_item_details(frm) {
 			);
 		}
 	});
+}
+
+function handle_status_values(frm){
+	if (frm.doc.reference_type == "GRN") {
+		frm.set_df_property("status", "options", ["Pending", "Accepted", "Rejected"]);
+
+	}
+}
+
+function handel_submitted_buttons(){
+	if (cur_frm.doc.status === "Accepted" && !cur_frm.is_dirty()) {
+		if ($(cur_frm.page.btn_primary).attr("data-label") === "Submit") {
+			$(cur_frm.page.btn_primary).show();
+		}
+		
+	} else {
+		if(cur_frm.is_dirty()){
+			$(cur_frm.page.btn_primary).show();
+		}else{
+			$(cur_frm.page.btn_primary).hide();
+		}
+	}
 }
