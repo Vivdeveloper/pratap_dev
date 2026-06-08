@@ -260,8 +260,7 @@ doctype_js = {
     "Purchase Receipt": "public/js/pratap_quality_inspection_reference_override.js",
     "Purchase Invoice": "public/js/pratap_quality_inspection_reference_override.js",
     "Delivery Note": "public/js/pratap_quality_inspection_reference_override.js",
-    "Sales Invoice": "public/js/pratap_quality_inspection_reference_override.js",
-    "Purchase Receipt":"public/js/purchase_receipt.js"
+    "Sales Invoice": "public/js/pratap_quality_inspection_reference_override.js"
 }
 
 doctype_list_js = {

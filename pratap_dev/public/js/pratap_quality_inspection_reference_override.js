@@ -1,5 +1,28 @@
-const PRATAP_QC_BUTTON_GROUP = __("Quality");
+// const PRATAP_QC_BUTTON_GROUP = __("Quality");
+const PRATAP_QC_BUTTON_GROUP = ""
 
+function remove_qc_button(frm) {
+	let attempts = 0;
+
+        const interval = setInterval(() => {
+            attempts++;
+
+            if (frm.custom_buttons?.["Quality Inspection(s)"]) {
+                frm.remove_custom_button(
+                    __("Quality Inspection(s)"),
+                    __("Create")
+                );
+
+                console.log("Quality Inspection button removed");
+                clearInterval(interval);
+            }
+
+            // stop after 5 seconds
+            if (attempts > 50) {
+                clearInterval(interval);
+            }
+        }, 100);
+}
 frappe.ui.form.on("Purchase Receipt", {
 	refresh(frm) {
 		setup_pratap_qc_buttons(frm);
@@ -9,6 +32,7 @@ frappe.ui.form.on("Purchase Receipt", {
 				frm.page.clear_primary_action();
 			}
 		}
+		remove_qc_button(frm);
 	},
 });
 
