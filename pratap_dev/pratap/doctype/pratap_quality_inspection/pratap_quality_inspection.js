@@ -12,6 +12,7 @@ frappe.ui.form.on("Pratap Quality Inspection", {
 		set_reference_name_query(frm);
 		set_cancel_all_ignore_doctypes(frm);
 		handle_status_values(frm);
+		toggle_supplier_coa(frm);
 		// on amending removing fields that is not relevent
 		if (frm.doc.amended_from && frm.doc.__islocal){
 			frm.set_value("stock_entry", "");
@@ -33,6 +34,7 @@ frappe.ui.form.on("Pratap Quality Inspection", {
 			frm.set_value("reference_name", "");
 		}
 		handle_status_values(frm);
+		toggle_supplier_coa(frm);
 	},
 
 	reference_name(frm) {
@@ -269,4 +271,15 @@ function handel_submitted_buttons(){
 			$(cur_frm.page.btn_primary).hide();
 		}
 	}
+}
+function toggle_supplier_coa(frm) {
+    const hide_supplier_coa = frm.doc.reference_type !== "GRN";
+
+    frm.fields_dict.readings.grid.update_docfield_property(
+        "supplier_coa",
+        "hidden",
+        hide_supplier_coa ? 1 : 0
+    );
+
+    frm.refresh_field("readings");
 }
