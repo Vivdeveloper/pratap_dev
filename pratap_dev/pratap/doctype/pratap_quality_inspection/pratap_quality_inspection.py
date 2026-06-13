@@ -178,9 +178,9 @@ class PratapQualityInspection(Document):
 		inspected_qty = frappe.utils.flt(self.inspected_qty)
 		process_loss = frappe.utils.flt(self.process_loss)
 		if self.reference_type == "Work Order":
-			if self.custom_density == 0:
+			if self.custom_density > 0:
 				return
-			self.finished_qty = (batch_qty - inspected_qty- (batch_qty * process_loss / 100)) / self.custom_density
+			self.finished_qty = round((batch_qty - inspected_qty- (batch_qty * process_loss / 100) / self.custom_density))
 		else:
 			self.finished_qty = round((batch_qty - inspected_qty) * (1 - process_loss / 100))
 
