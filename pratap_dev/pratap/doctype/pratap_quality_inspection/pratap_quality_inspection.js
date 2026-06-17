@@ -273,13 +273,12 @@ function handel_submitted_buttons(){
 	}
 }
 function toggle_supplier_coa(frm) {
-    const hide_supplier_coa = frm.doc.reference_type !== "GRN";
+	const show_supplier_coa = frm.doc.reference_type === "GRN";
+	const grid = frm.fields_dict.readings?.grid;
+	if (!grid) {
+		return;
+	}
 
-    frm.fields_dict.readings.grid.update_docfield_property(
-        "supplier_coa",
-        "hidden",
-        hide_supplier_coa ? 1 : 0
-    );
-
-    frm.refresh_field("readings");
+	grid.visible_columns = [];
+	grid.set_column_disp("supplier_coa", show_supplier_coa);
 }

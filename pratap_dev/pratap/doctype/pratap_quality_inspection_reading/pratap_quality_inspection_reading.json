@@ -200,8 +200,10 @@
   },
   {
    "columns": 1,
+   "depends_on": "eval:parent.reference_type=='GRN'",
    "fieldname": "supplier_coa",
    "fieldtype": "Data",
+   "in_list_view": 1,
    "label": "Supplier COA"
   },
   {
