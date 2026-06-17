@@ -168,15 +168,24 @@ class PratapQualityInspection(Document):
 		custom_density = frappe.utils.flt(self.custom_density)
 
 		if custom_density > 0:
+			# (batch_qty - inspected_qty - process_loss%reference_qty)/ custom_density
 			self.density_qty = reference_qty / custom_density
 		else:
 			self.density_qty = 0
 
 	def _set_finished_qty(self):
-		process_loss = frappe.utils.flt(self.process_loss)
 		batch_qty = frappe.utils.flt(self.reference_qty)
 		inspected_qty = frappe.utils.flt(self.inspected_qty)
-		self.finished_qty = round((batch_qty - inspected_qty) * (1 - process_loss / 100))
+		process_loss = frappe.utils.flt(self.process_loss)
+		if self.reference_type == "Work Order":
+			if self.custom_density == 0:
+				return
+			self.finished_qty = ((batch_qty - inspected_qty- (batch_qty * process_loss / 100)) / self.custom_density)
+		else:
+			self.finished_qty = (batch_qty - inspected_qty) * (1 - process_loss / 100)
+		# Round to 3 decimal places
+		self.finished_qty = round(self.finished_qty)
+
 
 	def _set_raw_material_required_qty(self):
 		reference_qty = frappe.utils.flt(self.reference_qty)
@@ -468,7 +477,10 @@ class PratapQualityInspection(Document):
 		stock_entry.use_multi_level_bom = work_order.use_multi_level_bom
 		# accept 0 qty as well
 		# finished good qty if fetching from  Pratap Quality Inspection batch \\(Override)
-		stock_entry.fg_completed_qty = self.reference_qty
+		if self.finished_qty > self.reference_qty:
+			stock_entry.fg_completed_qty = self.finished_qty
+		else:
+			stock_entry.fg_completed_qty = self.reference_qty
 
 		if work_order.bom_no:
 			stock_entry.inspection_required = frappe.db.get_value("BOM", work_order.bom_no, "inspection_required")
