@@ -251,7 +251,15 @@ fixtures = [
 ]
 
 before_migrate = ["pratap_dev.fixture_export.setup_fixture_import"]
-after_install = ["pratap_dev.fixture_export.setup_fixture_import"]
+after_install = [
+	"pratap_dev.fixture_export.setup_fixture_import",
+	"pratap_dev.purchase_order_grn.disable_purchase_after_save_message",
+]
+after_migrate = ["pratap_dev.purchase_order_grn.disable_purchase_after_save_message"]
+
+override_whitelisted_methods = {
+	"get_last_buying_rate": "pratap_dev.purchase_order_grn.get_last_buying_rate",
+}
 
 doctype_js = {
     "Opportunity": "public/js/opportunity_override.js",
