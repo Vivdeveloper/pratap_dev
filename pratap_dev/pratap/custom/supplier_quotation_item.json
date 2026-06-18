@@ -1,0 +1,37 @@
+{
+ "custom_fields": [
+  {
+   "dt": "Supplier Quotation Item",
+   "fieldname": "custom_packing_qty",
+   "fieldtype": "Data",
+   "insert_after": "quantity_and_rate",
+   "label": "Standard Pkg Qty",
+   "columns": 1,
+   "in_list_view": 1,
+   "translatable": 1
+  },
+  {
+   "dt": "Supplier Quotation Item",
+   "fieldname": "custom_total_qty",
+   "fieldtype": "Data",
+   "insert_after": "custom_packing_qty",
+   "label": "No of Unit",
+   "columns": 1,
+   "in_list_view": 1,
+   "translatable": 1
+  }
+ ],
+ "custom_perms": [],
+ "doctype": "Supplier Quotation Item",
+ "links": [],
+ "property_setters": [
+  {
+   "doc_type": "Supplier Quotation Item",
+   "doctype_or_field": "DocType",
+   "property": "field_order",
+   "property_type": "Data",
+   "value": "[\"item_code\", \"supplier_part_no\", \"item_name\", \"column_break_3\", \"lead_time_days\", \"expected_delivery_date\", \"is_free_item\", \"section_break_5\", \"description\", \"item_group\", \"brand\", \"col_break1\", \"image\", \"image_view\", \"quantity_and_rate\", \"custom_packing_qty\", \"custom_total_qty\", \"qty\", \"stock_uom\", \"col_break2\", \"uom\", \"conversion_factor\", \"stock_qty\", \"sec_break_price_list\", \"price_list_rate\", \"discount_percentage\", \"discount_amount\", \"distributed_discount_amount\", \"col_break_price_list\", \"base_price_list_rate\", \"sec_break1\", \"rate\", \"amount\", \"item_tax_template\", \"col_break3\", \"base_rate\", \"base_amount\", \"pricing_rules\", \"section_break_24\", \"net_rate\", \"net_amount\", \"column_break_27\", \"base_net_rate\", \"base_net_amount\", \"item_weight_details\", \"weight_per_unit\", \"total_weight\", \"column_break_23\", \"weight_uom\", \"warehouse_and_reference\", \"warehouse\", \"prevdoc_doctype\", \"material_request\", \"sales_order\", \"request_for_quotation\", \"col_break4\", \"material_request_item\", \"request_for_quotation_item\", \"item_tax_rate\", \"manufacture_details\", \"manufacturer\", \"column_break_15\", \"manufacturer_part_no\", \"ad_sec_break\", \"cost_center\", \"dimension_col_break\", \"project\", \"section_break_44\", \"page_break\"]"
+  }
+ ],
+ "sync_on_migrate": 1
+}
