@@ -11,8 +11,20 @@ frappe.ui.form.on("Material Request Item", {
 	item_code(frm, cdt, cdn) {
 		set_rm_warehouse_qty(frm, cdt, cdn);
 	},
+	custom_packing_qty(frm, cdt, cdn) {
+		calculate_quantity(frm, cdt, cdn);
+	},
+	custom_total_qty(frm, cdt, cdn) {
+		calculate_quantity(frm, cdt, cdn);
+	}
+
 });
 
+function calculate_quantity(frm, cdt, cdn) {
+	const row = locals[cdt][cdn];
+	const quantity = (row.custom_packing_qty || 0) * (row.custom_total_qty || 0);
+	frappe.model.set_value(cdt, cdn, "qty", quantity);
+}
 function set_rm_warehouse_qty(frm, cdt, cdn) {
 	if (frm.doc.docstatus !== 0) {
 		return;
