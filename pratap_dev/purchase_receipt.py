@@ -13,6 +13,9 @@ from pratap_dev.purchase_receipt_batch import _set_batch_from_insert_batch_numbe
 class PratapPurchaseReceipt(PurchaseReceipt):
     def validate(self):
         super().validate()
+        if self.is_return:
+            return
+
         self._validate_items_pratap_quality_inspection()
         self._sync_density_from_pratap_qc_on_items()
 

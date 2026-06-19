@@ -587,12 +587,10 @@ class PratapQualityInspection(Document):
 		stock_entry.from_bom = 1
 		stock_entry.bom_no = work_order.bom_no
 		stock_entry.use_multi_level_bom = work_order.use_multi_level_bom
-		# accept 0 qty as well
-		# finished good qty if fetching from  Pratap Quality Inspection batch \\(Override)
-		if self.finished_qty > self.reference_qty:
-			stock_entry.fg_completed_qty = self.finished_qty
-		else:
-			stock_entry.fg_completed_qty = self.reference_qty
+		finished_qty = frappe.utils.flt(self.finished_qty)
+		reference_qty = frappe.utils.flt(self.reference_qty)
+		# ERPNext requires fg_completed_qty to match finished item qty.
+		stock_entry.fg_completed_qty = finished_qty or reference_qty
 
 		if work_order.bom_no:
 			stock_entry.inspection_required = frappe.db.get_value("BOM", work_order.bom_no, "inspection_required")
@@ -617,15 +615,57 @@ class PratapQualityInspection(Document):
 
 		stock_entry.set_stock_entry_type()
 		stock_entry.get_items()
-		# after child table created from stock entery modifying as per Pratap Quality Inspection requirements
+		# FG uses density-based finished_qty; WO batch row always consumes full reference (batch) qty.
+		rm_scale = 1
+		if reference_qty > 0 and finished_qty > 0:
+			if abs(finished_qty - reference_qty) > 0.0001:
+				rm_scale = reference_qty / finished_qty
+
 		for item in stock_entry.items:
-			if(item.is_finished_item):
-				item.qty = self.finished_qty
+			if item.is_finished_item and finished_qty > 0:
+				item.qty = finished_qty
+			elif item.serial_and_batch_bundle and reference_qty > 0:
+				self._sync_batch_row_with_reference_qty(item, reference_qty)
+			elif not item.is_finished_item and item.s_warehouse and rm_scale != 1:
+				item.qty = frappe.utils.flt(item.qty) * rm_scale
 
 		if purpose != "Disassemble":
 			stock_entry.set_serial_no_batch_for_finished_good()
 
 		return stock_entry.as_dict()
+
+	def _sync_batch_row_with_reference_qty(self, row, reference_qty):
+		"""Consume full WO batch qty and align draft Serial and Batch Bundle."""
+		target_qty = frappe.utils.flt(reference_qty)
+		if target_qty <= 0:
+			return
+
+		row.qty = target_qty
+		bundle_name = row.serial_and_batch_bundle
+		if not bundle_name or not frappe.db.exists("Serial and Batch Bundle", bundle_name):
+			return
+
+		bundle = frappe.get_doc("Serial and Batch Bundle", bundle_name)
+		if bundle.docstatus != 0 or not bundle.entries:
+			return
+
+		current_total = abs(frappe.utils.flt(bundle.total_qty))
+		if abs(current_total - target_qty) <= 0.0001:
+			return
+
+		is_outward = frappe.utils.flt(bundle.total_qty) < 0
+		target_entry_qty = -target_qty if is_outward else target_qty
+
+		if len(bundle.entries) == 1:
+			bundle.entries[0].qty = target_entry_qty
+		else:
+			per_entry = target_entry_qty / len(bundle.entries)
+			for entry in bundle.entries:
+				entry.qty = per_entry
+
+		bundle.flags.ignore_voucher_validation = True
+		bundle.calculate_total_qty(save=False)
+		bundle.save(ignore_permissions=True)
 	
 @frappe.whitelist()
 def get_grn_batch_list(purchase_receipt, item_code=None, purchase_receipt_item=None):

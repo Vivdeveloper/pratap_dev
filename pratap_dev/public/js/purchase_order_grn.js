@@ -1,5 +1,7 @@
 frappe.ui.form.on("Purchase Order", {
 	refresh(frm) {
+		remove_default_purchase_receipt_button(frm);
+
 		if (can_create_grn(frm)) {
 			frm.add_custom_button(__("Create GRN"), () => show_create_grn_dialog(frm), __("Create"));
 		}
@@ -20,6 +22,36 @@ frappe.ui.form.on("Purchase Order", {
 		await show_last_buying_rates(frm);
 	},
 });
+
+function remove_default_purchase_receipt_button(frm) {
+	// ERPNext adds Purchase Receipt under Create; site translation shows it as "GRN".
+	const label = __("Purchase Receipt");
+	const group = __("Create");
+
+	const remove_if_exists = () => {
+		while (frm.custom_buttons?.[label]) {
+			frm.remove_custom_button(label, group);
+		}
+	};
+
+	if (frm._pr_remove_pr_interval) {
+		clearInterval(frm._pr_remove_pr_interval);
+	}
+
+	remove_if_exists();
+
+	let attempts = 0;
+	frm._pr_remove_pr_interval = setInterval(() => {
+		attempts++;
+		const existed = !!frm.custom_buttons?.[label];
+		remove_if_exists();
+
+		if (existed || attempts >= 50) {
+			clearInterval(frm._pr_remove_pr_interval);
+			frm._pr_remove_pr_interval = null;
+		}
+	}, 100);
+}
 
 function show_last_buying_rates(frm) {
 	const item_codes = (frm.doc.items || []).map((row) => row.item_code).filter(Boolean);
