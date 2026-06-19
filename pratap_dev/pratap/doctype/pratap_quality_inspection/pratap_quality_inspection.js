@@ -125,6 +125,111 @@ frappe.ui.form.on("Pratap Quality Inspection Raw Material", {
 	},
 });
 
+frappe.ui.form.on("Pratap Quality Inspection Reading", {
+	observe_value(frm, cdt, cdn) {
+		update_reading_row_status(frm, cdt, cdn);
+	},
+
+	min_value(frm, cdt, cdn) {
+		update_reading_row_status(frm, cdt, cdn);
+	},
+
+	max_value(frm, cdt, cdn) {
+		update_reading_row_status(frm, cdt, cdn);
+	},
+
+	manual_inspection(frm, cdt, cdn) {
+		update_reading_row_status(frm, cdt, cdn);
+	},
+
+	numeric(frm, cdt, cdn) {
+		update_reading_row_status(frm, cdt, cdn);
+	},
+
+	reading_value(frm, cdt, cdn) {
+		update_reading_row_status(frm, cdt, cdn);
+	},
+
+	status(frm, cdt, cdn) {
+		update_document_status_from_readings(frm);
+	},
+});
+
+function update_reading_row_status(frm, cdt, cdn) {
+	if (frm.doc.docstatus >= 1) {
+		return;
+	}
+
+	const row = locals[cdt][cdn];
+	if (!row) {
+		return;
+	}
+
+	if (cint(row.manual_inspection)) {
+		update_document_status_from_readings(frm);
+		return;
+	}
+
+	if (cint(row.formula_based_criteria)) {
+		return;
+	}
+
+	let status = "";
+
+	if (cint(row.numeric)) {
+		const observe_value = (row.observe_value || "").trim();
+		if (observe_value) {
+			const parsed_value = flt(observe_value);
+			const min_value = flt(row.min_value);
+			const max_value = flt(row.max_value);
+			status =
+				parsed_value >= min_value && parsed_value <= max_value
+					? "Accepted"
+					: "Rejected";
+		}
+	} else {
+		const observe_value = (row.observe_value || "").trim();
+		const reading_value = observe_value || (row.reading_value || "").trim();
+		const accepted_value = (row.value || "").trim();
+		if (reading_value && accepted_value) {
+			status =
+				reading_value.toLowerCase() === accepted_value.toLowerCase()
+					? "Accepted"
+					: "Rejected";
+		}
+	}
+
+	if (row.status !== status) {
+		frappe.model.set_value(cdt, cdn, "status", status);
+	}
+
+	update_document_status_from_readings(frm);
+}
+
+function update_document_status_from_readings(frm) {
+	if (frm.doc.docstatus >= 1 || frm.doc.status === "Rework") {
+		return;
+	}
+
+	const readings = frm.doc.readings || [];
+	if (!readings.length) {
+		return;
+	}
+
+	const statuses = readings.map((row) => (row.status || "").trim());
+	let parent_status = "Pending";
+
+	if (statuses.some((status) => status === "Rejected")) {
+		parent_status = "Rejected";
+	} else if (statuses.every((status) => status === "Accepted")) {
+		parent_status = "Accepted";
+	}
+
+	if ((frm.doc.status || "").trim() !== parent_status) {
+		frm.set_value("status", parent_status);
+	}
+}
+
 function set_density_qty(frm) {
 	const reference_qty = flt(frm.doc.reference_qty);
 	const custom_density = flt(frm.doc.custom_density);

@@ -13,12 +13,13 @@
   "reference_type",
   "reference_doctype",
   "reference_name",
+  "column_break_umqp",
+  "naming_series",
   "purchase_receipt_item",
   "stock_entry",
   "inspection_date",
   "company",
-  "column_break_unee",
-  "naming_series",
+  "section_break_ipcj",
   "rework_notes",
   "section_break_1",
   "production_item",
@@ -215,10 +216,6 @@
    "options": "UOM"
   },
   {
-   "fieldname": "column_break_unee",
-   "fieldtype": "Column Break"
-  },
-  {
    "fieldname": "naming_series",
    "fieldtype": "Select",
    "label": "naming_series",
@@ -246,6 +243,7 @@
    "fieldtype": "Section Break"
   },
   {
+   "depends_on": "eval:doc.status == \"Rework\"",
    "fieldname": "rework_notes",
    "fieldtype": "Long Text",
    "label": "Rework Notes",
@@ -309,13 +307,21 @@
    "hidden": 1,
    "label": "Batch QC JSON",
    "no_copy": 1
+  },
+  {
+   "fieldname": "column_break_umqp",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "section_break_ipcj",
+   "fieldtype": "Section Break"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-06-19 10:44:41.165549",
+ "modified": "2026-06-19 14:52:48.933918",
  "modified_by": "Administrator",
  "module": "pratap",
  "name": "Pratap Quality Inspection",

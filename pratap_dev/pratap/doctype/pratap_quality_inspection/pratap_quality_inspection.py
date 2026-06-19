@@ -258,7 +258,7 @@ class PratapQualityInspection(Document):
 		for parameter in parameters:
 			row = self.append("readings", {})
 			row.update(parameter)
-			row.status = "Accepted"
+			row.status = ""
 			row.parameter_group = frappe.get_value(
 				"Quality Inspection Parameter", parameter.get("specification"), "parameter_group"
 			)
@@ -279,7 +279,7 @@ class PratapQualityInspection(Document):
 		for parameter in parameters:
 			row = self.append("readings", {})
 			row.update(parameter)
-			row.status = "Accepted"
+			row.status = ""
 			row.parameter_group = frappe.get_value(
 				"Quality Inspection Parameter", parameter.get("specification"), "parameter_group"
 			)
@@ -360,59 +360,60 @@ class PratapQualityInspection(Document):
 			if cint(reading.manual_inspection):
 				continue
 
-			if (self.reference_type or "").strip() == "GRN" and (reading.status or "").strip():
-				continue
-
 			if cint(reading.formula_based_criteria):
 				self._set_status_based_on_formula(reading)
 			else:
 				self._set_status_based_on_acceptance_values(reading)
 
-		if (self.reference_type or "").strip() == "GRN":
-			self._set_grn_status_from_readings()
-			return
+		self._set_parent_status_from_readings()
 
-		if cint(self.manual_inspection):
-			# In manual mode, keep row/document status as user-selected.
-			return
-
-		self.status = "Accepted"
-		for reading in self.readings:
-			if reading.status == "Rejected":
-				self.status = "Rejected"
-				break
-
-	def _set_grn_status_from_readings(self):
-		"""GRN QC document status follows reading results even in manual inspection mode."""
+	def _set_parent_status_from_readings(self):
+		"""Parent status from readings: all Accepted → Accepted, any Rejected → Rejected, else Pending."""
 		if not self.readings:
 			return
 
-		if any((reading.status or "").strip() == "Rejected" for reading in self.readings):
-			self.status = "Rejected"
-			return
+		statuses = [(reading.status or "").strip() for reading in self.readings]
 
-		if all((reading.status or "").strip() == "Accepted" for reading in self.readings):
+		if any(status == "Rejected" for status in statuses):
+			self.status = "Rejected"
+		elif statuses and all(status == "Accepted" for status in statuses):
 			self.status = "Accepted"
+		else:
+			self.status = "Pending"
 
 	def _set_status_based_on_acceptance_values(self, reading):
 		if cint(reading.numeric):
-			result = self._min_max_criteria_passed(reading)
-		else:
-			reading_value = (reading.get("reading_value") or "").strip()
-			accepted_value = (reading.get("value") or "").strip()
+			self._set_status_from_observe_value_range(reading)
+			return
 
-			if not reading_value:
-				frappe.throw(
-					f"Row #{reading.idx}: Reading Value is required for value-based inspection."
-				)
-			if not accepted_value:
-				frappe.throw(
-					f"Row #{reading.idx}: Acceptance Criteria Value is required for value-based inspection."
-				)
+		observe_value = (reading.get("observe_value") or "").strip()
+		reading_value = observe_value or (reading.get("reading_value") or "").strip()
+		accepted_value = (reading.get("value") or "").strip()
 
-			result = reading_value.lower() == accepted_value.lower()
+		if not reading_value:
+			frappe.throw(
+				f"Row #{reading.idx}: Reading Value is required for value-based inspection."
+			)
+		if not accepted_value:
+			frappe.throw(
+				f"Row #{reading.idx}: Acceptance Criteria Value is required for value-based inspection."
+			)
 
+		result = reading_value.lower() == accepted_value.lower()
 		reading.status = "Accepted" if result else "Rejected"
+
+	def _set_status_from_observe_value_range(self, reading):
+		observe_value = (reading.get("observe_value") or "").strip()
+		if not observe_value:
+			reading.status = ""
+			return
+
+		min_value = frappe.utils.flt(reading.get("min_value"))
+		max_value = frappe.utils.flt(reading.get("max_value"))
+		parsed_value = _parse_float(observe_value)
+		reading.status = (
+			"Accepted" if min_value <= parsed_value <= max_value else "Rejected"
+		)
 
 	def _min_max_criteria_passed(self, reading):
 		has_reading = False
