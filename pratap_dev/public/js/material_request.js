@@ -2,6 +2,13 @@ frappe.ui.form.on("Material Request", {
 	refresh(frm) {
 		frm.remove_custom_button(__("Purchase Order"), __("Create"));
 
+		frm.add_fetch(
+			"custom_supplier_",
+			"supplier_name",
+			"custom_supplier_name",
+			"Material Request Item"
+		);
+
 		frm.set_query("custom_supplier_", "items", function (doc, cdt, cdn) {
 			const row = locals[cdt][cdn];
 			return {
@@ -28,8 +35,10 @@ frappe.ui.form.on("Material Request Item", {
 	},
 	custom_total_qty(frm, cdt, cdn) {
 		calculate_quantity(frm, cdt, cdn);
-	}
-
+	},
+	custom_supplier_(frm, cdt, cdn) {
+		set_supplier_name(frm, cdt, cdn);
+	},
 });
 
 function calculate_quantity(frm, cdt, cdn) {
@@ -58,12 +67,40 @@ function set_supplier_if_single_vendor(frm, cdt, cdn) {
 			}
 
 			const supplier = suppliers[0].supplier;
-			if (row.custom_supplier_ === supplier) {
+			const supplier_name = suppliers[0].supplier_name;
+
+			if (row.custom_supplier_ === supplier && row.custom_supplier_name) {
+				return;
+			}
+
+			if (supplier_name) {
+				frappe.model.set_value(cdt, cdn, {
+					custom_supplier_: supplier,
+					custom_supplier_name: supplier_name,
+				});
 				return;
 			}
 
 			frappe.model.set_value(cdt, cdn, "custom_supplier_", supplier);
 		},
+	});
+}
+
+function set_supplier_name(frm, cdt, cdn) {
+	const row = locals[cdt][cdn];
+	if (!row?.custom_supplier_) {
+		if (row.custom_supplier_name) {
+			frappe.model.set_value(cdt, cdn, "custom_supplier_name", "");
+		}
+		return;
+	}
+
+	frappe.db.get_value("Supplier", row.custom_supplier_, "supplier_name", (values) => {
+		const supplier_name = values?.supplier_name;
+		if (!supplier_name || row.custom_supplier_name === supplier_name) {
+			return;
+		}
+		frappe.model.set_value(cdt, cdn, "custom_supplier_name", supplier_name);
 	});
 }
 
