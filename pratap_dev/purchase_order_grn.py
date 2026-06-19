@@ -11,6 +11,124 @@ from frappe.utils import flt
 from erpnext.buying.doctype.purchase_order.purchase_order import set_missing_values
 
 
+@frappe.whitelist()
+def get_last_buying_rate(doc=None, supplier=None, item_codes=None, current_po=None):
+	"""Return last buying rate details for PO items."""
+	doc = _parse_po_doc(doc) if doc else {}
+	po_items = doc.get("items") or []
+
+	supplier = supplier or doc.get("supplier")
+	if isinstance(item_codes, str):
+		item_codes = json.loads(item_codes) if item_codes else []
+	if not item_codes and po_items:
+		item_codes = [item.get("item_code") for item in po_items if item.get("item_code")]
+
+	if not current_po and doc.get("name") and not doc.get("__islocal"):
+		current_po = doc.get("name")
+
+	if not supplier or not item_codes:
+		return []
+
+	normalized_codes = [(code or "").strip().upper() for code in item_codes]
+	rate_map = _get_last_buying_rate_map(supplier, normalized_codes, current_po)
+
+	rows = []
+	source_items = po_items or [{"item_code": code} for code in item_codes]
+
+	for item in source_items:
+		item_code = item.get("item_code")
+		if not item_code:
+			continue
+
+		last = rate_map.get(item_code.strip().upper(), {})
+		rows.append(
+			{
+				"item_code": item_code,
+				"supplier_item": _resolve_supplier_item(item, supplier),
+				"po_rate": flt(item.get("rate")),
+				"po_uom": item.get("uom"),
+				"last_buying_rate": last.get("last_buying_rate"),
+				"last_uom": last.get("uom"),
+				"last_supplier": last.get("supplier_name") or last.get("supplier"),
+			}
+		)
+
+	return rows
+
+
+def _resolve_supplier_item(item, supplier):
+	if item.get("supplier_part_no"):
+		return item.get("supplier_part_no")
+
+	item_code = item.get("item_code")
+	if supplier and item_code:
+		item_supplier = frappe.db.get_value(
+			"Item Supplier",
+			{"parent": item_code, "supplier": supplier},
+			["supplier_part_no", "custom_supplier_item"],
+			as_dict=True,
+		)
+		if item_supplier:
+			return item_supplier.custom_supplier_item or item_supplier.supplier_part_no
+
+	return item.get("item_name") or item_code
+
+
+def _get_last_buying_rate_map(supplier, item_codes, current_po=None):
+	if not item_codes:
+		return {}
+
+	item_tuple = (item_codes[0], item_codes[0]) if len(item_codes) == 1 else tuple(item_codes)
+	params = {
+		"supplier": supplier,
+		"item_codes": item_tuple,
+		"current_po": current_po or "",
+	}
+
+	rows = frappe.db.sql(
+		"""
+		SELECT
+			UPPER(TRIM(poi.item_code)) AS item_code,
+			poi.rate AS last_buying_rate,
+			poi.uom,
+			po.supplier_name,
+			po.transaction_date,
+			po.creation
+		FROM `tabPurchase Order Item` poi
+		INNER JOIN `tabPurchase Order` po ON po.name = poi.parent
+		WHERE po.docstatus IN (0, 1)
+			AND po.supplier = %(supplier)s
+			AND po.name != %(current_po)s
+			AND UPPER(TRIM(poi.item_code)) IN %(item_codes)s
+		ORDER BY po.transaction_date DESC, po.creation DESC
+		""",
+		params,
+		as_dict=True,
+	)
+
+	rate_map = {}
+	for row in rows:
+		if row.item_code not in rate_map:
+			rate_map[row.item_code] = row
+
+	return rate_map
+
+
+def disable_purchase_after_save_message():
+	"""Disable legacy UOM popup shown after save."""
+	script_name = "Purchase After Save Message"
+	if frappe.db.exists("Client Script", script_name):
+		frappe.db.set_value("Client Script", script_name, "enabled", 0)
+
+
+def _parse_po_doc(doc):
+	if not doc:
+		doc = frappe.form_dict.get("doc")
+	if isinstance(doc, str):
+		doc = json.loads(doc)
+	return doc or {}
+
+
 def get_grn_stats_for_po(purchase_order):
 	"""Draft GRN qty per PO item (excludes cancelled PRs)."""
 	stats = {}

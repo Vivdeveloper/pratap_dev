@@ -2,6 +2,14 @@ frappe.ui.form.on("Material Request", {
 	refresh(frm) {
 		frm.remove_custom_button(__("Purchase Order"), __("Create"));
 
+		frm.set_query("custom_supplier_", "items", function (doc, cdt, cdn) {
+			const row = locals[cdt][cdn];
+			return {
+				query: "auto_po_creation.api.supplier_link_query",
+				filters: { item_code: row.item_code || "" },
+			};
+		});
+
 		if (!frm.doc.__islocal && frm.doc.docstatus === 1 && frm.doc.material_request_type === "Purchase") {
 			frm.add_custom_button(__("Supplier Quotation"), () => {
 				open_mr_document_dialog(frm, MR_SQ_CONFIG);
@@ -13,6 +21,7 @@ frappe.ui.form.on("Material Request", {
 frappe.ui.form.on("Material Request Item", {
 	item_code(frm, cdt, cdn) {
 		set_rm_warehouse_qty(frm, cdt, cdn);
+		set_supplier_if_single_vendor(frm, cdt, cdn);
 	},
 	custom_packing_qty(frm, cdt, cdn) {
 		calculate_quantity(frm, cdt, cdn);
@@ -28,6 +37,36 @@ function calculate_quantity(frm, cdt, cdn) {
 	const quantity = (row.custom_packing_qty || 0) * (row.custom_total_qty || 0);
 	frappe.model.set_value(cdt, cdn, "qty", quantity);
 }
+
+function set_supplier_if_single_vendor(frm, cdt, cdn) {
+	if (frm.doc.docstatus !== 0 || frm.doc.material_request_type !== "Purchase") {
+		return;
+	}
+
+	const row = locals[cdt][cdn];
+	if (!row?.item_code) {
+		return;
+	}
+
+	frappe.call({
+		method: "auto_po_creation.api.get_item_suppliers",
+		args: { item_code: row.item_code },
+		callback(r) {
+			const suppliers = r.message || [];
+			if (suppliers.length !== 1) {
+				return;
+			}
+
+			const supplier = suppliers[0].supplier;
+			if (row.custom_supplier_ === supplier) {
+				return;
+			}
+
+			frappe.model.set_value(cdt, cdn, "custom_supplier_", supplier);
+		},
+	});
+}
+
 function set_rm_qty_field(cdt, cdn, fieldname, value) {
 	const row = locals[cdt][cdn];
 	const next_value = flt(value);

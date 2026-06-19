@@ -1,0 +1,208 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2025-12-20 16:15:02.709585",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "section_break_fekc",
+  "amended_from",
+  "gate_entry_details_section",
+  "date",
+  "supplier_invoice_no",
+  "column_break_cwmw",
+  "time_of_arrival",
+  "supplier_invoice_date",
+  "supplier_and_vehicle_details_section",
+  "purchase_order_po_no",
+  "received_qty",
+  "actual_received_qty",
+  "transporter_name",
+  "vehicle_no",
+  "driver_name",
+  "driver_full_name",
+  "driver_contact",
+  "column_break_poko",
+  "supplier_name",
+  "supplier_address",
+  "vehicle_fitness_certificate",
+  "puc",
+  "insurance"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_break_fekc",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Gate Pass",
+   "print_hide": 1,
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "gate_entry_details_section",
+   "fieldtype": "Section Break",
+   "label": "Gate Entry Details"
+  },
+  {
+   "default": "Today",
+   "fieldname": "date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Date"
+  },
+  {
+   "fieldname": "supplier_invoice_no",
+   "fieldtype": "Data",
+   "label": "Supplier Invoice NO"
+  },
+  {
+   "fieldname": "column_break_cwmw",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Now",
+   "fieldname": "time_of_arrival",
+   "fieldtype": "Time",
+   "in_list_view": 1,
+   "label": "Time of Arrival"
+  },
+  {
+   "fieldname": "supplier_invoice_date",
+   "fieldtype": "Date",
+   "label": "Supplier Invoice Date"
+  },
+  {
+   "fieldname": "supplier_and_vehicle_details_section",
+   "fieldtype": "Section Break",
+   "label": "Supplier and Vehicle Details"
+  },
+  {
+   "fieldname": "purchase_order_po_no",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Purchase Order (PO) No.",
+   "options": "Purchase Order"
+  },
+  {
+   "fetch_from": "purchase_order_po_no.total_qty",
+   "fieldname": "received_qty",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "in_list_view": 1,
+   "label": "Received Qty "
+  },
+  {
+   "fieldname": "actual_received_qty",
+   "fieldtype": "Data",
+   "label": "Actual Received Qty ",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "driver_name.transporter",
+   "fieldname": "transporter_name",
+   "fieldtype": "Data",
+   "label": "Transporter Name "
+  },
+  {
+   "fieldname": "vehicle_no",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Vehicle No"
+  },
+  {
+   "fieldname": "driver_name",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Driver ID",
+   "options": "Driver"
+  },
+  {
+   "fetch_from": "driver_name.full_name",
+   "fieldname": "driver_full_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Driver Full Name "
+  },
+  {
+   "fetch_from": "driver_name.cell_number",
+   "fieldname": "driver_contact",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Driver Contact"
+  },
+  {
+   "fieldname": "column_break_poko",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fetch_from": "purchase_order_po_no.supplier_name",
+   "fieldname": "supplier_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Supplier Name"
+  },
+  {
+   "fetch_from": "purchase_order_po_no.address_display",
+   "fieldname": "supplier_address",
+   "fieldtype": "Small Text",
+   "in_list_view": 1,
+   "label": "Supplier Address"
+  },
+  {
+   "fieldname": "vehicle_fitness_certificate",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Vehicle Fitness Certificate ",
+   "options": "\nValid\nInvalid"
+  },
+  {
+   "fieldname": "puc",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "PUC ",
+   "options": "\nValid\nInvalid"
+  },
+  {
+   "fieldname": "insurance",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Insurance",
+   "options": "\nValid\nInvalid"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "is_submittable": 1,
+ "links": [],
+ "modified": "2026-06-18 17:22:13.344938",
+ "modified_by": "Administrator",
+ "module": "pratap",
+ "name": "Gate Pass",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
