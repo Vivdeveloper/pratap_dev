@@ -129,7 +129,7 @@ function open_last_buying_rates_dialog(rows) {
 			.join("");
 
 		const dialog = new frappe.ui.Dialog({
-			title: __("Last Buying Rates"),
+			title: __("Please check the last buying rates and UOM"),
 			size: "large",
 			fields: [
 				{
