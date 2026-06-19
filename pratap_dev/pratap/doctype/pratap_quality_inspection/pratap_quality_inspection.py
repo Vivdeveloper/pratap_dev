@@ -15,8 +15,10 @@ class PratapQualityInspection(Document):
 	def before_submit(self):
 		self._ensure_density_for_submit()
 		self._validate_custom_density()
+		self._validate_inspected_qty()
 		self._validate_readings_status_mandatory()
 		self._validate_status_for_submit()
+		self._freeze_batch_qc_json()
 
 	def on_cancel(self):
 		self.ignore_linked_doctypes = ["Serial and Batch Bundle"]
@@ -195,7 +197,7 @@ class PratapQualityInspection(Document):
 
 	def _validate_inspected_qty(self):
 		if frappe.utils.flt(self.inspected_qty) <= 0:
-			frappe.throw("Inspected Qty must be greater than 0.")
+			frappe.throw(_("Inspected Qty must be greater than 0."))
 
 	def _set_density_qty(self):
 		reference_qty = frappe.utils.flt(self.reference_qty)
@@ -212,9 +214,12 @@ class PratapQualityInspection(Document):
 		inspected_qty = frappe.utils.flt(self.inspected_qty)
 		process_loss = frappe.utils.flt(self.process_loss)
 		if self.reference_type == "Work Order":
-			if self.custom_density == 0:
+			custom_density = frappe.utils.flt(self.custom_density)
+			if custom_density <= 0:
 				return
-			self.finished_qty = ((batch_qty - inspected_qty- (batch_qty * process_loss / 100)) / self.custom_density)
+			self.finished_qty = (
+				(batch_qty - inspected_qty - (batch_qty * process_loss / 100)) / custom_density
+			)
 		else:
 			self.finished_qty = (batch_qty - inspected_qty) * (1 - process_loss / 100)
 		# Round to 3 decimal places
@@ -473,6 +478,35 @@ class PratapQualityInspection(Document):
 				"Status must be Accepted before submit. For GRN QC, set all readings to Accepted or update Status to Accepted."
 			)
 		)
+
+	def _freeze_batch_qc_json(self):
+		"""Snapshot batch QC rows to JSON on submit; no further GRN fetch after this."""
+		if (self.reference_type or "").strip() != "GRN":
+			return
+
+		from pratap_dev.purchase_receipt_batch_qc import parse_batch_qc_json
+
+		rows = parse_batch_qc_json(self.batch_qc_json)
+		if not rows:
+			for batch in get_grn_batch_list(
+				self.reference_name,
+				self.production_item,
+				self.get("purchase_receipt_item"),
+			):
+				batch_qty = frappe.utils.flt(batch.get("batch_qty"))
+				rows.append(
+					{
+						"batch_no": batch.get("batch_no"),
+						"batch_qty": batch_qty,
+						"accepted_qty": 0,
+						"rejected_qty": batch_qty,
+					}
+				)
+
+		if rows:
+			import json
+
+			self.batch_qc_json = json.dumps(rows)
 
 	def _update_grn_item(self):
 		from pratap_dev.purchase_receipt_batch_qc import parse_batch_qc_json, update_grn_from_batch_qc

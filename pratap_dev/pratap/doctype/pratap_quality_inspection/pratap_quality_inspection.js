@@ -13,7 +13,6 @@ frappe.ui.form.on("Pratap Quality Inspection", {
 		set_cancel_all_ignore_doctypes(frm);
 		handle_status_values(frm);
 		toggle_supplier_coa(frm);
-		setup_qc_submit_button(frm);
 		if (frm.doc.reference_type === "GRN" && frm.doc.reference_name) {
 			load_grn_batch_details(frm);
 		} else {
@@ -98,6 +97,15 @@ frappe.ui.form.on("Pratap Quality Inspection", {
 					"Status must be Accepted before submit. Complete readings and set Status to Accepted."
 				),
 			});
+		}
+		if (flt(frm.doc.inspected_qty) <= 0) {
+			frappe.throw({
+				title: __("Validation Error"),
+				message: __("Inspected Qty must be greater than 0."),
+			});
+		}
+		if (frm.doc.reference_type === "GRN" && frm._grn_batch_rows?.length) {
+			frm.doc.batch_qc_json = serialize_batch_qc_rows(frm._grn_batch_rows);
 		}
 	},
 });
@@ -291,46 +299,6 @@ function handle_status_values(frm){
 	}
 }
 
-function setup_qc_submit_button(frm) {
-	if (frm.doc.docstatus !== 0) {
-		return;
-	}
-
-	const status = (frm.doc.status || "").trim();
-	const can_submit = status === "Accepted";
-
-	if (can_submit) {
-		if ($(frm.page.btn_primary).attr("data-label") === "Submit") {
-			$(frm.page.btn_primary).show();
-		}
-		return;
-	}
-
-	frm.page.clear_primary_action();
-	frm.page.set_primary_action(__("Submit"), () => {
-		frappe.throw({
-			title: __("Cannot Submit"),
-			message: __(
-				"Status must be Accepted before submit. For GRN QC, complete all readings as Accepted."
-			),
-		});
-	});
-}
-
-function handel_submitted_buttons(){
-	if (cur_frm.doc.status === "Accepted" && !cur_frm.is_dirty()) {
-		if ($(cur_frm.page.btn_primary).attr("data-label") === "Submit") {
-			$(cur_frm.page.btn_primary).show();
-		}
-		
-	} else {
-		if(cur_frm.is_dirty()){
-			$(cur_frm.page.btn_primary).show();
-		}else{
-			$(cur_frm.page.btn_primary).hide();
-		}
-	}
-}
 function toggle_supplier_coa(frm) {
 	const show_supplier_coa = frm.doc.reference_type === "GRN";
 	const grid = frm.fields_dict.readings?.grid;
@@ -362,6 +330,18 @@ function parse_batch_qc_json(value) {
 	}
 }
 
+function parse_batch_qc_json_rows(value) {
+	if (!value) {
+		return [];
+	}
+	try {
+		const parsed = JSON.parse(value);
+		return Array.isArray(parsed) ? parsed : [];
+	} catch {
+		return [];
+	}
+}
+
 function serialize_batch_qc_rows(rows) {
 	return JSON.stringify(
 		(rows || []).map((row) => {
@@ -377,9 +357,34 @@ function serialize_batch_qc_rows(rows) {
 	);
 }
 
+function load_grn_batch_from_json(frm) {
+	if (frm.doc.reference_type !== "GRN") {
+		clear_grn_batch_html(frm);
+		return;
+	}
+
+	frm._grn_batch_rows = parse_batch_qc_json_rows(frm.doc.batch_qc_json).map((row) => {
+		const batch_qty = flt(row.batch_qty);
+		const accepted_qty = Math.min(Math.max(flt(row.accepted_qty), 0), batch_qty);
+		return {
+			batch_no: row.batch_no,
+			batch_qty,
+			accepted_qty,
+			rejected_qty: Math.max(batch_qty - accepted_qty, 0),
+		};
+	});
+
+	render_grn_batch_html(frm);
+}
+
 function load_grn_batch_details(frm) {
 	if (frm.doc.reference_type !== "GRN" || !frm.doc.reference_name) {
 		clear_grn_batch_html(frm);
+		return;
+	}
+
+	if (frm.doc.docstatus >= 1) {
+		load_grn_batch_from_json(frm);
 		return;
 	}
 
