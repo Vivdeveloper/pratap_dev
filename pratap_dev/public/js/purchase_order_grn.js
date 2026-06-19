@@ -19,8 +19,15 @@ frappe.ui.form.on("Purchase Order", {
 		if (!frm.doc.items?.length) {
 			return;
 		}
-		await show_last_buying_rates(frm);
+		if(["Waiting for  Approval", "Draft"].includes(frm.doc.workflow_state)) {
+			await show_last_buying_rates(frm);
+		}
 	},
+	async after_workflow_action(frm) {
+        if (["Draft", "Waiting for  Approval"].includes(frm.doc.workflow_state)) {
+            await show_last_buying_rates(frm);
+        }
+    }
 });
 
 function remove_default_purchase_receipt_button(frm) {
