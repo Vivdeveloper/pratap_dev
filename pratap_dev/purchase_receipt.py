@@ -13,6 +13,9 @@ from pratap_dev.purchase_receipt_batch import _set_batch_from_insert_batch_numbe
 class PratapPurchaseReceipt(PurchaseReceipt):
     def validate(self):
         super().validate()
+        if self.is_return:
+            return
+
         self._validate_items_pratap_quality_inspection()
         self._sync_density_from_pratap_qc_on_items()
 
@@ -61,7 +64,7 @@ class PratapPurchaseReceipt(PurchaseReceipt):
             qc = frappe.db.get_value(
                 "Pratap Quality Inspection",
                 qc_name,
-                ["reference_doctype", "reference_name", "production_item", "docstatus"],
+                ["reference_doctype", "reference_name", "production_item", "purchase_receipt_item", "docstatus"],
                 as_dict=True,
             )
 
@@ -79,6 +82,13 @@ class PratapPurchaseReceipt(PurchaseReceipt):
                     ).format(row.idx, qc_name, qc.production_item, row.item_code)
                 )
 
+            if qc.get("purchase_receipt_item") and qc.purchase_receipt_item != row.name:
+                frappe.throw(
+                    _(
+                        "Row {0}: Pratap Quality Inspection {1} is linked to a different GRN item row."
+                    ).format(row.idx, qc_name)
+                )
+
     def _sync_density_from_pratap_qc_on_items(self):
         for row in self.get("items") or []:
             qc_name = row.get("custom_pratap_quality_inspection")
@@ -92,20 +102,12 @@ class PratapPurchaseReceipt(PurchaseReceipt):
         if self.is_return:
             return
 
-        for row in self.items:
-            if flt(row.qty) <= 0:
-                continue
-            if not row.custom_qc_required:
-                continue
-            qc_name = row.get("custom_pratap_quality_inspection")
-            if not qc_name:
-                frappe.throw(
-                    _(
-                        "Row {0}: Pratap Quality Inspection is required on item {1} before submitting GRN."
-                    ).format(row.idx, row.item_code or row.item_name)
-                )
-
-            _validate_pratap_qc_for_row(qc_name, row, self.name)
+        errors = _get_grn_qc_submit_errors(self)
+        if errors:
+            frappe.throw(
+                "<br>".join(errors),
+                title=_("Pratap Quality Inspection Required"),
+            )
 
     def _create_uom_in_items(self, items: list):
         for item in items:
@@ -123,43 +125,72 @@ class PratapPurchaseReceipt(PurchaseReceipt):
         batch.insert()
         return batch.name
 
-def _validate_pratap_qc_for_row(qc_name, row, grn_name):
+def _get_grn_qc_submit_errors(grn_doc):
+    """Collect QC validation messages for every QC-required GRN line."""
+    errors = []
+
+    for row in grn_doc.get("items") or []:
+        if not _grn_item_needs_qc(row):
+            continue
+
+        qc_name = row.get("custom_pratap_quality_inspection")
+        item_label = row.item_code or row.item_name or row.idx
+
+        if not qc_name:
+            errors.append(
+                _(
+                    "Row {0} ({1}): Create and submit Pratap Quality Inspection before submitting GRN."
+                ).format(row.idx, item_label)
+            )
+            continue
+
+        error = _get_pratap_qc_row_error(qc_name, row, grn_doc.name)
+        if error:
+            errors.append(error)
+
+    return errors
+
+
+def _get_pratap_qc_row_error(qc_name, row, grn_name):
     if not frappe.db.exists("Pratap Quality Inspection", qc_name):
-        frappe.throw(
-            _("Row {0}: Pratap Quality Inspection {1} does not exist.").format(row.idx, qc_name)
-        )
+        return _("Row {0}: Pratap Quality Inspection {1} does not exist.").format(row.idx, qc_name)
 
     qc = frappe.get_doc("Pratap Quality Inspection", qc_name)
 
     if qc.reference_doctype != "Purchase Receipt" or qc.reference_name != grn_name:
-        frappe.throw(
-            _(
-                "Row {0}: Pratap Quality Inspection {1} is not linked to this Purchase Receipt."
-            ).format(row.idx, qc_name)
-        )
+        return _(
+            "Row {0}: Pratap Quality Inspection {1} is not linked to this Purchase Receipt."
+        ).format(row.idx, qc_name)
 
     if qc.production_item and row.item_code and qc.production_item != row.item_code:
-        frappe.throw(
-            _(
-                "Row {0}: Pratap Quality Inspection {1} is for item {2}, not {3}."
-            ).format(row.idx, qc_name, qc.production_item, row.item_code)
-        )
+        return _(
+            "Row {0}: Pratap Quality Inspection {1} is for item {2}, not {3}."
+        ).format(row.idx, qc_name, qc.production_item, row.item_code)
+
+    if qc.get("purchase_receipt_item") and qc.purchase_receipt_item != row.name:
+        return _(
+            "Row {0}: Pratap Quality Inspection {1} is linked to a different GRN item row."
+        ).format(row.idx, qc_name)
 
     submitting_qc = frappe.flags.get("submitting_pratap_qc") == qc_name
 
     if not submitting_qc and qc.docstatus != 1:
-        frappe.throw(
-            _(
-                "Row {0}: Pratap Quality Inspection {1} must be submitted before GRN can be submitted."
-            ).format(row.idx, qc_name)
-        )
+        return _(
+            "Row {0} ({1}): Submit Pratap Quality Inspection {2} before submitting GRN."
+        ).format(row.idx, row.item_code or row.item_name, qc_name)
 
     if (qc.status or "").strip() != "Accepted":
-        frappe.throw(
-            _(
-                "Row {0}: Pratap Quality Inspection {1} must have status Accepted."
-            ).format(row.idx, qc_name)
-        )
+        return _(
+            "Row {0} ({1}): Pratap Quality Inspection {2} must have status Accepted."
+        ).format(row.idx, row.item_code or row.item_name, qc_name)
+
+    return None
+
+
+def _validate_pratap_qc_for_row(qc_name, row, grn_name):
+    error = _get_pratap_qc_row_error(qc_name, row, grn_name)
+    if error:
+        frappe.throw(error)
 
 
 def link_pratap_qc_to_grn_item(doc, method=None):
@@ -173,24 +204,9 @@ def link_pratap_qc_to_grn_item(doc, method=None):
     if not doc.name:
         return
 
-    rows = frappe.get_all(
-        "Purchase Receipt Item",
-        filters={"parent": doc.reference_name, "item_code": doc.production_item},
-        fields=["name", "custom_pratap_quality_inspection"],
-        order_by="idx asc",
-    )
-
-    if not rows:
+    target_row_name = _resolve_grn_item_row_name(doc)
+    if not target_row_name:
         return
-
-    target_row = None
-    for row in rows:
-        if not row.custom_pratap_quality_inspection or row.custom_pratap_quality_inspection == doc.name:
-            target_row = row
-            break
-
-    if not target_row:
-        target_row = rows[0]
 
     values = {"custom_pratap_quality_inspection": doc.name}
     if doc.get("custom_density") not in (None, ""):
@@ -198,27 +214,29 @@ def link_pratap_qc_to_grn_item(doc, method=None):
 
     frappe.db.set_value(
         "Purchase Receipt Item",
-        target_row.name,
+        target_row_name,
         values,
         update_modified=False,
     )
 
 
-def sync_grn_item_density_from_pratap_qc(grn_name, item_code, qc_name):
+def sync_grn_item_density_from_pratap_qc(grn_name, item_code, qc_name, purchase_receipt_item=None):
     """Push custom_density from Pratap QC to the matching GRN item row."""
-    if not grn_name or not item_code or not qc_name:
+    if not grn_name or not qc_name:
         return
 
     density = frappe.db.get_value("Pratap Quality Inspection", qc_name, "custom_density")
     if density in (None, ""):
         return
 
-    row_name = frappe.db.get_value(
-        "Purchase Receipt Item",
-        {"parent": grn_name, "item_code": item_code},
-        "name",
-        order_by="idx asc",
-    )
+    row_name = purchase_receipt_item
+    if not row_name and item_code:
+        row_name = frappe.db.get_value(
+            "Purchase Receipt Item",
+            {"parent": grn_name, "item_code": item_code},
+            "name",
+            order_by="idx asc",
+        )
 
     if row_name:
         frappe.db.set_value(
@@ -240,13 +258,14 @@ def clear_pratap_qc_from_grn_item(doc, remove_reference=False):
         qc_link = doc.name
 
     child = frappe.qb.DocType("Purchase Receipt Item")
-    query = (
-        frappe.qb.update(child)
-        .set(child.custom_pratap_quality_inspection, qc_link)
-        .where(
+    query = frappe.qb.update(child).set(child.custom_pratap_quality_inspection, qc_link)
+
+    if doc.get("purchase_receipt_item"):
+        query = query.where(child.name == doc.purchase_receipt_item)
+    else:
+        query = query.where(
             (child.parent == doc.reference_name) & (child.item_code == doc.production_item)
         )
-    )
 
     if doc.docstatus == 2 or remove_reference:
         query = query.where(child.custom_pratap_quality_inspection == doc.name)
@@ -262,6 +281,73 @@ def clear_pratap_qc_from_grn_item(doc, remove_reference=False):
     )
 
 
+def grn_ready_for_submit_after_qc(purchase_receipt):
+    """Return True when every QC-required GRN line has a submitted Accepted Pratap QC."""
+    if not purchase_receipt or not frappe.db.exists("Purchase Receipt", purchase_receipt):
+        return False
+
+    grn = frappe.get_doc("Purchase Receipt", purchase_receipt)
+    if grn.docstatus != 0:
+        return False
+
+    needs_qc = False
+    for row in grn.items:
+        if not _grn_item_needs_qc(row):
+            continue
+
+        needs_qc = True
+        qc_name = row.get("custom_pratap_quality_inspection")
+        if not qc_name:
+            return False
+
+        qc = frappe.db.get_value(
+            "Pratap Quality Inspection",
+            qc_name,
+            ["docstatus", "status"],
+            as_dict=True,
+        )
+        if not qc or qc.docstatus != 1 or (qc.status or "").strip() != "Accepted":
+            return False
+
+    return needs_qc
+
+
+def _grn_item_needs_qc(row):
+    received_qty = flt(row.get("received_qty")) or flt(row.get("qty"))
+    if received_qty <= 0 or not row.get("item_code"):
+        return False
+
+    if frappe.get_meta("Purchase Receipt Item").has_field("custom_qc_required"):
+        return bool(row.get("custom_qc_required"))
+
+    return True
+
+
+def _resolve_grn_item_row_name(doc):
+    if doc.get("purchase_receipt_item"):
+        if frappe.db.exists(
+            "Purchase Receipt Item",
+            {"name": doc.purchase_receipt_item, "parent": doc.reference_name},
+        ):
+            return doc.purchase_receipt_item
+
+    rows = frappe.get_all(
+        "Purchase Receipt Item",
+        filters={"parent": doc.reference_name, "item_code": doc.production_item},
+        fields=["name", "custom_pratap_quality_inspection"],
+        order_by="idx asc",
+    )
+
+    if not rows:
+        return None
+
+    for row in rows:
+        if not row.custom_pratap_quality_inspection or row.custom_pratap_quality_inspection == doc.name:
+            return row.name
+
+    return rows[0].name
+
+
 def _is_grn_incoming_pratap_qc(doc):
     return (
         getattr(doc, "doctype", None) == "Pratap Quality Inspection"
@@ -271,6 +357,72 @@ def _is_grn_incoming_pratap_qc(doc):
         and doc.reference_name
         and doc.production_item
     )
+
+
+@frappe.whitelist()
+def get_grn_qc_submit_status(purchase_receipt):
+    """Client-side GRN submit gate: all QC-required lines must have submitted Accepted QC."""
+    if not frappe.db.exists("Purchase Receipt", purchase_receipt):
+        frappe.throw(_("Purchase Receipt {0} does not exist.").format(purchase_receipt))
+
+    grn = frappe.get_doc("Purchase Receipt", purchase_receipt)
+
+    if grn.docstatus != 0:
+        return {"can_submit": True, "pending_items": [], "message": ""}
+
+    if grn.meta.has_field("custom_ignore_quality_inspection") and grn.get(
+        "custom_ignore_quality_inspection"
+    ):
+        return {"can_submit": True, "pending_items": [], "message": ""}
+
+    errors = _get_grn_qc_submit_errors(grn)
+    if not errors:
+        return {"can_submit": True, "pending_items": [], "message": ""}
+
+    pending_items = []
+    for row in grn.items:
+        if not _grn_item_needs_qc(row):
+            continue
+
+        qc_name = row.get("custom_pratap_quality_inspection")
+        error = None
+        if not qc_name:
+            error = True
+        else:
+            error = bool(_get_pratap_qc_row_error(qc_name, row, grn.name))
+
+        if not error:
+            continue
+
+        qc_docstatus = None
+        qc_status = None
+        if qc_name and frappe.db.exists("Pratap Quality Inspection", qc_name):
+            qc_values = frappe.db.get_value(
+                "Pratap Quality Inspection",
+                qc_name,
+                ["docstatus", "status"],
+                as_dict=True,
+            )
+            qc_docstatus = qc_values.docstatus
+            qc_status = (qc_values.status or "").strip()
+
+        pending_items.append(
+            {
+                "idx": row.idx,
+                "item_code": row.item_code,
+                "item_name": row.item_name,
+                "row_name": row.name,
+                "qc_name": qc_name,
+                "qc_docstatus": qc_docstatus,
+                "qc_status": qc_status,
+            }
+        )
+
+    return {
+        "can_submit": False,
+        "pending_items": pending_items,
+        "message": "<br>".join(errors),
+    }
 
 
 @frappe.whitelist()
@@ -293,12 +445,15 @@ def get_pratap_qc_status_for_grn(purchase_receipt):
             "inspection_type": "Incoming",
             "docstatus": ["<", 2],
         },
-        fields=["name", "production_item", "status", "docstatus"],
+        fields=["name", "production_item", "purchase_receipt_item", "status", "docstatus"],
         order_by="creation desc",
     )
 
+    qc_by_row = {}
     qc_by_item = {}
     for qc in qcs:
+        if qc.get("purchase_receipt_item") and qc.purchase_receipt_item not in qc_by_row:
+            qc_by_row[qc.purchase_receipt_item] = qc
         if qc.production_item and qc.production_item not in qc_by_item:
             qc_by_item[qc.production_item] = qc
 
@@ -309,7 +464,7 @@ def get_pratap_qc_status_for_grn(purchase_receipt):
     seen_view = set()
 
     for row in doc.items:
-        if not row.item_code or flt(row.qty) <= 0:
+        if not _grn_item_needs_qc(row):
             continue
 
         linked_name = row.get("custom_pratap_quality_inspection")
@@ -319,9 +474,11 @@ def get_pratap_qc_status_for_grn(purchase_receipt):
             qc = frappe.db.get_value(
                 "Pratap Quality Inspection",
                 linked_name,
-                ["name", "production_item", "status", "docstatus"],
+                ["name", "production_item", "purchase_receipt_item", "status", "docstatus"],
                 as_dict=True,
             )
+        elif row.name in qc_by_row:
+            qc = qc_by_row[row.name]
         elif row.item_code in qc_by_item:
             qc = qc_by_item[row.item_code]
 
@@ -370,6 +527,7 @@ def _grn_item_row_for_qc(row):
         "item_code": row.item_code,
         "item_name": row.item_name,
         "qty": row.qty,
+        "received_qty": row.get("received_qty"),
         "uom": row.uom,
         "stock_uom": row.stock_uom,
         "work_order": row.get("work_order"),

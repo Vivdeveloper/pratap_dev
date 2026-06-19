@@ -3,9 +3,10 @@ frappe.ui.form.on("Work Order", {
         if (![0, 1].includes(frm.doc.docstatus)) {
             return;
         }
-        if (frm.doc.custom_rework_qc) {
+        if (frm.doc.custom_rework_qc && frm.doc.docstatus != 1) {
             handle_rework_consumption(frm);
         }
+        if(frm.doc.docstatus != 1) {
         frm.add_custom_button(__("Create Pratap QC"), () => {
             frappe.new_doc("Pratap Quality Inspection", {
                 inspection_type: "In Process",
@@ -18,6 +19,7 @@ frappe.ui.form.on("Work Order", {
                 reference_qty: frm.doc.qty,
             });
         });
+        }
         },
 });
 

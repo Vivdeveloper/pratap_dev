@@ -13,11 +13,13 @@
   "reference_type",
   "reference_doctype",
   "reference_name",
+  "column_break_umqp",
+  "naming_series",
+  "purchase_receipt_item",
   "stock_entry",
   "inspection_date",
   "company",
-  "column_break_unee",
-  "naming_series",
+  "section_break_ipcj",
   "rework_notes",
   "section_break_1",
   "production_item",
@@ -31,6 +33,9 @@
   "process_loss",
   "finished_qty",
   "sales_uom",
+  "section_break_qlzs",
+  "batch_html",
+  "batch_qc_json",
   "section_break_2",
   "inspected_qty",
   "column_break_1",
@@ -188,6 +193,15 @@
    "reqd": 1
   },
   {
+   "depends_on": "eval:doc.reference_type == \"GRN\"",
+   "fieldname": "purchase_receipt_item",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Purchase Receipt Item",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
    "fieldname": "readings",
    "fieldtype": "Table",
    "label": "Readings",
@@ -200,10 +214,6 @@
    "in_standard_filter": 1,
    "label": "Sales UOM/Default UOM",
    "options": "UOM"
-  },
-  {
-   "fieldname": "column_break_unee",
-   "fieldtype": "Column Break"
   },
   {
    "fieldname": "naming_series",
@@ -233,6 +243,7 @@
    "fieldtype": "Section Break"
   },
   {
+   "depends_on": "eval:doc.status == \"Rework\"",
    "fieldname": "rework_notes",
    "fieldtype": "Long Text",
    "label": "Rework Notes",
@@ -278,13 +289,39 @@
    "fieldtype": "Link",
    "label": "Purchase UOM",
    "options": "UOM"
+  },
+  {
+   "fieldname": "section_break_qlzs",
+   "fieldtype": "Section Break"
+  },
+  {
+   "depends_on": "eval:doc.reference_type == \"GRN\"",
+   "fieldname": "batch_html",
+   "fieldtype": "HTML",
+   "label": "Batch Details"
+  },
+  {
+   "depends_on": "eval:doc.reference_type == \"GRN\"",
+   "fieldname": "batch_qc_json",
+   "fieldtype": "Long Text",
+   "hidden": 1,
+   "label": "Batch QC JSON",
+   "no_copy": 1
+  },
+  {
+   "fieldname": "column_break_umqp",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "section_break_ipcj",
+   "fieldtype": "Section Break"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-06-08 11:24:01.757886",
+ "modified": "2026-06-19 14:52:48.933918",
  "modified_by": "Administrator",
  "module": "pratap",
  "name": "Pratap Quality Inspection",

@@ -24,15 +24,21 @@ function remove_qc_button(frm) {
         }, 100);
 }
 frappe.ui.form.on("Purchase Receipt", {
-	refresh(frm) {
-		setup_pratap_qc_buttons(frm);
-		if (frm.doc.items) {
-			is_qc_checked = frm?.doc?.items[0].qc_required;
-			if (is_qc_checked && frm.doc.docstatus === 0) {
-				frm.page.clear_primary_action();
-			}
-		}
+	async refresh(frm) {
 		remove_qc_button(frm);
+		await setup_pratap_qc_buttons(frm);
+		await setup_grn_submit_gate(frm);
+
+		if (frm.is_new() && frm.doc.items?.length) {
+			frm.doc.items.forEach((row) => {
+				row.use_serial_batch_fields = 0;
+			});
+			frm.refresh_field("items");
+		}
+	},
+
+	async before_submit(frm) {
+		await validate_grn_qc_before_submit(frm);
 	},
 });
 
@@ -200,9 +206,10 @@ async function open_new_pratap_qc(frm, selected_item) {
 		reference_name: frm.doc.name,
 		work_order: selected_item.work_order || "",
 		company: frm.doc.company,
+		purchase_receipt_item: selected_item.name || "",
 		production_item: selected_item.item_code || "",
 		item_name: selected_item.item_name || "",
-		reference_qty: flt(selected_item.qty),
+		reference_qty: flt(selected_item.received_qty) || flt(selected_item.qty),
 		sales_uom: selected_item.uom || selected_item.stock_uom || "",
 		status: "Pending",
 	};
@@ -236,6 +243,72 @@ function get_inspection_type(doctype) {
 	return "Outgoing";
 }
 
+function grn_item_needs_qc(row) {
+	const received_qty = flt(row.received_qty) || flt(row.qty);
+	return Boolean(row.custom_qc_required) && received_qty > 0 && row.item_code;
+}
+
+async function setup_grn_submit_gate(frm) {
+	frm._grn_qc_submit_blocked = false;
+
+	if (frm.is_new() || frm.doc.docstatus !== 0) {
+		frm.dashboard.clear_headline();
+		return;
+	}
+
+	const needs_qc = (frm.doc.items || []).some(grn_item_needs_qc);
+	if (!needs_qc) {
+		frm.dashboard.clear_headline();
+		return;
+	}
+
+	const { message: status } = await frappe.call({
+		method: "pratap_dev.purchase_receipt.get_grn_qc_submit_status",
+		args: { purchase_receipt: frm.doc.name },
+	});
+
+	if (!status || status.can_submit) {
+		frm.dashboard.clear_headline();
+		return;
+	}
+
+	frm._grn_qc_submit_blocked = true;
+	frm._grn_qc_submit_message = status.message;
+
+	frm.dashboard.set_headline_alert(
+		__(
+			"Complete Pratap Quality Inspection for all items before submitting this GRN."
+		),
+		"orange"
+	);
+
+	frm.page.clear_primary_action();
+	frm.page.set_primary_action(__("Submit"), () => {
+		frappe.throw({
+			title: __("Pratap Quality Inspection Required"),
+			message: frm._grn_qc_submit_message || status.message,
+		});
+	});
+}
+
+async function validate_grn_qc_before_submit(frm) {
+	if (frm.doc.docstatus !== 0) {
+		return;
+	}
+
+	const { message: status } = await frappe.call({
+		method: "pratap_dev.purchase_receipt.get_grn_qc_submit_status",
+		args: { purchase_receipt: frm.doc.name },
+	});
+
+	if (status && !status.can_submit && status.message) {
+		frappe.throw({
+			title: __("Pratap Quality Inspection Required"),
+			message: status.message,
+		});
+	}
+}
+
 function pick_grn_item_for_qc(items) {
 	if (!items.length) {
 		frappe.msgprint(__("No items are pending Pratap Quality Inspection."));
@@ -248,7 +321,8 @@ function pick_grn_item_for_qc(items) {
 
 	const option_map = new Map();
 	const option_labels = items.map((row, index) => {
-		const label = `${index + 1}. ${row.item_code || ""} - ${row.item_name || ""} (${flt(row.qty)} ${row.uom || ""})`;
+		const qty = flt(row.received_qty) || flt(row.qty);
+		const label = `${index + 1}. ${row.item_code || ""} - ${row.item_name || ""} (${qty} ${row.uom || ""})`;
 		option_map.set(label, row);
 		return label;
 	});
