@@ -93,9 +93,8 @@
    "fetch_from": "purchase_order_po_no.total_qty",
    "fieldname": "received_qty",
    "fieldtype": "Data",
-   "hidden": 1,
    "in_list_view": 1,
-   "label": "Received Qty "
+   "label": "PO Qty "
   },
   {
    "fieldname": "actual_received_qty",
@@ -180,7 +179,7 @@
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-06-18 17:22:13.344938",
+ "modified": "2026-06-19 17:03:33.004069",
  "modified_by": "Administrator",
  "module": "pratap",
  "name": "Gate Pass",
