@@ -6,7 +6,7 @@ frappe.ui.form.on("Purchase Order", {
 			frm.add_custom_button(__("Create GRN"), () => show_create_grn_dialog(frm), __("Create"));
 		}
 
-		if (frm.doc.docstatus === 0 && frm.doc.items?.length) {
+		if (should_show_last_buying_rates(frm)) {
 			frm.add_custom_button(
 				__("Last Buying Rate"),
 				() => show_last_buying_rates(frm),
@@ -16,19 +16,35 @@ frappe.ui.form.on("Purchase Order", {
 	},
 
 	async before_save(frm) {
-		if (!frm.doc.items?.length) {
-			return;
-		}
-		if(["Waiting for  Approval", "Draft"].includes(frm.doc.workflow_state)) {
+		if (should_show_last_buying_rates(frm)) {
 			await show_last_buying_rates(frm);
 		}
 	},
+
 	async after_workflow_action(frm) {
-        if (["Draft", "Waiting for  Approval"].includes(frm.doc.workflow_state)) {
-            await show_last_buying_rates(frm);
-        }
-    }
+		if (should_show_last_buying_rates(frm)) {
+			await show_last_buying_rates(frm);
+		}
+	},
 });
+
+function normalize_workflow_state(state) {
+	return (state || "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function should_show_last_buying_rates(frm) {
+	if (!frm.doc.items?.length) {
+		return false;
+	}
+
+	const state = normalize_workflow_state(frm.doc.workflow_state);
+	if (state === "draft" || state === "waiting for approval") {
+		return true;
+	}
+
+	// Plain draft PO when workflow state is not set yet
+	return frm.doc.docstatus === 0 && !state;
+}
 
 function remove_default_purchase_receipt_button(frm) {
 	// ERPNext adds Purchase Receipt under Create; site translation shows it as "GRN".
