@@ -6,7 +6,7 @@ frappe.ui.form.on("Purchase Order", {
 			frm.add_custom_button(__("Create GRN"), () => show_create_grn_dialog(frm), __("Create"));
 		}
 
-		if (should_show_last_buying_rates(frm)) {
+		if (pratap_dev.last_buying_rates.should_show(frm)) {
 			frm.add_custom_button(
 				__("Last Buying Rate"),
 				() => show_last_buying_rates(frm),
@@ -16,34 +16,23 @@ frappe.ui.form.on("Purchase Order", {
 	},
 
 	async before_save(frm) {
-		if (should_show_last_buying_rates(frm)) {
+		if (pratap_dev.last_buying_rates.should_show(frm)) {
 			await show_last_buying_rates(frm);
 		}
 	},
 
 	async after_workflow_action(frm) {
-		if (should_show_last_buying_rates(frm)) {
+		if (pratap_dev.last_buying_rates.should_show(frm)) {
 			await show_last_buying_rates(frm);
 		}
 	},
 });
 
-function normalize_workflow_state(state) {
-	return (state || "").replace(/\s+/g, " ").trim().toLowerCase();
-}
-
-function should_show_last_buying_rates(frm) {
-	if (!frm.doc.items?.length) {
-		return false;
-	}
-
-	const state = normalize_workflow_state(frm.doc.workflow_state);
-	if (state === "draft" || state === "waiting for approval") {
-		return true;
-	}
-
-	// Plain draft PO when workflow state is not set yet
-	return frm.doc.docstatus === 0 && !state;
+function show_last_buying_rates(frm) {
+	return pratap_dev.last_buying_rates.show(frm, {
+		rate_column_label: __("PO Rate"),
+		current_po: frm.doc.name,
+	});
 }
 
 function remove_default_purchase_receipt_button(frm) {
@@ -74,124 +63,6 @@ function remove_default_purchase_receipt_button(frm) {
 			frm._pr_remove_pr_interval = null;
 		}
 	}, 100);
-}
-
-function show_last_buying_rates(frm) {
-	const item_codes = (frm.doc.items || []).map((row) => row.item_code).filter(Boolean);
-	if (!item_codes.length) {
-		return Promise.resolve();
-	}
-
-	return frappe
-		.call({
-			method: "get_last_buying_rate",
-			args: {
-				supplier: frm.doc.supplier,
-				item_codes: JSON.stringify(item_codes),
-				current_po: frm.doc.name,
-				doc: frm.doc,
-			},
-			freeze: true,
-			freeze_message: __("Loading Last Buying Rates..."),
-		})
-		.then((response) => {
-			const rows = enrich_last_buying_rate_rows(response.message || [], frm);
-			if (!rows.length) {
-				return;
-			}
-			return open_last_buying_rates_dialog(rows);
-		});
-}
-
-function enrich_last_buying_rate_rows(rows, frm) {
-	const item_map = {};
-	(frm.doc.items || []).forEach((item) => {
-		if (item.item_code) {
-			item_map[item.item_code] = item;
-		}
-	});
-
-	return rows.map((row) => {
-		const item = item_map[row.item_code] || {};
-		return {
-			...row,
-			supplier_item:
-				row.supplier_item ||
-				item.supplier_part_no ||
-				item.item_name ||
-				item.item_code ||
-				row.item_code,
-			po_rate: row.po_rate ?? item.rate,
-			po_uom: row.po_uom || item.uom,
-		};
-	});
-}
-
-function open_last_buying_rates_dialog(rows) {
-	return new Promise((resolve) => {
-		let settled = false;
-		const finish = () => {
-			if (settled) {
-				return;
-			}
-			settled = true;
-			resolve();
-		};
-
-		const table_rows = rows
-			.map((row) => {
-				return `<tr>
-					<td>${frappe.utils.escape_html(row.item_code || "")}</td>
-					<td>${frappe.utils.escape_html(row.supplier_item || "")}</td>
-					<td class="text-right">${format_rate(row.po_rate)}</td>
-					<td class="text-right">${format_rate(row.last_buying_rate)}</td>
-					<td>${frappe.utils.escape_html(row.last_uom || "")}</td>
-					<td>${frappe.utils.escape_html(row.last_supplier || "")}</td>
-				</tr>`;
-			})
-			.join("");
-
-		const dialog = new frappe.ui.Dialog({
-			title: __("Please check the last buying rates and UOM"),
-			size: "large",
-			fields: [
-				{
-					fieldtype: "HTML",
-					fieldname: "rates_html",
-					options: `<div class="table-responsive">
-							<table class="table table-bordered">
-								<thead>
-									<tr>
-										<th>${__("Item Code")}</th>
-										<th>${__("Supplier Item")}</th>
-										<th class="text-right">${__("PO Rate")}</th>
-										<th class="text-right">${__("Last Buying Rate")}</th>
-										<th>${__("Last UOM")}</th>
-										<th>${__("Last Supplier")}</th>
-									</tr>
-								</thead>
-								<tbody>${table_rows}</tbody>
-							</table>
-						</div>`,
-				},
-			],
-			primary_action_label: __("OK"),
-			primary_action() {
-				dialog.hide();
-				finish();
-			},
-		});
-
-		dialog.show();
-		dialog.$wrapper.on("hidden.bs.modal", finish);
-	});
-}
-
-function format_rate(value) {
-	if (value === null || value === undefined || value === "") {
-		return "";
-	}
-	return frappe.format(value, { fieldtype: "Float" });
 }
 
 function can_create_grn(frm) {
