@@ -27,7 +27,7 @@ app_license = "mit"
 # include js, css files in header of desk.html
 # app_include_css = "/assets/pratap_dev/css/pratap_dev.css"
 
-# app_include_js = ["/assets/pratap_dev/js/global_autosave.js"]
+app_include_js = ["/assets/pratap_dev/js/last_buying_rates.js"]
 
 # include js, css files in header of web template
 # web_include_css = "/assets/pratap_dev/css/pratap_dev.css"
@@ -265,6 +265,7 @@ doctype_js = {
     "Opportunity": "public/js/opportunity_override.js",
     "Work Order": "public/js/work_order_override.js",
     "Purchase Order": "public/js/purchase_order_grn.js",
+    "Supplier Quotation": "public/js/supplier_quotation.js",
     "Purchase Receipt": "public/js/pratap_quality_inspection_reference_override.js",
     "Purchase Invoice": "public/js/pratap_quality_inspection_reference_override.js",
     "Delivery Note": "public/js/pratap_quality_inspection_reference_override.js",
