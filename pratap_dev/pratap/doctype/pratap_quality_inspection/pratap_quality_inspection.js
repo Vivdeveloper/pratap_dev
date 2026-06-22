@@ -18,6 +18,7 @@ frappe.ui.form.on("Pratap Quality Inspection", {
 		} else {
 			render_grn_batch_html(frm);
 		}
+		expand_batch_html_full_width(frm);
 		// on amending removing fields that is not relevent
 		if (frm.doc.amended_from && frm.doc.__islocal){
 			frm.set_value("stock_entry", "");
@@ -415,6 +416,21 @@ function toggle_supplier_coa(frm) {
 	grid.set_column_disp("supplier_coa", show_supplier_coa);
 }
 
+function expand_batch_html_full_width(frm) {
+	const field = frm.fields_dict.batch_html;
+	if (!field?.$wrapper || frm.doc.reference_type !== "GRN") {
+		return;
+	}
+
+	const $section = field.$wrapper.closest(".form-section");
+	if (!$section.length) {
+		return;
+	}
+
+	$section.find("> .section-body > .form-column").addClass("col-sm-12").removeClass("col-sm-6");
+	$section.find(".column-break").hide();
+}
+
 function clear_grn_batch_html(frm) {
 	frm._grn_batch_rows = [];
 	const $wrapper = frm.fields_dict.batch_html?.$wrapper;
@@ -450,16 +466,89 @@ function parse_batch_qc_json_rows(value) {
 function serialize_batch_qc_rows(rows) {
 	return JSON.stringify(
 		(rows || []).map((row) => {
-			const batch_qty = flt(row.batch_qty);
-			const accepted_qty = flt(row.accepted_qty);
+			const normalized = normalize_grn_batch_row(row);
 			return {
-				batch_no: row.batch_no,
-				batch_qty,
-				accepted_qty,
-				rejected_qty: Math.max(batch_qty - accepted_qty, 0),
+				batch_no: normalized.batch_no,
+				batch_qty: normalized.batch_qty,
+				standard_pkg_qty: normalized.standard_pkg_qty,
+				no_of_unit: normalized.no_of_unit,
+				accepted_unit: normalized.accepted_unit,
+				rejected_unit: normalized.rejected_unit,
+				accepted_qty: normalized.accepted_qty,
+				rejected_qty: normalized.rejected_qty,
 			};
 		})
 	);
+}
+
+function get_row_batch_units(row) {
+	const packing = flt(row.standard_pkg_qty) || 1;
+	if (row.no_of_unit !== null && row.no_of_unit !== undefined && row.no_of_unit !== "") {
+		return flt(row.no_of_unit);
+	}
+	return flt(row.batch_qty) / packing;
+}
+
+function normalize_grn_batch_row(row, saved = {}) {
+	const batch_qty = flt(row.batch_qty);
+	const standard_pkg_qty = flt(row.standard_pkg_qty ?? saved.standard_pkg_qty) || 1;
+	const no_of_unit = get_row_batch_units({
+		...row,
+		standard_pkg_qty,
+		no_of_unit: row.no_of_unit ?? saved.no_of_unit,
+	});
+
+	let accepted_unit = 0;
+	if (saved.accepted_unit !== null && saved.accepted_unit !== undefined && saved.accepted_unit !== "") {
+		accepted_unit = flt(saved.accepted_unit);
+	} else if (
+		saved.accepted_qty !== null &&
+		saved.accepted_qty !== undefined &&
+		saved.accepted_qty !== ""
+	) {
+		accepted_unit = standard_pkg_qty ? flt(saved.accepted_qty) / standard_pkg_qty : 0;
+	} else if (
+		row.accepted_unit !== null &&
+		row.accepted_unit !== undefined &&
+		row.accepted_unit !== ""
+	) {
+		accepted_unit = flt(row.accepted_unit);
+	} else if (row.accepted_qty !== null && row.accepted_qty !== undefined && row.accepted_qty !== "") {
+		accepted_unit = standard_pkg_qty ? flt(row.accepted_qty) / standard_pkg_qty : 0;
+	}
+
+	const normalized = {
+		batch_no: row.batch_no,
+		batch_qty,
+		standard_pkg_qty,
+		no_of_unit,
+		accepted_unit,
+	};
+
+	return sync_row_from_accepted_unit(normalized).row;
+}
+
+function sync_row_from_accepted_unit(row) {
+	const standard_pkg_qty = flt(row.standard_pkg_qty) || 1;
+	const batch_units = get_row_batch_units(row);
+	let accepted_unit = Math.max(flt(row.accepted_unit), 0);
+	let capped = false;
+
+	if (accepted_unit > batch_units) {
+		accepted_unit = batch_units;
+		capped = true;
+	}
+
+	const rejected_unit = batch_units - accepted_unit;
+	const accepted_qty = standard_pkg_qty * accepted_unit;
+	const rejected_qty = standard_pkg_qty * rejected_unit;
+
+	row.accepted_unit = accepted_unit;
+	row.rejected_unit = rejected_unit;
+	row.accepted_qty = accepted_qty;
+	row.rejected_qty = rejected_qty;
+
+	return { row, capped };
 }
 
 function load_grn_batch_from_json(frm) {
@@ -468,16 +557,9 @@ function load_grn_batch_from_json(frm) {
 		return;
 	}
 
-	frm._grn_batch_rows = parse_batch_qc_json_rows(frm.doc.batch_qc_json).map((row) => {
-		const batch_qty = flt(row.batch_qty);
-		const accepted_qty = Math.min(Math.max(flt(row.accepted_qty), 0), batch_qty);
-		return {
-			batch_no: row.batch_no,
-			batch_qty,
-			accepted_qty,
-			rejected_qty: Math.max(batch_qty - accepted_qty, 0),
-		};
-	});
+	frm._grn_batch_rows = parse_batch_qc_json_rows(frm.doc.batch_qc_json).map((row) =>
+		normalize_grn_batch_row(row)
+	);
 
 	render_grn_batch_html(frm);
 }
@@ -507,17 +589,7 @@ function load_grn_batch_details(frm) {
 			const saved_rows = parse_batch_qc_json(frm.doc.batch_qc_json);
 			const batches = response.message || [];
 
-			frm._grn_batch_rows = batches.map((row) => {
-				const saved = saved_rows[row.batch_no] || {};
-				const batch_qty = flt(row.batch_qty);
-				const accepted_qty = Math.min(Math.max(flt(saved.accepted_qty), 0), batch_qty);
-				return {
-					batch_no: row.batch_no,
-					batch_qty,
-					accepted_qty,
-					rejected_qty: batch_qty - accepted_qty,
-				};
-			});
+			frm._grn_batch_rows = batches.map((row) => normalize_grn_batch_row(row, saved_rows[row.batch_no] || {}));
 
 			render_grn_batch_html(frm);
 		});
@@ -547,8 +619,12 @@ function render_grn_batch_html(frm) {
 	const is_read_only = frm.doc.docstatus === 1;
 	const table_rows = rows
 		.map((row, index) => {
-			const accepted = format_batch_input(row.accepted_qty);
-			const rejected = format_batch_display(calc_rejected_qty(row));
+			const standard_pkg_qty = format_batch_display(row.standard_pkg_qty);
+			const no_of_unit = format_batch_display(get_row_batch_units(row));
+			const accepted_unit = format_batch_input(row.accepted_unit);
+			const rejected_unit = format_batch_display(row.rejected_unit);
+			const accepted_qty = format_batch_display(row.accepted_qty);
+			const rejected_qty = format_batch_display(calc_rejected_qty(row));
 			const batch_qty = format_batch_display(row.batch_qty);
 
 			if (is_read_only) {
@@ -558,8 +634,12 @@ function render_grn_batch_html(frm) {
 						<span class="grn-batch-badge">${frappe.utils.escape_html(row.batch_no || "")}</span>
 					</td>
 					<td class="grn-batch-col-qty">${batch_qty}</td>
-					<td class="grn-batch-col-qty grn-batch-col-accepted">${format_batch_display(row.accepted_qty)}</td>
-					<td class="grn-batch-col-qty grn-batch-col-rejected">${rejected}</td>
+					<td class="grn-batch-col-qty">${standard_pkg_qty}</td>
+					<td class="grn-batch-col-qty">${no_of_unit}</td>
+					<td class="grn-batch-col-qty grn-batch-col-accepted">${format_batch_display(row.accepted_unit)}</td>
+					<td class="grn-batch-col-qty grn-batch-col-rejected">${rejected_unit}</td>
+					<td class="grn-batch-col-qty grn-batch-col-accepted">${accepted_qty}</td>
+					<td class="grn-batch-col-qty grn-batch-col-rejected">${rejected_qty}</td>
 				</tr>`;
 			}
 
@@ -569,13 +649,21 @@ function render_grn_batch_html(frm) {
 					<span class="grn-batch-badge">${frappe.utils.escape_html(row.batch_no || "")}</span>
 				</td>
 				<td class="grn-batch-col-qty">${batch_qty}</td>
+				<td class="grn-batch-col-qty">${standard_pkg_qty}</td>
+				<td class="grn-batch-col-qty">${no_of_unit}</td>
 				<td class="grn-batch-col-input grn-batch-col-accepted">
-					<input type="number" class="grn-batch-input grn-batch-accepted-qty"
-						data-batch-index="${index}" min="0" max="${flt(row.batch_qty)}"
-						step="any" value="${accepted}" placeholder="0">
+					<input type="number" class="grn-batch-input grn-batch-accepted-unit"
+						data-batch-index="${index}" min="0" max="${flt(get_row_batch_units(row))}"
+						step="any" value="${accepted_unit}" placeholder="0">
 				</td>
 				<td class="grn-batch-col-qty grn-batch-col-rejected">
-					<span class="grn-batch-rejected-display" data-batch-index="${index}">${rejected}</span>
+					<span class="grn-batch-rejected-unit-display" data-batch-index="${index}">${rejected_unit}</span>
+				</td>
+				<td class="grn-batch-col-qty grn-batch-col-accepted">
+					<span class="grn-batch-accepted-qty-display" data-batch-index="${index}">${accepted_qty}</span>
+				</td>
+				<td class="grn-batch-col-qty grn-batch-col-rejected">
+					<span class="grn-batch-rejected-display" data-batch-index="${index}">${rejected_qty}</span>
 				</td>
 			</tr>`;
 		})
@@ -603,6 +691,10 @@ function render_grn_batch_html(frm) {
 							<th class="grn-batch-col-index">#</th>
 							<th class="grn-batch-col-batch">${__("Batch No")}</th>
 							<th class="grn-batch-col-qty">${__("Batch Qty")}</th>
+							<th class="grn-batch-col-qty">${__("Standard Pkg Qty")}</th>
+							<th class="grn-batch-col-qty">${__("No of Unit")}</th>
+							<th class="grn-batch-col-input grn-batch-col-accepted">${__("Accepted Unit")}</th>
+							<th class="grn-batch-col-input grn-batch-col-rejected">${__("Rejected Unit")}</th>
 							<th class="grn-batch-col-input grn-batch-col-accepted">${__("Accepted Qty")}</th>
 							<th class="grn-batch-col-input grn-batch-col-rejected">${__("Rejected Qty")}</th>
 						</tr>
@@ -612,6 +704,10 @@ function render_grn_batch_html(frm) {
 						<tr>
 							<td colspan="2" class="grn-batch-total-label">${__("Total")}</td>
 							<td class="grn-batch-col-qty grn-batch-total-batch-qty">${format_batch_display(totals.batch_qty)}</td>
+							<td class="grn-batch-col-qty"></td>
+							<td class="grn-batch-col-qty grn-batch-total-no-of-unit">${format_batch_display(totals.no_of_unit)}</td>
+							<td class="grn-batch-col-qty grn-batch-col-accepted grn-batch-total-accepted-unit">${format_batch_display(totals.accepted_unit)}</td>
+							<td class="grn-batch-col-qty grn-batch-col-rejected grn-batch-total-rejected-unit">${format_batch_display(totals.rejected_unit)}</td>
 							<td class="grn-batch-col-qty grn-batch-col-accepted grn-batch-total-accepted-qty">${format_batch_display(totals.accepted_qty)}</td>
 							<td class="grn-batch-col-qty grn-batch-col-rejected grn-batch-total-rejected-qty">${format_batch_display(totals.rejected_qty)}</td>
 						</tr>
@@ -625,36 +721,20 @@ function render_grn_batch_html(frm) {
 		bind_grn_batch_html_events(frm, $wrapper);
 	}
 
+	expand_batch_html_full_width(frm);
 	ensure_grn_batch_styles();
 }
 
 function bind_grn_batch_html_events(frm, $wrapper) {
 	$wrapper
-		.off("input blur", ".grn-batch-accepted-qty")
-		.on("input blur", ".grn-batch-accepted-qty", function () {
+		.off("input blur", ".grn-batch-accepted-unit")
+		.on("input blur", ".grn-batch-accepted-unit", function () {
 			sync_grn_batch_row_inputs(frm, $wrapper, $(this));
 		});
 }
 
 function calc_rejected_qty(row) {
-	return Math.max(flt(row.batch_qty) - flt(row.accepted_qty), 0);
-}
-
-function cap_accepted_qty(batch_qty, accepted) {
-	const batch_qty_flt = flt(batch_qty);
-	let accepted_qty = Math.max(flt(accepted), 0);
-	let capped = false;
-
-	if (accepted_qty > batch_qty_flt) {
-		accepted_qty = batch_qty_flt;
-		capped = true;
-	}
-
-	return {
-		accepted_qty,
-		rejected_qty: batch_qty_flt - accepted_qty,
-		capped,
-	};
+	return flt(row.rejected_qty);
 }
 
 function sync_grn_batch_row_inputs(frm, $wrapper, $changed_input) {
@@ -664,26 +744,32 @@ function sync_grn_batch_row_inputs(frm, $wrapper, $changed_input) {
 		return;
 	}
 
-	const $accepted_input = $wrapper.find(`.grn-batch-accepted-qty[data-batch-index="${index}"]`);
-	const capped_values = cap_accepted_qty(row.batch_qty, $accepted_input.val());
+	const $accepted_input = $wrapper.find(`.grn-batch-accepted-unit[data-batch-index="${index}"]`);
+	row.accepted_unit = $accepted_input.val();
+	const { row: synced_row, capped } = sync_row_from_accepted_unit(row);
 
-	const accepted = capped_values.accepted_qty;
-	const rejected = capped_values.rejected_qty;
-
-	$accepted_input.val(format_batch_input(accepted));
+	$accepted_input.val(format_batch_input(synced_row.accepted_unit));
+	$wrapper
+		.find(`.grn-batch-rejected-unit-display[data-batch-index="${index}"]`)
+		.text(format_batch_display(synced_row.rejected_unit));
+	$wrapper
+		.find(`.grn-batch-accepted-qty-display[data-batch-index="${index}"]`)
+		.text(format_batch_display(synced_row.accepted_qty));
 	$wrapper
 		.find(`.grn-batch-rejected-display[data-batch-index="${index}"]`)
-		.text(format_batch_display(rejected));
+		.text(format_batch_display(synced_row.rejected_qty));
 
-	if (capped_values.capped) {
+	if (capped) {
 		$changed_input.addClass("grn-batch-input-capped");
 		setTimeout(() => $changed_input.removeClass("grn-batch-input-capped"), 600);
 	}
 
-	row.accepted_qty = accepted;
-	row.rejected_qty = rejected;
+	frm._grn_batch_rows[index] = synced_row;
 
 	const totals = get_grn_batch_totals(frm._grn_batch_rows);
+	$wrapper.find(".grn-batch-total-no-of-unit").text(format_batch_display(totals.no_of_unit));
+	$wrapper.find(".grn-batch-total-accepted-unit").text(format_batch_display(totals.accepted_unit));
+	$wrapper.find(".grn-batch-total-rejected-unit").text(format_batch_display(totals.rejected_unit));
 	$wrapper.find(".grn-batch-total-accepted-qty").text(format_batch_display(totals.accepted_qty));
 	$wrapper.find(".grn-batch-total-rejected-qty").text(format_batch_display(totals.rejected_qty));
 
@@ -693,13 +779,22 @@ function sync_grn_batch_row_inputs(frm, $wrapper, $changed_input) {
 function get_grn_batch_totals(rows) {
 	return (rows || []).reduce(
 		(totals, row) => {
-			const accepted = flt(row.accepted_qty);
 			totals.batch_qty += flt(row.batch_qty);
-			totals.accepted_qty += accepted;
+			totals.no_of_unit += get_row_batch_units(row);
+			totals.accepted_unit += flt(row.accepted_unit);
+			totals.rejected_unit += flt(row.rejected_unit);
+			totals.accepted_qty += flt(row.accepted_qty);
 			totals.rejected_qty += calc_rejected_qty(row);
 			return totals;
 		},
-		{ batch_qty: 0, accepted_qty: 0, rejected_qty: 0 }
+		{
+			batch_qty: 0,
+			no_of_unit: 0,
+			accepted_unit: 0,
+			rejected_unit: 0,
+			accepted_qty: 0,
+			rejected_qty: 0,
+		}
 	);
 }
 
@@ -759,20 +854,24 @@ function ensure_grn_batch_styles() {
 			margin: 0;
 			border-collapse: collapse;
 			font-size: 13px;
+			table-layout: fixed;
 		}
 		.grn-batch-table thead th {
-			padding: 8px 12px;
+			padding: 8px 6px;
 			background: var(--subtle-fg, #f7fafc);
 			border-bottom: 1px solid var(--border-color, #d1d8dd);
 			font-weight: 600;
 			color: var(--text-muted, #6c7680);
 			text-transform: uppercase;
-			font-size: 11px;
-			letter-spacing: 0.03em;
+			font-size: 10px;
+			letter-spacing: 0.02em;
+			white-space: nowrap;
+			overflow: hidden;
+			text-overflow: ellipsis;
 		}
 		.grn-batch-table tbody td,
 		.grn-batch-table tfoot td {
-			padding: 6px 12px;
+			padding: 6px 6px;
 			border-bottom: 1px solid var(--border-color, #e2e8f0);
 			vertical-align: middle;
 		}
@@ -790,20 +889,23 @@ function ensure_grn_batch_styles() {
 			color: var(--text-color, #1f272e);
 		}
 		.grn-batch-col-index {
-			width: 40px;
+			width: 3%;
 			text-align: center;
 			color: var(--text-muted, #6c7680);
 		}
 		.grn-batch-col-batch {
-			min-width: 140px;
+			width: 14%;
+			white-space: nowrap;
+			overflow: hidden;
+			text-overflow: ellipsis;
 		}
 		.grn-batch-col-qty {
-			width: 110px;
+			width: 10%;
 			text-align: right;
 			font-variant-numeric: tabular-nums;
 		}
 		.grn-batch-col-input {
-			width: 130px;
+			width: 11%;
 		}
 		.grn-batch-col-accepted {
 			background: rgba(34, 197, 94, 0.06);
@@ -833,7 +935,9 @@ function ensure_grn_batch_styles() {
 			color: #b91c1c;
 			font-weight: 600;
 		}
-		.grn-batch-rejected-display {
+		.grn-batch-rejected-display,
+		.grn-batch-rejected-unit-display,
+		.grn-batch-accepted-qty-display {
 			display: block;
 			text-align: right;
 			padding: 4px 8px;
@@ -841,16 +945,21 @@ function ensure_grn_batch_styles() {
 		}
 		.grn-batch-badge {
 			display: inline-block;
+			max-width: 100%;
 			padding: 2px 8px;
 			border-radius: 4px;
 			background: var(--subtle-accent, #edf2ff);
 			color: var(--text-color, #1f272e);
 			font-size: 12px;
 			font-weight: 500;
+			white-space: nowrap;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			vertical-align: middle;
 		}
 		.grn-batch-input {
 			width: 100%;
-			max-width: 120px;
+			max-width: none;
 			margin-left: auto;
 			display: block;
 			height: 28px;
@@ -876,13 +985,13 @@ function ensure_grn_batch_styles() {
 		.grn-batch-input::placeholder {
 			color: var(--text-muted, #b8c2cc);
 		}
-		.grn-batch-accepted-qty {
+		.grn-batch-accepted-unit {
 			border-color: rgba(34, 197, 94, 0.45);
 			background: rgba(34, 197, 94, 0.06);
 			color: #15803d;
 			font-weight: 600;
 		}
-		.grn-batch-accepted-qty:focus {
+		.grn-batch-accepted-unit:focus {
 			border-color: #22c55e;
 			box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.2);
 		}

@@ -495,10 +495,18 @@ class PratapQualityInspection(Document):
 				self.get("purchase_receipt_item"),
 			):
 				batch_qty = frappe.utils.flt(batch.get("batch_qty"))
+				standard_pkg_qty = frappe.utils.flt(batch.get("standard_pkg_qty")) or 1
+				no_of_unit = frappe.utils.flt(batch.get("no_of_unit"))
+				if not no_of_unit and standard_pkg_qty:
+					no_of_unit = batch_qty / standard_pkg_qty
 				rows.append(
 					{
 						"batch_no": batch.get("batch_no"),
 						"batch_qty": batch_qty,
+						"standard_pkg_qty": standard_pkg_qty,
+						"no_of_unit": no_of_unit,
+						"accepted_unit": 0,
+						"rejected_unit": no_of_unit,
 						"accepted_qty": 0,
 						"rejected_qty": batch_qty,
 					}
@@ -681,6 +689,8 @@ def get_grn_batch_list(purchase_receipt, item_code=None, purchase_receipt_item=N
 	if not item_row:
 		return []
 
+	standard_pkg_qty = frappe.utils.flt(item_row.get("custom_packing_qty")) or 1
+
 	batches = []
 	seen_batches = {}
 
@@ -702,13 +712,23 @@ def get_grn_batch_list(purchase_receipt, item_code=None, purchase_receipt_item=N
 				seen_batches[batch_no] = qty
 
 		for batch_no, qty in seen_batches.items():
-			batches.append({"batch_no": batch_no, "batch_qty": qty})
+			batches.append(
+				{
+					"batch_no": batch_no,
+					"batch_qty": qty,
+					"standard_pkg_qty": standard_pkg_qty,
+					"no_of_unit": qty / standard_pkg_qty if standard_pkg_qty else 0,
+				}
+			)
 
 	elif item_row.get("batch_no"):
+		batch_qty = frappe.utils.flt(item_row.qty)
 		batches.append(
 			{
 				"batch_no": item_row.batch_no,
-				"batch_qty": frappe.utils.flt(item_row.qty),
+				"batch_qty": batch_qty,
+				"standard_pkg_qty": standard_pkg_qty,
+				"no_of_unit": batch_qty / standard_pkg_qty if standard_pkg_qty else 0,
 			}
 		)
 

@@ -32,11 +32,27 @@ def parse_batch_qc_json(value):
 		batch_qty = flt(row.get("batch_qty"))
 		accepted_qty = min(max(flt(row.get("accepted_qty")), 0), batch_qty)
 		rejected_qty = batch_qty - accepted_qty
+		standard_pkg_qty = flt(row.get("standard_pkg_qty")) or 1
+		no_of_unit = flt(row.get("no_of_unit"))
+		if not no_of_unit and standard_pkg_qty:
+			no_of_unit = batch_qty / standard_pkg_qty
+
+		accepted_unit = flt(row.get("accepted_unit"))
+		if not accepted_unit and standard_pkg_qty:
+			accepted_unit = accepted_qty / standard_pkg_qty
+
+		rejected_unit = flt(row.get("rejected_unit"))
+		if not rejected_unit and no_of_unit:
+			rejected_unit = no_of_unit - accepted_unit
 
 		rows.append(
 			{
 				"batch_no": row.get("batch_no"),
 				"batch_qty": batch_qty,
+				"standard_pkg_qty": standard_pkg_qty,
+				"no_of_unit": no_of_unit,
+				"accepted_unit": accepted_unit,
+				"rejected_unit": rejected_unit,
 				"accepted_qty": accepted_qty,
 				"rejected_qty": rejected_qty,
 			}
