@@ -266,7 +266,10 @@ doctype_js = {
     "Work Order": "public/js/work_order_override.js",
     "Purchase Order": "public/js/purchase_order_grn.js",
     "Supplier Quotation": "public/js/supplier_quotation.js",
-    "Purchase Receipt": "public/js/pratap_quality_inspection_reference_override.js",
+    "Purchase Receipt": [
+        "public/js/pratap_quality_inspection_reference_override.js",
+        "public/js/purchase_receipt_batch_entry.js",
+    ],
     "Purchase Invoice": "public/js/pratap_quality_inspection_reference_override.js",
     "Delivery Note": "public/js/pratap_quality_inspection_reference_override.js",
     "Sales Invoice": "public/js/pratap_quality_inspection_reference_override.js",
