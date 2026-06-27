@@ -30,6 +30,10 @@ class PratapPurchaseReceipt(PurchaseReceipt):
     def before_submit(self):
         self._validate_pratap_quality_inspection_on_items()
 
+    def on_submit(self):
+        super().on_submit()
+        create_grouped_purchase_invoice_if_ready(self)
+
     def on_update(self):
         if self.items:
             self.items = self._create_uom_in_items(self.items)
@@ -124,6 +128,76 @@ class PratapPurchaseReceipt(PurchaseReceipt):
         })
         batch.insert()
         return batch.name
+
+def create_grouped_purchase_invoice_if_ready(grn):
+    """Create one combined Purchase Invoice once every GRN in the group is submitted.
+
+    GRNs created together from a Purchase Order share `custom_grn_group_id`. When the
+    last GRN of a group is submitted, all items across the group's GRNs are accumulated
+    into a single draft Purchase Invoice (idempotent: only one PI per group).
+    """
+    group_id = grn.get("custom_grn_group_id")
+    if not group_id:
+        return
+
+    if not grn.meta.has_field("custom_grn_group_id"):
+        return
+
+    # Idempotency: a PI for this group must not already exist.
+    if frappe.db.exists(
+        "Purchase Invoice", {"custom_grn_group_id": group_id, "docstatus": ["<", 2]}
+    ):
+        return
+
+    group_grns = frappe.get_all(
+        "Purchase Receipt",
+        filters={"custom_grn_group_id": group_id, "docstatus": ["<", 2]},
+        fields=["name", "docstatus"],
+        order_by="creation asc",
+    )
+
+    grn_names = []
+    for row in group_grns:
+        # `grn` is being submitted in this transaction; treat it as submitted.
+        effective_docstatus = 1 if row.name == grn.name else row.docstatus
+        if effective_docstatus != 1:
+            # At least one GRN in the group is still a draft — wait for it.
+            return
+        grn_names.append(row.name)
+
+    if not grn_names:
+        return
+
+    from erpnext.stock.doctype.purchase_receipt.purchase_receipt import make_purchase_invoice
+
+    target = None
+    for name in grn_names:
+        target = make_purchase_invoice(name, target_doc=target)
+
+    if not target or not target.get("items"):
+        return
+
+    if target.meta.has_field("custom_grn_group_id"):
+        target.custom_grn_group_id = group_id
+
+    bill_no = grn.get("custom_supplier_invoice_no")
+    bill_date = grn.get("custom_supplier_invoice_date")
+    if bill_no and target.meta.has_field("bill_no"):
+        target.bill_no = bill_no
+    if bill_date and target.meta.has_field("bill_date"):
+        target.bill_date = bill_date
+
+    target.flags.ignore_permissions = True
+    target.save()
+
+    frappe.msgprint(
+        _("Purchase Invoice {0} created from {1} grouped GRN(s).").format(
+            frappe.utils.get_link_to_form("Purchase Invoice", target.name), len(grn_names)
+        ),
+        indicator="green",
+        alert=True,
+    )
+
 
 def _get_grn_qc_submit_errors(grn_doc):
     """Collect QC validation messages for every QC-required GRN line."""

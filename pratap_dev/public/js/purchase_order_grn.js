@@ -98,6 +98,22 @@ function open_create_grn_dialog(frm, items) {
 		size: "extra-large",
 		fields: [
 			{
+				fieldname: "sales_invoice_number",
+				fieldtype: "Data",
+				label: __("Sales Invoice Number"),
+				reqd: 1,
+			},
+			{
+				fieldname: "sales_invoice_date",
+				fieldtype: "Date",
+				label: __("Invoice Date"),
+				reqd: 1,
+			},
+			{
+				fieldname: "invoice_section_break",
+				fieldtype: "Section Break",
+			},
+			{
 				fieldname: "items",
 				fieldtype: "Table",
 				label: __("Items"),
@@ -167,6 +183,8 @@ function open_create_grn_dialog(frm, items) {
 				args: {
 					purchase_order: frm.doc.name,
 					items: payload,
+					sales_invoice_number: dialog.get_value("sales_invoice_number"),
+					sales_invoice_date: dialog.get_value("sales_invoice_date"),
 				},
 				freeze: true,
 				freeze_message: __("Creating and saving Purchase Receipts..."),
