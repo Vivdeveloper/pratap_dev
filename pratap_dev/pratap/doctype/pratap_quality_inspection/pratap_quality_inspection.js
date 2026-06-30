@@ -100,6 +100,10 @@ frappe.ui.form.on("Pratap Quality Inspection", {
 		render_batch_readings_matrix(frm);
 	},
 
+	validate(frm) {
+		warn_incomplete_batch_readings(frm);
+	},
+
 	before_submit(frm) {
 		if ((frm.doc.status || "").trim() !== "Accepted") {
 			frappe.throw({
@@ -1081,6 +1085,128 @@ function get_reading_criteria_text(reading) {
 	return value ? `${__("Expected")}: <b>${frappe.utils.escape_html(value)}</b>` : "";
 }
 
+// Numeric pass rule: value within [min, max]. A bound of 0 means "no limit"
+// (e.g. Max 0 => no upper bound), matching how Batch QC criteria are configured.
+function bread_param_status(reading, value) {
+	const v = (value === null || value === undefined ? "" : String(value)).trim();
+
+	if (cint(reading.numeric)) {
+		if (!v) return ""; // not entered yet
+		const parsed = flt(v);
+		const min_value = flt(reading.min_value);
+		const max_value = flt(reading.max_value);
+		const ok_min = min_value === 0 || parsed >= min_value;
+		const ok_max = max_value === 0 || parsed <= max_value;
+		return ok_min && ok_max ? "Accepted" : "Rejected";
+	}
+
+	if (cint(reading.formula_based_criteria)) {
+		// Formula cannot be evaluated client-side; accept once a value is present.
+		return v ? "Accepted" : "";
+	}
+
+	// Text/value based
+	const expected = (reading.value || "").trim();
+	if (!v) return "";
+	if (!expected) return "Accepted";
+	return v.toLowerCase() === expected.toLowerCase() ? "Accepted" : "Rejected";
+}
+
+// Batch status from all its parameter readings:
+// any Rejected -> Rejected, any blank -> Pending, else Accepted.
+function bread_batch_status(frm, col) {
+	const readings = frm.doc.readings || [];
+	const field = `reading_${col + 1}`;
+	let has_blank = false;
+	for (const reading of readings) {
+		const status = bread_param_status(reading, reading[field]);
+		if (status === "Rejected") return "Rejected";
+		if (status === "") has_blank = true;
+	}
+	return has_blank ? "Pending" : "Accepted";
+}
+
+function bread_collect_values(frm, col) {
+	const readings = frm.doc.readings || [];
+	const field = `reading_${col + 1}`;
+	const values = {};
+	readings.forEach((reading) => {
+		values[reading.specification || reading.name] = reading[field] || "";
+	});
+	return values;
+}
+
+function bread_get_rows(frm) {
+	return parse_batch_readings_rows(frm.doc.batch_readings_json);
+}
+
+// Merge a patch for one batch into batch_readings_json, keeping batch order.
+function bread_upsert(frm, batch_no, patch) {
+	const batches = get_batch_readings_columns(frm);
+	const map = parse_batch_readings_map(frm.doc.batch_readings_json);
+	map[batch_no] = Object.assign({ batch_no: batch_no, status: "", added: false, values: {} }, map[batch_no] || {}, patch);
+	const rows = batches.map((b) => map[b] || { batch_no: b, status: "", added: false, values: {} });
+	frm.set_value("batch_readings_json", JSON.stringify(rows));
+}
+
+function bread_added_batches(frm) {
+	const map = parse_batch_readings_map(frm.doc.batch_readings_json);
+	return get_batch_readings_columns(frm).filter((b) => map[b] && map[b].added);
+}
+
+function bread_pending_batches(frm) {
+	const map = parse_batch_readings_map(frm.doc.batch_readings_json);
+	return get_batch_readings_columns(frm).filter(
+		(b) => !(map[b] && map[b].added) || !["Accepted", "Rejected"].includes((map[b].status || "").trim())
+	);
+}
+
+// Roll batch statuses up to the document (top) status automatically.
+function bread_roll_up_parent_status(frm) {
+	if (frm.doc.docstatus >= 1 || (frm.doc.status || "").trim() === "Rework") {
+		return;
+	}
+	const batches = get_batch_readings_columns(frm);
+	if (!batches.length) return;
+
+	const map = parse_batch_readings_map(frm.doc.batch_readings_json);
+	const statuses = batches.map((b) => (map[b] && map[b].added ? (map[b].status || "").trim() : ""));
+
+	let parent_status = "Pending";
+	if (statuses.some((s) => s === "Rejected")) {
+		parent_status = "Rejected";
+	} else if (statuses.length && statuses.every((s) => s === "Accepted")) {
+		parent_status = "Accepted";
+	}
+
+	if ((frm.doc.status || "").trim() !== parent_status) {
+		frm.set_value("status", parent_status);
+	}
+}
+
+// Save-time warning: list batches whose readings have not been added yet.
+function warn_incomplete_batch_readings(frm) {
+	if (frm.doc.reference_type !== "GRN" || frm.doc.docstatus >= 1) {
+		return;
+	}
+	const batches = get_batch_readings_columns(frm);
+	if (!batches.length || !(frm.doc.readings || []).length) {
+		return;
+	}
+	const pending = bread_pending_batches(frm);
+	if (pending.length) {
+		frappe.msgprint({
+			title: __("Incomplete Batch Readings"),
+			indicator: "orange",
+			message: __("Readings not added for {0} of {1} batch(es): {2}. Please add readings for every batch.", [
+				pending.length,
+				batches.length,
+				pending.join(", "),
+			]),
+		});
+	}
+}
+
 function render_batch_readings_matrix(frm) {
 	const field = frm.fields_dict.batch_readings_html;
 	if (!field?.$wrapper) {
@@ -1106,85 +1232,116 @@ function render_batch_readings_matrix(frm) {
 		return;
 	}
 
-	const saved = parse_batch_readings_map(frm.doc.batch_readings_json);
+	const map = parse_batch_readings_map(frm.doc.batch_readings_json);
 	const is_read_only = frm.doc.docstatus === 1;
 
-	const cards = batches
-		.map((batch_no, cIdx) => {
-			const status = (saved[batch_no]?.status || "").trim();
+	// Default selected batch -> first batch that has not been added yet.
+	if (!frm._bread_selected || !batches.includes(frm._bread_selected)) {
+		frm._bread_selected = batches.find((b) => !(map[b] && map[b].added)) || batches[0];
+	}
+	const selected = frm._bread_selected;
+	const col = batches.indexOf(selected);
 
-			const param_blocks = readings
-				.map((reading, rIdx) => {
-					const reading_field = `reading_${cIdx + 1}`;
-					const cell_val = frappe.utils.escape_html(reading[reading_field] || "");
-					const name = frappe.utils.escape_html(reading.specification || __("(unnamed)"));
-					const is_numeric = cint(reading.numeric);
-					const is_manual = cint(reading.manual_inspection);
-
-					const type_label = cint(reading.formula_based_criteria)
-						? __("Formula")
-						: is_numeric
-						? __("Numeric")
-						: __("Text");
-					const type_badge = `<span class="bread-type-badge ${
-						is_numeric ? "bread-type-numeric" : "bread-type-text"
-					}">${type_label}</span>`;
-					const manual_check = `<label class="bread-manual-check" title="${__(
-						"Manual Inspection (applies to all batches)"
-					)}">
-						<input type="checkbox" class="bread-manual-input" data-row="${rIdx}" ${
-						is_manual ? "checked" : ""
-					} ${is_read_only ? "disabled" : ""}>
-						${__("Manual")}
-					</label>`;
-
-					const criteria = get_reading_criteria_text(reading);
-					const criteria_html = criteria
-						? `<span class="bread-param-criteria">${criteria}</span>`
-						: `<span class="bread-param-criteria text-muted">${__("No criteria")}</span>`;
-
-					const input_html = is_read_only
-						? `<span class="bread-readonly-value">${cell_val || "—"}</span>`
-						: `<input type="text" class="bread-input" data-row="${rIdx}" data-col="${cIdx}" value="${cell_val}" placeholder="${__(
-								"Enter value"
-						  )}">`;
-
-					return `<div class="bread-param-block">
-						<div class="bread-param-top">
-							<span class="bread-param-name">${name}</span>
-							${type_badge}${manual_check}
-						</div>
-						<div class="bread-param-bottom">
-							${criteria_html}
-							${input_html}
-						</div>
-					</div>`;
-				})
-				.join("");
-
-			const status_html = is_read_only
-				? batch_status_badge(status)
-				: `<select class="bread-status-select" data-batch="${frappe.utils.escape_html(batch_no)}">
-						<option value=""${status === "" ? " selected" : ""}>${__("Select")}</option>
-						<option value="Accepted"${status === "Accepted" ? " selected" : ""}>${__("Accepted")}</option>
-						<option value="Rejected"${status === "Rejected" ? " selected" : ""}>${__("Rejected")}</option>
-					</select>`;
-
-			const status_class = status ? `bread-card-${status.toLowerCase()}` : "";
-
-			return `<div class="bread-card ${status_class}">
-				<div class="bread-card-head">
-					<span class="bread-card-batch-label">${__("Batch")}</span>
-					<span class="grn-batch-badge">${frappe.utils.escape_html(batch_no)}</span>
-				</div>
-				<div class="bread-card-body">${param_blocks}</div>
-				<div class="bread-card-foot">
-					<span class="bread-card-foot-label">${__("Batch Status")}</span>
-					${status_html}
-				</div>
-			</div>`;
+	// --- Batch selector dropdown ---
+	const options = batches
+		.map((b) => {
+			const entry = map[b];
+			let tag = " •"; // pending
+			if (entry && entry.added) {
+				tag = entry.status === "Rejected" ? "  ✗ Rejected" : entry.status === "Accepted" ? "  ✓ Accepted" : "  • Pending";
+			}
+			return `<option value="${frappe.utils.escape_html(b)}"${b === selected ? " selected" : ""}>${frappe.utils.escape_html(
+				b
+			)}${tag}</option>`;
 		})
 		.join("");
+
+	const dropdown_html = `
+		<div class="bread-picker">
+			<label class="bread-picker-label">${__("Select Batch")}</label>
+			<select class="bread-batch-select" ${is_read_only ? "disabled" : ""}>${options}</select>
+			${is_read_only ? "" : `<button class="btn btn-primary btn-sm bread-add-btn">${__("Add / Update Batch")}</button>`}
+		</div>`;
+
+	// --- Entry table for the selected batch ---
+	const entry_rows = readings
+		.map((reading, rIdx) => {
+			const reading_field = `reading_${col + 1}`;
+			const cell_val = frappe.utils.escape_html(reading[reading_field] || "");
+			const name = frappe.utils.escape_html(reading.specification || __("(unnamed)"));
+			const is_numeric = cint(reading.numeric);
+			const type_label = cint(reading.formula_based_criteria) ? __("Formula") : is_numeric ? __("Numeric") : __("Text");
+			const type_badge = `<span class="bread-type-badge ${is_numeric ? "bread-type-numeric" : "bread-type-text"}">${type_label}</span>`;
+			const criteria = get_reading_criteria_text(reading);
+			const criteria_html = criteria
+				? `<span class="bread-param-criteria">${criteria}</span>`
+				: `<span class="bread-param-criteria text-muted">${__("No criteria")}</span>`;
+			const input_html = is_read_only
+				? `<span class="bread-readonly-value">${cell_val || "—"}</span>`
+				: `<input type="text" class="bread-input bread-entry-input" data-row="${rIdx}" value="${cell_val}" placeholder="${__(
+						"Enter value"
+				  )}">`;
+			return `<tr>
+				<td class="bread-entry-param"><span class="bread-param-name">${name}</span> ${type_badge}</td>
+				<td class="bread-entry-criteria">${criteria_html}</td>
+				<td class="bread-entry-value">${input_html}</td>
+			</tr>`;
+		})
+		.join("");
+
+	const entry_html = `
+		<div class="bread-entry-card">
+			<div class="bread-entry-head">
+				<span class="bread-card-batch-label">${__("Readings for Batch")}</span>
+				<span class="grn-batch-badge">${frappe.utils.escape_html(selected)}</span>
+			</div>
+			<table class="bread-entry-table">
+				<thead><tr>
+					<th>${__("Parameter")}</th>
+					<th>${__("Criteria")}</th>
+					<th>${__("Observed Value")}</th>
+				</tr></thead>
+				<tbody>${entry_rows}</tbody>
+			</table>
+		</div>`;
+
+	// --- Summary ("niche") table of all batches ---
+	const summary_rows = batches
+		.map((b, i) => {
+			const entry = map[b];
+			const added = !!(entry && entry.added);
+			const status = (entry && entry.status) || "";
+			const status_cell = added ? batch_status_badge(status) : `<span class="bread-status-badge bread-badge-pending">${__("Not Added")}</span>`;
+			const actions = is_read_only
+				? ""
+				: `<button class="btn btn-xs btn-default bread-edit-btn" data-batch="${frappe.utils.escape_html(b)}">${__("Edit")}</button>
+				   ${added ? `<button class="btn btn-xs btn-default bread-remove-btn" data-batch="${frappe.utils.escape_html(b)}">${__("Clear")}</button>` : ""}`;
+			return `<tr class="${added ? "" : "bread-row-pending"}">
+				<td class="grn-batch-col-index">${i + 1}</td>
+				<td><span class="grn-batch-badge">${frappe.utils.escape_html(b)}</span></td>
+				<td>${status_cell}</td>
+				<td class="bread-summary-actions">${actions}</td>
+			</tr>`;
+		})
+		.join("");
+
+	const added_count = bread_added_batches(frm).length;
+	const summary_html = `
+		<div class="bread-summary-card">
+			<div class="grn-batch-qc-header">
+				<span class="grn-batch-qc-title">${__("Batch Readings Status")}</span>
+				<span class="grn-batch-qc-subtitle">${added_count} / ${batches.length} ${__("added")}</span>
+			</div>
+			<table class="grn-batch-table bread-summary-table">
+				<thead><tr>
+					<th class="grn-batch-col-index">#</th>
+					<th>${__("Batch No")}</th>
+					<th>${__("Status")}</th>
+					<th>${__("Action")}</th>
+				</tr></thead>
+				<tbody>${summary_rows}</tbody>
+			</table>
+		</div>`;
 
 	const subtitle = `${readings.length} ${__("parameter(s)")} · ${batches.length} ${__("batch(es)")}`;
 
@@ -1194,7 +1351,11 @@ function render_batch_readings_matrix(frm) {
 				<span class="grn-batch-qc-title">${__("Batch-wise Readings")}</span>
 				<span class="grn-batch-qc-subtitle">${subtitle}</span>
 			</div>
-			<div class="bread-cards">${cards}</div>
+			<div class="bread-body">
+				${dropdown_html}
+				${entry_html}
+				${summary_html}
+			</div>
 		</div>
 	`);
 
@@ -1211,78 +1372,101 @@ function batch_status_badge(status) {
 	if (!status) {
 		return `<span class="text-muted">—</span>`;
 	}
-	const cls = status === "Accepted" ? "bread-badge-accepted" : "bread-badge-rejected";
+	let cls = "bread-badge-pending";
+	if (status === "Accepted") cls = "bread-badge-accepted";
+	else if (status === "Rejected") cls = "bread-badge-rejected";
 	return `<span class="bread-status-badge ${cls}">${__(status)}</span>`;
 }
 
 function bind_batch_readings_events(frm, $wrapper) {
+	// Switch selected batch
 	$wrapper
-		.off("change", ".bread-input")
-		.on("change", ".bread-input", function () {
+		.off("change", ".bread-batch-select")
+		.on("change", ".bread-batch-select", function () {
+			frm._bread_selected = $(this).val();
+			render_batch_readings_matrix(frm);
+		});
+
+	// Live-write observed values into the parameter row's reading_<col> field
+	$wrapper
+		.off("change", ".bread-entry-input")
+		.on("change", ".bread-entry-input", function () {
 			const rIdx = parseInt($(this).attr("data-row"), 10);
-			const cIdx = parseInt($(this).attr("data-col"), 10);
-			set_batch_reading_value(frm, rIdx, cIdx, $(this).val());
+			set_batch_reading_value(frm, rIdx, $(this).val());
 		});
 
+	// Add / update the selected batch into the summary table
 	$wrapper
-		.off("change", ".bread-status-select")
-		.on("change", ".bread-status-select", function () {
-			set_batch_status(frm, $(this).attr("data-batch"), $(this).val());
+		.off("click", ".bread-add-btn")
+		.on("click", ".bread-add-btn", function () {
+			add_or_update_batch(frm);
 		});
 
+	// Edit an existing batch -> select it
 	$wrapper
-		.off("change", ".bread-manual-input")
-		.on("change", ".bread-manual-input", function () {
-			const rIdx = parseInt($(this).attr("data-row"), 10);
-			set_batch_reading_manual(frm, rIdx, $(this).is(":checked"));
+		.off("click", ".bread-edit-btn")
+		.on("click", ".bread-edit-btn", function () {
+			frm._bread_selected = $(this).attr("data-batch");
+			render_batch_readings_matrix(frm);
+		});
+
+	// Clear a batch's readings
+	$wrapper
+		.off("click", ".bread-remove-btn")
+		.on("click", ".bread-remove-btn", function () {
+			remove_batch_readings(frm, $(this).attr("data-batch"));
 		});
 }
 
-function set_batch_reading_manual(frm, rIdx, checked) {
-	const reading = (frm.doc.readings || [])[rIdx];
-	if (!reading) {
-		return;
-	}
-	frappe.model.set_value(reading.doctype, reading.name, "manual_inspection", checked ? 1 : 0);
-	// Manual flag is per parameter and shared across batches — re-render all cards.
-	render_batch_readings_matrix(frm);
-}
-
-function set_batch_reading_value(frm, rIdx, cIdx, value) {
-	const reading = (frm.doc.readings || [])[rIdx];
-	if (!reading) {
-		return;
-	}
-	frappe.model.set_value(reading.doctype, reading.name, `reading_${cIdx + 1}`, value);
-	sync_batch_readings_json(frm);
-}
-
-function set_batch_status(frm, batch_no, status) {
-	sync_batch_readings_json(frm, { [batch_no]: status });
-}
-
-function sync_batch_readings_json(frm, status_overrides) {
+function set_batch_reading_value(frm, rIdx, value) {
 	const batches = get_batch_readings_columns(frm);
-	const readings = frm.doc.readings || [];
-	const previous = parse_batch_readings_map(frm.doc.batch_readings_json);
+	const col = batches.indexOf(frm._bread_selected);
+	const reading = (frm.doc.readings || [])[rIdx];
+	if (col < 0 || !reading) {
+		return;
+	}
+	frappe.model.set_value(reading.doctype, reading.name, `reading_${col + 1}`, value);
+}
 
-	const rows = batches.map((batch_no, cIdx) => {
-		const reading_field = `reading_${cIdx + 1}`;
-		const values = {};
-		readings.forEach((reading) => {
-			const key = reading.specification || reading.name;
-			values[key] = reading[reading_field] || "";
-		});
+function add_or_update_batch(frm) {
+	const batches = get_batch_readings_columns(frm);
+	const selected = frm._bread_selected;
+	const col = batches.indexOf(selected);
+	if (col < 0) {
+		return;
+	}
 
-		let status = previous[batch_no]?.status || "";
-		if (status_overrides && batch_no in status_overrides) {
-			status = status_overrides[batch_no];
-		}
-
-		return { batch_no, status, values };
+	const status = bread_batch_status(frm, col);
+	bread_upsert(frm, selected, {
+		status: status,
+		added: true,
+		values: bread_collect_values(frm, col),
 	});
+	bread_roll_up_parent_status(frm);
 
-	frm.set_value("batch_readings_json", JSON.stringify(rows));
+	// Move to the next batch that still needs readings.
+	const next = bread_pending_batches(frm)[0];
+	frm._bread_selected = next || selected;
+
+	render_batch_readings_matrix(frm);
+	frappe.show_alert({
+		message: __("Batch {0} saved ({1})", [selected, status]),
+		indicator: status === "Rejected" ? "red" : status === "Accepted" ? "green" : "orange",
+	});
+}
+
+function remove_batch_readings(frm, batch_no) {
+	const batches = get_batch_readings_columns(frm);
+	const col = batches.indexOf(batch_no);
+	if (col >= 0) {
+		(frm.doc.readings || []).forEach((reading) => {
+			frappe.model.set_value(reading.doctype, reading.name, `reading_${col + 1}`, "");
+		});
+	}
+	bread_upsert(frm, batch_no, { status: "", added: false, values: {} });
+	bread_roll_up_parent_status(frm);
+	frm._bread_selected = batch_no;
+	render_batch_readings_matrix(frm);
 }
 
 function expand_batch_readings_full_width(frm) {
@@ -1480,6 +1664,89 @@ function ensure_batch_readings_styles() {
 		.bread-badge-rejected {
 			background: rgba(239, 68, 68, 0.12);
 			color: #b91c1c;
+		}
+		.bread-badge-pending {
+			background: rgba(245, 158, 11, 0.12);
+			color: #b45309;
+		}
+		.bread-body {
+			padding: 12px;
+			display: flex;
+			flex-direction: column;
+			gap: 14px;
+		}
+		.bread-picker {
+			display: flex;
+			align-items: center;
+			gap: 10px;
+			flex-wrap: wrap;
+		}
+		.bread-picker-label {
+			font-size: 12px;
+			font-weight: 600;
+			text-transform: uppercase;
+			letter-spacing: 0.03em;
+			color: var(--text-muted, #6c7680);
+			margin: 0;
+		}
+		.bread-batch-select {
+			min-width: 220px;
+			height: 32px;
+			padding: 4px 10px;
+			border: 1px solid var(--border-color, #d1d8dd);
+			border-radius: var(--border-radius-sm, 5px);
+			background: var(--control-bg, #fff);
+			color: var(--text-color, #1f272e);
+			font-size: 13px;
+		}
+		.bread-entry-card,
+		.bread-summary-card {
+			border: 1px solid var(--border-color, #d1d8dd);
+			border-radius: var(--border-radius, 8px);
+			background: var(--card-bg, #fff);
+			overflow: hidden;
+		}
+		.bread-entry-head {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			padding: 10px 12px;
+			background: var(--subtle-fg, #f7fafc);
+			border-bottom: 1px solid var(--border-color, #d1d8dd);
+		}
+		.bread-entry-table,
+		.bread-summary-table {
+			width: 100%;
+			border-collapse: collapse;
+			font-size: 13px;
+		}
+		.bread-entry-table th,
+		.bread-entry-table td {
+			padding: 8px 12px;
+			border-bottom: 1px solid var(--border-color, #eef1f4);
+			text-align: left;
+			vertical-align: middle;
+		}
+		.bread-entry-table thead th {
+			background: var(--subtle-fg, #f7fafc);
+			font-size: 10px;
+			text-transform: uppercase;
+			letter-spacing: 0.02em;
+			color: var(--text-muted, #6c7680);
+		}
+		.bread-entry-value {
+			text-align: right;
+			width: 180px;
+		}
+		.bread-entry-value .bread-input {
+			width: 150px;
+		}
+		.bread-row-pending td {
+			background: rgba(245, 158, 11, 0.05);
+		}
+		.bread-summary-actions {
+			display: flex;
+			gap: 6px;
 		}
 	`;
 }

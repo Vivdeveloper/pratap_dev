@@ -16,10 +16,12 @@ def get_forecast_clubs_for_material_request():
     Only non-cancelled Forecast Clubs that actually have material request items are
     returned.
     """
+    # Exclude Forecast Clubs whose Material Request is already created
+    # (status "Material Requested") so they no longer show in the picker.
     clubs = frappe.get_all(
         "Forecast Club",
-        filters={"docstatus": ["<", 2]},
-        fields=["name", "status"],
+        filters={"docstatus": ["<", 2], "status": ["!=", "Material Requested"]},
+        fields=["name", "status", "plant"],
         order_by="modified desc",
     )
     if not clubs:
@@ -42,7 +44,12 @@ def get_forecast_clubs_for_material_request():
             name_map[item.name] = item.item_name
 
     grouped = {
-        club.name: {"forecast_club": club.name, "status": club.status, "items": []}
+        club.name: {
+            "forecast_club": club.name,
+            "status": club.status,
+            "plant": club.plant,
+            "items": [],
+        }
         for club in clubs
     }
 

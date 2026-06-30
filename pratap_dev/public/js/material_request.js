@@ -488,7 +488,8 @@ function show_sales_forecast_dialog(frm, data) {
 .sf-header { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 6px; font-weight: 600; }
 .sf-selected { background: #e6f4ea; border: 1px solid #28a745; }
 .sf-title { font-size: 14px; }
-.sf-status { font-size: 11px; font-weight: 600; color: #6c757d; margin-left: auto; }
+.sf-plant { font-size: 11px; font-weight: 600; color: #1d6fc0; background: #e8f1fc; padding: 3px 10px; border-radius: 10px; margin-left: auto; }
+.sf-status { font-size: 11px; font-weight: 600; color: #6c757d; margin-left: 10px; }
 .sf-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
 .sf-table th { background: #f7f7f7; padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
 .sf-table td { padding: 8px; border-bottom: 1px solid #eee; }
@@ -505,6 +506,7 @@ function show_sales_forecast_dialog(frm, data) {
 					d.forecast_club
 				)}" ${isSelected ? "checked disabled" : ""}>
 				<span class="sf-title">${frappe.utils.escape_html(d.forecast_club)}</span>
+				${d.plant ? `<span class="sf-plant">${frappe.utils.escape_html(d.plant)}</span>` : `<span class="sf-plant" style="background:#f1f3f5;color:#6c757d;">${__("No Plant")}</span>`}
 				${d.status ? `<span class="sf-status">${frappe.utils.escape_html(d.status)}</span>` : ""}
 			</div>
 			<table class="sf-table">

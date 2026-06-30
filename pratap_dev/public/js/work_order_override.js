@@ -6,7 +6,8 @@ frappe.ui.form.on("Work Order", {
         if (frm.doc.custom_rework_qc && frm.doc.docstatus != 1) {
             handle_rework_consumption(frm);
         }
-        if(frm.doc.docstatus != 1) {
+        // Show "Create Pratap QC" for both draft and submitted Work Orders
+        // (no longer hidden once the Work Order is submitted).
         frm.add_custom_button(__("Create Pratap QC"), () => {
             frappe.new_doc("Pratap Quality Inspection", {
                 inspection_type: "In Process",
@@ -19,7 +20,6 @@ frappe.ui.form.on("Work Order", {
                 reference_qty: frm.doc.qty,
             });
         });
-        }
         },
 });
 
