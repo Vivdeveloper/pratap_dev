@@ -32,7 +32,11 @@ class PratapPurchaseReceipt(PurchaseReceipt):
 
     def on_submit(self):
         super().on_submit()
+        if self.is_return:
+            # Return PRs (purchase returns / debit-note source) must not spawn a grouped PI.
+            return
         create_grouped_purchase_invoice_if_ready(self)
+        create_rejection_documents_if_any(self)
 
     def on_update(self):
         if self.items:
@@ -197,6 +201,131 @@ def create_grouped_purchase_invoice_if_ready(grn):
         indicator="green",
         alert=True,
     )
+
+
+def create_rejection_documents_if_any(grn):
+    """On GRN submit, handle rejected quantity.
+
+    For the rejected qty sitting in the rejected warehouse:
+      1. Create a Purchase Return and submit it automatically.
+      2. Create a Debit Note (Purchase Invoice Return) in Draft from that return.
+
+    The GRN's group id (`custom_grn_group_id`) and supplier invoice no/date are copied
+    onto both documents. Idempotent: re-running will not create duplicates.
+    """
+    if grn.get("is_return"):
+        return
+
+    total_rejected = sum(flt(row.get("rejected_qty")) for row in (grn.get("items") or []))
+    if total_rejected <= 0:
+        return
+
+    return_pr = _create_submitted_purchase_return(grn)
+    if not return_pr:
+        return
+
+    _create_draft_debit_note(grn, return_pr)
+
+
+def _create_submitted_purchase_return(grn):
+    """Create and submit a Purchase Return for the GRN's rejected-warehouse qty."""
+    existing = frappe.db.get_value(
+        "Purchase Receipt",
+        {"return_against": grn.name, "is_return": 1, "docstatus": ["<", 2]},
+        "name",
+    )
+    if existing:
+        return frappe.get_doc("Purchase Receipt", existing)
+
+    from erpnext.stock.doctype.purchase_receipt.purchase_receipt import (
+        make_purchase_return_against_rejected_warehouse,
+    )
+
+    return_doc = make_purchase_return_against_rejected_warehouse(grn.name)
+    return_doc.set("items", [row for row in return_doc.items if flt(row.qty) != 0])
+    if not return_doc.items:
+        return None
+
+    _copy_grn_reference_fields(grn, return_doc)
+    return_doc.flags.ignore_permissions = True
+    return_doc.save()
+    return_doc.submit()
+
+    frappe.msgprint(
+        _("Purchase Return {0} created and submitted for rejected quantity.").format(
+            frappe.utils.get_link_to_form("Purchase Receipt", return_doc.name)
+        ),
+        indicator="orange",
+        alert=True,
+    )
+    return return_doc
+
+
+def _create_draft_debit_note(grn, return_pr):
+    """Create a draft Debit Note (Purchase Invoice Return) from the submitted return."""
+    # A debit note made from a return PR links back via its item's `purchase_receipt`
+    # (its header `return_against` stays empty), so detect duplicates through the item.
+    existing = frappe.db.get_value(
+        "Purchase Invoice Item",
+        {"purchase_receipt": return_pr.name, "docstatus": ["<", 2]},
+        "parent",
+    )
+    if existing:
+        return
+
+    from erpnext.stock.doctype.purchase_receipt.purchase_receipt import make_purchase_invoice
+
+    try:
+        debit_note = make_purchase_invoice(return_pr.name)
+        if not debit_note.get("is_return"):
+            debit_note.is_return = 1
+            debit_note.return_against = return_pr.name
+
+        _copy_grn_reference_fields(grn, debit_note)
+        debit_note.flags.ignore_permissions = True
+        debit_note.save()  # leave in Draft
+
+        frappe.msgprint(
+            _("Debit Note {0} created in Draft for rejected quantity.").format(
+                frappe.utils.get_link_to_form("Purchase Invoice", debit_note.name)
+            ),
+            indicator="orange",
+            alert=True,
+        )
+    except Exception:
+        frappe.log_error(
+            title="Pratap: Debit Note creation failed",
+            message=frappe.get_traceback(),
+        )
+        frappe.msgprint(
+            _(
+                "Purchase Return {0} was submitted, but the draft Debit Note could not be "
+                "created automatically. Please create it manually."
+            ).format(frappe.utils.get_link_to_form("Purchase Receipt", return_pr.name)),
+            indicator="red",
+            alert=True,
+        )
+
+
+def _copy_grn_reference_fields(grn, target):
+    """Copy GRN group id and supplier invoice no/date onto a return/debit-note document."""
+    group_id = grn.get("custom_grn_group_id")
+    if group_id and target.meta.has_field("custom_grn_group_id"):
+        target.custom_grn_group_id = group_id
+
+    bill_no = grn.get("custom_supplier_invoice_no")
+    bill_date = grn.get("custom_supplier_invoice_date")
+
+    if bill_no and target.meta.has_field("bill_no"):
+        target.bill_no = bill_no
+    if bill_date and target.meta.has_field("bill_date"):
+        target.bill_date = bill_date
+
+    # Mirror onto the document's own supplier-invoice fields when they exist (e.g. return PR).
+    if bill_no and target.meta.has_field("custom_supplier_invoice_no"):
+        target.custom_supplier_invoice_no = bill_no
+    if bill_date and target.meta.has_field("custom_supplier_invoice_date"):
+        target.custom_supplier_invoice_date = bill_date
 
 
 def _get_grn_qc_submit_errors(grn_doc):

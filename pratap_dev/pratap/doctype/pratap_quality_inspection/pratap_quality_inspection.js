@@ -80,6 +80,7 @@ frappe.ui.form.on("Pratap Quality Inspection", {
 		if (!frm.doc.quality_inspection_template) {
 			frm.call("get_item_specification_details").then(() => {
 				frm.refresh_field("readings");
+				render_batch_readings_matrix(frm);
 			});
 		}
 	},
@@ -87,7 +88,16 @@ frappe.ui.form.on("Pratap Quality Inspection", {
 	quality_inspection_template(frm) {
 		frm.call("get_item_specification_details").then(() => {
 			frm.refresh_field("readings");
+			render_batch_readings_matrix(frm);
 		});
+	},
+
+	readings_add(frm) {
+		render_batch_readings_matrix(frm);
+	},
+
+	readings_remove(frm) {
+		render_batch_readings_matrix(frm);
 	},
 
 	before_submit(frm) {
@@ -603,6 +613,7 @@ function render_grn_batch_html(frm) {
 
 	if (frm.doc.reference_type !== "GRN") {
 		clear_grn_batch_html(frm);
+		render_batch_readings_matrix(frm);
 		return;
 	}
 
@@ -613,6 +624,7 @@ function render_grn_batch_html(frm) {
 			: __("Select a GRN reference to load batch details.");
 		$wrapper.html(`<div class="grn-batch-empty text-muted">${message}</div>`);
 		ensure_grn_batch_styles();
+		render_batch_readings_matrix(frm);
 		return;
 	}
 
@@ -723,6 +735,7 @@ function render_grn_batch_html(frm) {
 
 	expand_batch_html_full_width(frm);
 	ensure_grn_batch_styles();
+	render_batch_readings_matrix(frm);
 }
 
 function bind_grn_batch_html_events(frm, $wrapper) {
@@ -1010,6 +1023,463 @@ function ensure_grn_batch_styles() {
 			border: 1px dashed var(--border-color, #d1d8dd);
 			border-radius: var(--border-radius, 8px);
 			background: var(--subtle-fg, #f7fafc);
+		}
+	`;
+}
+
+// ---------------------------------------------------------------------------
+// Batch-wise Readings matrix
+// Rows = parameters (readings), Columns = batches (from Batch QC Details).
+// Each cell writes the observed value into the parameter row's reading_<col>
+// field AND is mirrored into batch_readings_json. Status is a manual dropdown
+// per batch column. Manual Inspection stays on the parameter row and applies
+// to every batch in that row.
+// ---------------------------------------------------------------------------
+
+const BATCH_READINGS_MAX = 10; // reading_1 .. reading_10
+
+function get_batch_readings_columns(frm) {
+	return (frm._grn_batch_rows || [])
+		.map((row) => row.batch_no)
+		.filter(Boolean)
+		.slice(0, BATCH_READINGS_MAX);
+}
+
+function parse_batch_readings_rows(value) {
+	if (!value) {
+		return [];
+	}
+	try {
+		const parsed = JSON.parse(value);
+		return Array.isArray(parsed) ? parsed : [];
+	} catch {
+		return [];
+	}
+}
+
+function parse_batch_readings_map(value) {
+	return Object.fromEntries(
+		parse_batch_readings_rows(value).map((row) => [row.batch_no, row])
+	);
+}
+
+function get_reading_criteria_text(reading) {
+	if (cint(reading.formula_based_criteria)) {
+		return __("Formula based");
+	}
+	if (cint(reading.numeric)) {
+		const has_min = ![undefined, null, ""].includes(reading.min_value);
+		const has_max = ![undefined, null, ""].includes(reading.max_value);
+		if (!has_min && !has_max) {
+			return "";
+		}
+		return `${__("Min")} <b>${flt(reading.min_value)}</b> · ${__("Max")} <b>${flt(
+			reading.max_value
+		)}</b>`;
+	}
+	const value = (reading.value || "").trim();
+	return value ? `${__("Expected")}: <b>${frappe.utils.escape_html(value)}</b>` : "";
+}
+
+function render_batch_readings_matrix(frm) {
+	const field = frm.fields_dict.batch_readings_html;
+	if (!field?.$wrapper) {
+		return;
+	}
+	const $wrapper = field.$wrapper;
+
+	if (frm.doc.reference_type !== "GRN") {
+		$wrapper.empty();
+		return;
+	}
+
+	const batches = get_batch_readings_columns(frm);
+	const readings = frm.doc.readings || [];
+
+	if (!batches.length || !readings.length) {
+		const message = !batches.length
+			? __("Add batches in Batch QC Details to enter batch-wise readings.")
+			: __("Select a Quality Inspection Template to load parameters.");
+		$wrapper.html(`<div class="grn-batch-empty text-muted">${message}</div>`);
+		ensure_grn_batch_styles();
+		ensure_batch_readings_styles();
+		return;
+	}
+
+	const saved = parse_batch_readings_map(frm.doc.batch_readings_json);
+	const is_read_only = frm.doc.docstatus === 1;
+
+	const cards = batches
+		.map((batch_no, cIdx) => {
+			const status = (saved[batch_no]?.status || "").trim();
+
+			const param_blocks = readings
+				.map((reading, rIdx) => {
+					const reading_field = `reading_${cIdx + 1}`;
+					const cell_val = frappe.utils.escape_html(reading[reading_field] || "");
+					const name = frappe.utils.escape_html(reading.specification || __("(unnamed)"));
+					const is_numeric = cint(reading.numeric);
+					const is_manual = cint(reading.manual_inspection);
+
+					const type_label = cint(reading.formula_based_criteria)
+						? __("Formula")
+						: is_numeric
+						? __("Numeric")
+						: __("Text");
+					const type_badge = `<span class="bread-type-badge ${
+						is_numeric ? "bread-type-numeric" : "bread-type-text"
+					}">${type_label}</span>`;
+					const manual_check = `<label class="bread-manual-check" title="${__(
+						"Manual Inspection (applies to all batches)"
+					)}">
+						<input type="checkbox" class="bread-manual-input" data-row="${rIdx}" ${
+						is_manual ? "checked" : ""
+					} ${is_read_only ? "disabled" : ""}>
+						${__("Manual")}
+					</label>`;
+
+					const criteria = get_reading_criteria_text(reading);
+					const criteria_html = criteria
+						? `<span class="bread-param-criteria">${criteria}</span>`
+						: `<span class="bread-param-criteria text-muted">${__("No criteria")}</span>`;
+
+					const input_html = is_read_only
+						? `<span class="bread-readonly-value">${cell_val || "—"}</span>`
+						: `<input type="text" class="bread-input" data-row="${rIdx}" data-col="${cIdx}" value="${cell_val}" placeholder="${__(
+								"Enter value"
+						  )}">`;
+
+					return `<div class="bread-param-block">
+						<div class="bread-param-top">
+							<span class="bread-param-name">${name}</span>
+							${type_badge}${manual_check}
+						</div>
+						<div class="bread-param-bottom">
+							${criteria_html}
+							${input_html}
+						</div>
+					</div>`;
+				})
+				.join("");
+
+			const status_html = is_read_only
+				? batch_status_badge(status)
+				: `<select class="bread-status-select" data-batch="${frappe.utils.escape_html(batch_no)}">
+						<option value=""${status === "" ? " selected" : ""}>${__("Select")}</option>
+						<option value="Accepted"${status === "Accepted" ? " selected" : ""}>${__("Accepted")}</option>
+						<option value="Rejected"${status === "Rejected" ? " selected" : ""}>${__("Rejected")}</option>
+					</select>`;
+
+			const status_class = status ? `bread-card-${status.toLowerCase()}` : "";
+
+			return `<div class="bread-card ${status_class}">
+				<div class="bread-card-head">
+					<span class="bread-card-batch-label">${__("Batch")}</span>
+					<span class="grn-batch-badge">${frappe.utils.escape_html(batch_no)}</span>
+				</div>
+				<div class="bread-card-body">${param_blocks}</div>
+				<div class="bread-card-foot">
+					<span class="bread-card-foot-label">${__("Batch Status")}</span>
+					${status_html}
+				</div>
+			</div>`;
+		})
+		.join("");
+
+	const subtitle = `${readings.length} ${__("parameter(s)")} · ${batches.length} ${__("batch(es)")}`;
+
+	$wrapper.html(`
+		<div class="grn-batch-qc-wrapper bread-wrapper">
+			<div class="grn-batch-qc-header">
+				<span class="grn-batch-qc-title">${__("Batch-wise Readings")}</span>
+				<span class="grn-batch-qc-subtitle">${subtitle}</span>
+			</div>
+			<div class="bread-cards">${cards}</div>
+		</div>
+	`);
+
+	if (!is_read_only) {
+		bind_batch_readings_events(frm, $wrapper);
+	}
+
+	expand_batch_readings_full_width(frm);
+	ensure_grn_batch_styles();
+	ensure_batch_readings_styles();
+}
+
+function batch_status_badge(status) {
+	if (!status) {
+		return `<span class="text-muted">—</span>`;
+	}
+	const cls = status === "Accepted" ? "bread-badge-accepted" : "bread-badge-rejected";
+	return `<span class="bread-status-badge ${cls}">${__(status)}</span>`;
+}
+
+function bind_batch_readings_events(frm, $wrapper) {
+	$wrapper
+		.off("change", ".bread-input")
+		.on("change", ".bread-input", function () {
+			const rIdx = parseInt($(this).attr("data-row"), 10);
+			const cIdx = parseInt($(this).attr("data-col"), 10);
+			set_batch_reading_value(frm, rIdx, cIdx, $(this).val());
+		});
+
+	$wrapper
+		.off("change", ".bread-status-select")
+		.on("change", ".bread-status-select", function () {
+			set_batch_status(frm, $(this).attr("data-batch"), $(this).val());
+		});
+
+	$wrapper
+		.off("change", ".bread-manual-input")
+		.on("change", ".bread-manual-input", function () {
+			const rIdx = parseInt($(this).attr("data-row"), 10);
+			set_batch_reading_manual(frm, rIdx, $(this).is(":checked"));
+		});
+}
+
+function set_batch_reading_manual(frm, rIdx, checked) {
+	const reading = (frm.doc.readings || [])[rIdx];
+	if (!reading) {
+		return;
+	}
+	frappe.model.set_value(reading.doctype, reading.name, "manual_inspection", checked ? 1 : 0);
+	// Manual flag is per parameter and shared across batches — re-render all cards.
+	render_batch_readings_matrix(frm);
+}
+
+function set_batch_reading_value(frm, rIdx, cIdx, value) {
+	const reading = (frm.doc.readings || [])[rIdx];
+	if (!reading) {
+		return;
+	}
+	frappe.model.set_value(reading.doctype, reading.name, `reading_${cIdx + 1}`, value);
+	sync_batch_readings_json(frm);
+}
+
+function set_batch_status(frm, batch_no, status) {
+	sync_batch_readings_json(frm, { [batch_no]: status });
+}
+
+function sync_batch_readings_json(frm, status_overrides) {
+	const batches = get_batch_readings_columns(frm);
+	const readings = frm.doc.readings || [];
+	const previous = parse_batch_readings_map(frm.doc.batch_readings_json);
+
+	const rows = batches.map((batch_no, cIdx) => {
+		const reading_field = `reading_${cIdx + 1}`;
+		const values = {};
+		readings.forEach((reading) => {
+			const key = reading.specification || reading.name;
+			values[key] = reading[reading_field] || "";
+		});
+
+		let status = previous[batch_no]?.status || "";
+		if (status_overrides && batch_no in status_overrides) {
+			status = status_overrides[batch_no];
+		}
+
+		return { batch_no, status, values };
+	});
+
+	frm.set_value("batch_readings_json", JSON.stringify(rows));
+}
+
+function expand_batch_readings_full_width(frm) {
+	const field = frm.fields_dict.batch_readings_html;
+	if (!field?.$wrapper || frm.doc.reference_type !== "GRN") {
+		return;
+	}
+	const $section = field.$wrapper.closest(".form-section");
+	if (!$section.length) {
+		return;
+	}
+	$section.find("> .section-body > .form-column").addClass("col-sm-12").removeClass("col-sm-6");
+	$section.find(".column-break").hide();
+}
+
+function ensure_batch_readings_styles() {
+	let style = document.getElementById("batch-readings-styles");
+	if (!style) {
+		style = document.createElement("style");
+		style.id = "batch-readings-styles";
+		document.head.appendChild(style);
+	}
+
+	style.textContent = `
+		.bread-cards {
+			display: grid;
+			grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+			gap: 12px;
+			padding: 12px;
+		}
+		.bread-card {
+			border: 1px solid var(--border-color, #d1d8dd);
+			border-radius: var(--border-radius, 8px);
+			background: var(--card-bg, #fff);
+			display: flex;
+			flex-direction: column;
+			overflow: hidden;
+		}
+		.bread-card.bread-card-accepted {
+			border-color: rgba(34, 197, 94, 0.5);
+		}
+		.bread-card.bread-card-rejected {
+			border-color: rgba(239, 68, 68, 0.5);
+		}
+		.bread-card-head {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			padding: 10px 12px;
+			background: var(--subtle-fg, #f7fafc);
+			border-bottom: 1px solid var(--border-color, #d1d8dd);
+		}
+		.bread-card-batch-label {
+			font-size: 11px;
+			font-weight: 600;
+			text-transform: uppercase;
+			letter-spacing: 0.03em;
+			color: var(--text-muted, #6c7680);
+		}
+		.bread-card-body {
+			padding: 4px 12px;
+		}
+		.bread-param-block {
+			padding: 9px 0;
+			border-bottom: 1px solid var(--border-color, #eef1f4);
+		}
+		.bread-param-block:last-child {
+			border-bottom: none;
+		}
+		.bread-param-top {
+			display: flex;
+			align-items: center;
+			flex-wrap: wrap;
+			gap: 6px;
+			margin-bottom: 6px;
+		}
+		.bread-param-name {
+			font-weight: 600;
+			font-size: 13px;
+			color: var(--text-color, #1f272e);
+		}
+		.bread-type-badge {
+			display: inline-block;
+			padding: 1px 7px;
+			border-radius: 4px;
+			font-size: 10px;
+			font-weight: 600;
+			text-transform: uppercase;
+			letter-spacing: 0.02em;
+		}
+		.bread-type-numeric {
+			background: rgba(36, 144, 239, 0.12);
+			color: #1d6fc0;
+		}
+		.bread-type-text {
+			background: rgba(124, 58, 237, 0.12);
+			color: #6d28d9;
+		}
+		.bread-manual-check {
+			display: inline-flex;
+			align-items: center;
+			gap: 4px;
+			margin: 0;
+			padding: 1px 7px;
+			border-radius: 4px;
+			background: rgba(245, 158, 11, 0.12);
+			color: #b45309;
+			font-size: 10px;
+			font-weight: 600;
+			text-transform: uppercase;
+			letter-spacing: 0.02em;
+			cursor: pointer;
+			user-select: none;
+		}
+		.bread-manual-check input {
+			margin: 0;
+			cursor: pointer;
+		}
+		.bread-param-bottom {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 10px;
+		}
+		.bread-param-criteria {
+			font-size: 12px;
+			color: var(--text-muted, #6c7680);
+			white-space: nowrap;
+			font-variant-numeric: tabular-nums;
+		}
+		.bread-param-criteria b {
+			color: var(--text-color, #1f272e);
+		}
+		.bread-input {
+			width: 130px;
+			flex: 0 0 130px;
+			height: 30px;
+			padding: 4px 10px;
+			border: 1px solid var(--border-color, #d1d8dd);
+			border-radius: var(--border-radius-sm, 5px);
+			background: var(--control-bg, #fff);
+			color: var(--text-color, #1f272e);
+			font-size: 13px;
+			text-align: right;
+			transition: border-color 0.15s, box-shadow 0.15s;
+		}
+		.bread-input:focus {
+			outline: none;
+			border-color: var(--primary, #2490ef);
+			box-shadow: 0 0 0 2px rgba(36, 144, 239, 0.15);
+		}
+		.bread-readonly-value {
+			min-width: 130px;
+			text-align: right;
+			font-weight: 600;
+			color: var(--text-color, #1f272e);
+			font-variant-numeric: tabular-nums;
+		}
+		.bread-card-foot {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 10px;
+			padding: 10px 12px;
+			background: var(--subtle-fg, #f7fafc);
+			border-top: 1px solid var(--border-color, #d1d8dd);
+			margin-top: auto;
+		}
+		.bread-card-foot-label {
+			font-size: 12px;
+			font-weight: 600;
+			color: var(--text-color, #1f272e);
+		}
+		.bread-status-select {
+			width: 150px;
+			height: 30px;
+			padding: 3px 8px;
+			border: 1px solid var(--border-color, #d1d8dd);
+			border-radius: var(--border-radius-sm, 5px);
+			background: var(--control-bg, #fff);
+			color: var(--text-color, #1f272e);
+			font-size: 12px;
+		}
+		.bread-status-badge {
+			display: inline-block;
+			padding: 2px 12px;
+			border-radius: 10px;
+			font-size: 12px;
+			font-weight: 600;
+		}
+		.bread-badge-accepted {
+			background: rgba(34, 197, 94, 0.12);
+			color: #15803d;
+		}
+		.bread-badge-rejected {
+			background: rgba(239, 68, 68, 0.12);
+			color: #b91c1c;
 		}
 	`;
 }

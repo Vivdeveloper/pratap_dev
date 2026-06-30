@@ -22,6 +22,13 @@ frappe.ui.form.on("Material Request", {
 				open_supplier_quotation_dialog(frm);
 			});
 		}
+
+		if (frm.doc.docstatus === 0) {
+			const sf_btn = frm.add_custom_button(__("Sales Forecast"), () => {
+				open_sales_forecast_dialog(frm);
+			});
+			$(sf_btn).css({ "background-color": "black", color: "white" });
+		}
 	},
 });
 
@@ -441,5 +448,163 @@ function show_sq_selection_dialog(frm, table_data) {
 		set_dialog_supplier_name(row, grid);
 	});
 
+	dialog.show();
+}
+
+// ---------------------------------------------------------------------------
+// Sales Forecast (Forecast Club) picker — mirrors the Work Order button dialog.
+// Lists Forecast Clubs with their material request items; selected items are
+// inserted into the Material Request (qty set, not added).
+// ---------------------------------------------------------------------------
+
+function open_sales_forecast_dialog(frm) {
+	frappe.call({
+		method: "pratap_dev.material_request_forecast.get_forecast_clubs_for_material_request",
+		freeze: true,
+		freeze_message: __("Loading Sales Forecast..."),
+		callback(r) {
+			const data = r.message || [];
+			if (!data.length) {
+				frappe.msgprint(__("No Sales Forecast items found."));
+				return;
+			}
+			show_sales_forecast_dialog(frm, data);
+		},
+	});
+}
+
+function show_sales_forecast_dialog(frm, data) {
+	const existing_fcs = [];
+	(frm.doc.items || []).forEach((row) => {
+		if (row.custom_forecast_club && !existing_fcs.includes(row.custom_forecast_club)) {
+			existing_fcs.push(row.custom_forecast_club);
+		}
+	});
+
+	let html = `
+<style>
+.sf-card { border: 1px solid #e0e0e0; border-radius: 10px; padding: 12px; margin-bottom: 12px; background: #fff; transition: all 0.2s ease; }
+.sf-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+.sf-header { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 6px; font-weight: 600; }
+.sf-selected { background: #e6f4ea; border: 1px solid #28a745; }
+.sf-title { font-size: 14px; }
+.sf-status { font-size: 11px; font-weight: 600; color: #6c757d; margin-left: auto; }
+.sf-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+.sf-table th { background: #f7f7f7; padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
+.sf-table td { padding: 8px; border-bottom: 1px solid #eee; }
+.sf-qty-badge { background: #f1f3f5; padding: 3px 8px; border-radius: 6px; font-weight: 500; }
+</style>
+`;
+
+	data.forEach((d) => {
+		const isSelected = existing_fcs.includes(d.forecast_club);
+		html += `
+		<div class="sf-card">
+			<div class="sf-header ${isSelected ? "sf-selected" : ""}">
+				<input type="checkbox" class="sf-checkbox" data-fc="${frappe.utils.escape_html(
+					d.forecast_club
+				)}" ${isSelected ? "checked disabled" : ""}>
+				<span class="sf-title">${frappe.utils.escape_html(d.forecast_club)}</span>
+				${d.status ? `<span class="sf-status">${frappe.utils.escape_html(d.status)}</span>` : ""}
+			</div>
+			<table class="sf-table">
+				<thead>
+					<tr>
+						<th style="width:20%">${__("Item Code")}</th>
+						<th style="width:60%">${__("Item Name")}</th>
+						<th style="width:20%">${__("MR Qty")}</th>
+					</tr>
+				</thead>
+				<tbody>`;
+
+		if (d.items && d.items.length) {
+			d.items.forEach((i) => {
+				html += `
+					<tr>
+						<td>${frappe.utils.escape_html(i.item_code)}</td>
+						<td>${frappe.utils.escape_html(i.item_name || "")}</td>
+						<td><span class="sf-qty-badge">${i.qty}</span></td>
+					</tr>`;
+			});
+		} else {
+			html += `<tr><td colspan="3" style="text-align:center; color:#999;">${__(
+				"No Items"
+			)}</td></tr>`;
+		}
+
+		html += `</tbody></table></div>`;
+	});
+
+	const dialog = new frappe.ui.Dialog({
+		title: __("Select Items from Sales Forecast"),
+		size: "large",
+		fields: [{ fieldtype: "HTML", fieldname: "html" }],
+		primary_action_label: __("Insert into MR"),
+		primary_action() {
+			const selected_fcs = [];
+			dialog.$wrapper.find(".sf-checkbox:checked").each(function () {
+				selected_fcs.push($(this).data("fc"));
+			});
+
+			if (!selected_fcs.length) {
+				frappe.msgprint(__("Select at least one Sales Forecast"));
+				return;
+			}
+
+			const item_qty_map = {};
+			const item_fc_map = {};
+
+			data.forEach((d) => {
+				if (!selected_fcs.includes(d.forecast_club)) {
+					return;
+				}
+				(d.items || []).forEach((i) => {
+					item_qty_map[i.item_code] = (item_qty_map[i.item_code] || 0) + (i.qty || 0);
+					if (!item_fc_map[i.item_code]) {
+						item_fc_map[i.item_code] = d.forecast_club;
+					}
+				});
+			});
+
+			Object.keys(item_qty_map).forEach((item_code) => {
+				const total_qty = item_qty_map[item_code];
+				const forecast_club = item_fc_map[item_code];
+				const existing = frm.doc.items.find((row) => row.item_code === item_code);
+
+				if (existing) {
+					frappe.model.set_value(existing.doctype, existing.name, "qty", total_qty);
+					if (!existing.custom_forecast_club) {
+						frappe.model.set_value(
+							existing.doctype,
+							existing.name,
+							"custom_forecast_club",
+							forecast_club
+						);
+					}
+					return;
+				}
+
+				const empty_row = frm.doc.items.find((row) => !row.item_code);
+				const row = empty_row || frm.add_child("items");
+
+				frappe.model.set_value(row.doctype, row.name, "item_code", item_code);
+				frappe.model.set_value(row.doctype, row.name, "qty", total_qty);
+				frappe.model.set_value(row.doctype, row.name, "custom_forecast_club", forecast_club);
+
+				if (frm.doc.set_warehouse) {
+					frappe.model.set_value(row.doctype, row.name, "warehouse", frm.doc.set_warehouse);
+				}
+				if (frm.doc.schedule_date) {
+					frappe.model.set_value(row.doctype, row.name, "schedule_date", frm.doc.schedule_date);
+				}
+			});
+
+			frm.refresh_field("items");
+			frappe.msgprint(__("Items inserted Successfully"));
+			dialog.hide();
+		},
+	});
+
+	dialog.fields_dict.html.$wrapper.html(html);
 	dialog.show();
 }

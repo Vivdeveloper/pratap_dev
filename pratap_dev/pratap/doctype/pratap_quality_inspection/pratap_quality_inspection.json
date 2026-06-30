@@ -44,6 +44,10 @@
   "amended_from",
   "section_break_lbwt",
   "quality_inspection_template",
+  "batch_readings_section",
+  "batch_readings_html",
+  "batch_readings_json",
+  "readings_section",
   "readings",
   "section_break_kcls",
   "raw_materials"
@@ -202,10 +206,34 @@
    "read_only": 1
   },
   {
+   "fieldname": "readings_section",
+   "fieldtype": "Section Break",
+   "label": "Readings"
+  },
+  {
    "fieldname": "readings",
    "fieldtype": "Table",
    "label": "Readings",
    "options": "Pratap Quality Inspection Reading"
+  },
+  {
+   "depends_on": "eval:doc.reference_type == \"GRN\"",
+   "fieldname": "batch_readings_section",
+   "fieldtype": "Section Break",
+   "label": "Batch-wise Readings"
+  },
+  {
+   "depends_on": "eval:doc.reference_type == \"GRN\"",
+   "fieldname": "batch_readings_html",
+   "fieldtype": "HTML",
+   "label": "Batch Readings"
+  },
+  {
+   "fieldname": "batch_readings_json",
+   "fieldtype": "Long Text",
+   "hidden": 1,
+   "label": "Batch Readings JSON",
+   "no_copy": 1
   },
   {
    "fetch_from": "production_item.stock_uom",
