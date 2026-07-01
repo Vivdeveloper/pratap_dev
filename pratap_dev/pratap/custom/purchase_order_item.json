@@ -1,0 +1,17 @@
+{
+ "custom_fields": [
+  {
+   "dt": "Purchase Order Item",
+   "fieldname": "custom_notes",
+   "fieldtype": "Small Text",
+   "insert_after": "schedule_date",
+   "label": "Notes",
+   "translatable": 1
+  }
+ ],
+ "custom_perms": [],
+ "doctype": "Purchase Order Item",
+ "links": [],
+ "property_setters": [],
+ "sync_on_migrate": 1
+}

@@ -46,7 +46,73 @@ frappe.ui.form.on("Material Request Item", {
 	custom_supplier_(frm, cdt, cdn) {
 		set_supplier_name(frm, cdt, cdn);
 	},
+	qty(frm) {
+		split_mr_rows_over_threshold(frm);
+	},
 });
+
+// Any item row with qty above this is auto-split into rows capped at the threshold.
+const MR_ROW_QTY_THRESHOLD = 470000;
+
+function copy_mr_row_fields(src, dest) {
+	const skip = new Set([
+		"name",
+		"idx",
+		"qty",
+		"doctype",
+		"parent",
+		"parentfield",
+		"parenttype",
+		"docstatus",
+		"owner",
+		"creation",
+		"modified",
+		"modified_by",
+		"__islocal",
+		"__unsaved",
+	]);
+	Object.keys(src).forEach((key) => {
+		if (!skip.has(key) && typeof src[key] !== "object") {
+			dest[key] = src[key];
+		}
+	});
+}
+
+// Split every item row whose qty exceeds MR_ROW_QTY_THRESHOLD into multiple
+// rows for the same item (each <= threshold, remainder in new rows).
+function split_mr_rows_over_threshold(frm) {
+	if (frm._mr_splitting || !frm.doc.items || !frm.doc.items.length) {
+		return;
+	}
+	if (MR_ROW_QTY_THRESHOLD <= 0) {
+		return;
+	}
+	if (!frm.doc.items.some((row) => flt(row.qty) > MR_ROW_QTY_THRESHOLD)) {
+		return;
+	}
+
+	frm._mr_splitting = true;
+	try {
+		frm.doc.items.slice().forEach((row) => {
+			const qty = flt(row.qty);
+			if (qty <= MR_ROW_QTY_THRESHOLD) {
+				return;
+			}
+			frappe.model.set_value(row.doctype, row.name, "qty", MR_ROW_QTY_THRESHOLD);
+			let remaining = qty - MR_ROW_QTY_THRESHOLD;
+			while (remaining > 0) {
+				const chunk = Math.min(remaining, MR_ROW_QTY_THRESHOLD);
+				const new_row = frm.add_child("items");
+				copy_mr_row_fields(row, new_row);
+				new_row.qty = chunk;
+				remaining -= chunk;
+			}
+		});
+		frm.refresh_field("items");
+	} finally {
+		frm._mr_splitting = false;
+	}
+}
 
 function calculate_quantity(frm, cdt, cdn) {
 	const row = locals[cdt][cdn];
@@ -601,6 +667,7 @@ function show_sales_forecast_dialog(frm, data) {
 				}
 			});
 
+			split_mr_rows_over_threshold(frm);
 			frm.refresh_field("items");
 			frappe.msgprint(__("Items inserted Successfully"));
 			dialog.hide();
