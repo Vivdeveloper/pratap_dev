@@ -411,17 +411,28 @@ function bind_batch_entry_grid_events(dialog, default_pkg_qty, item_code) {
 	};
 
 	const handler = function () {
-		const row_name = $(this).closest(".grid-row").attr("data-name");
+		const $input = $(this);
+		const row_name = $input.closest(".grid-row").attr("data-name");
 		const grid_row = grid.grid_rows_by_docname[row_name];
-		if (grid_row) {
-			on_qty_field_change(grid_row);
+		if (!grid_row) {
+			return;
 		}
+		// Read the value straight from the input so Total Qty (Standard Pkg Qty x No of Unit)
+		// updates live as the user types, instead of only on save/model-commit.
+		const fieldname = $input.attr("data-fieldname");
+		if (fieldname) {
+			grid_row.doc[fieldname] = flt($input.val());
+		}
+		on_qty_field_change(grid_row);
 	};
 
 	grid.wrapper
-		.off("change blur", 'input[data-fieldname="custom_packing_qty"], input[data-fieldname="custom_total_qty"]')
+		.off(
+			"input change blur keyup",
+			'input[data-fieldname="custom_packing_qty"], input[data-fieldname="custom_total_qty"]'
+		)
 		.on(
-			"change blur",
+			"input change blur keyup",
 			'input[data-fieldname="custom_packing_qty"], input[data-fieldname="custom_total_qty"]',
 			handler
 		);
