@@ -61,7 +61,7 @@ class PratapQualityInspection(Document):
 		if not self.name:
 			return
 
-		if (self.status or "").strip() != "Accepted":
+		if (self.status or "").strip() not in QC_GRN_OK_STATUSES:
 			return
 
 		from pratap_dev.purchase_receipt import link_pratap_qc_to_grn_item
@@ -143,7 +143,7 @@ class PratapQualityInspection(Document):
 		if self.reference_doctype != "Purchase Receipt" or not self.reference_name:
 			return
 
-		if (self.status or "").strip() != "Accepted":
+		if (self.status or "").strip() not in QC_GRN_OK_STATUSES:
 			return
 
 		if not frappe.db.exists("Purchase Receipt", self.reference_name):

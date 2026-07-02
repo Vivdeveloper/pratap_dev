@@ -9,6 +9,9 @@ from erpnext.stock.doctype.purchase_receipt.purchase_receipt import PurchaseRece
 
 from pratap_dev.purchase_receipt_batch import _set_batch_from_insert_batch_number
 
+# GRN QC outcomes that let the GRN proceed (fully accepted, or partial across batches).
+QC_GRN_OK_STATUSES = {"Accepted", "Partially Accepted", "Partially Rejected"}
+
 
 class PratapPurchaseReceipt(PurchaseReceipt):
     def validate(self):
@@ -484,9 +487,10 @@ def _get_pratap_qc_row_error(qc_name, row, grn_name):
             "Row {0} ({1}): Submit Pratap Quality Inspection {2} before submitting GRN."
         ).format(row.idx, row.item_code or row.item_name, qc_name)
 
-    if (qc.status or "").strip() != "Accepted":
+    if (qc.status or "").strip() not in QC_GRN_OK_STATUSES:
         return _(
-            "Row {0} ({1}): Pratap Quality Inspection {2} must have status Accepted."
+            "Row {0} ({1}): Pratap Quality Inspection {2} must have status Accepted "
+            "(or Partially Accepted/Rejected)."
         ).format(row.idx, row.item_code or row.item_name, qc_name)
 
     return None
@@ -503,7 +507,7 @@ def link_pratap_qc_to_grn_item(doc, method=None):
     if not _is_grn_incoming_pratap_qc(doc):
         return
 
-    if (doc.status or "").strip() != "Accepted":
+    if (doc.status or "").strip() not in QC_GRN_OK_STATUSES:
         return
 
     if not doc.name:
@@ -611,7 +615,7 @@ def grn_ready_for_submit_after_qc(purchase_receipt):
             ["docstatus", "status"],
             as_dict=True,
         )
-        if not qc or qc.docstatus != 1 or (qc.status or "").strip() != "Accepted":
+        if not qc or qc.docstatus != 1 or (qc.status or "").strip() not in QC_GRN_OK_STATUSES:
             return False
 
     return needs_qc

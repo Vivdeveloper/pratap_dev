@@ -12,6 +12,7 @@ frappe.ui.form.on("Pratap Quality Inspection", {
 		set_reference_name_query(frm);
 		set_cancel_all_ignore_doctypes(frm);
 		handle_status_values(frm);
+		apply_reading_table_mode(frm);
 		toggle_supplier_coa(frm);
 		if (frm.doc.reference_type === "GRN" && frm.doc.reference_name) {
 			load_grn_batch_details(frm);
@@ -40,6 +41,7 @@ frappe.ui.form.on("Pratap Quality Inspection", {
 			frm.set_value("reference_name", "");
 		}
 		handle_status_values(frm);
+		apply_reading_table_mode(frm);
 		toggle_supplier_coa(frm);
 		if (frm.doc.reference_type !== "GRN") {
 			frm.set_value("batch_qc_json", "");
@@ -80,6 +82,7 @@ frappe.ui.form.on("Pratap Quality Inspection", {
 		if (!frm.doc.quality_inspection_template) {
 			frm.call("get_item_specification_details").then(() => {
 				frm.refresh_field("readings");
+				apply_reading_table_mode(frm);
 				render_batch_readings_matrix(frm);
 			});
 		}
@@ -88,11 +91,13 @@ frappe.ui.form.on("Pratap Quality Inspection", {
 	quality_inspection_template(frm) {
 		frm.call("get_item_specification_details").then(() => {
 			frm.refresh_field("readings");
+			apply_reading_table_mode(frm);
 			render_batch_readings_matrix(frm);
 		});
 	},
 
 	readings_add(frm) {
+		apply_reading_table_mode(frm);
 		render_batch_readings_matrix(frm);
 	},
 
@@ -223,6 +228,10 @@ function update_reading_row_status(frm, cdt, cdn) {
 
 function update_document_status_from_readings(frm) {
 	if (frm.doc.docstatus >= 1 || frm.doc.status === "Rework") {
+		return;
+	}
+	// GRN parent status is driven by the Batch-wise Readings roll-up, not per-parameter readings.
+	if (frm.doc.reference_type === "GRN") {
 		return;
 	}
 
@@ -414,9 +423,34 @@ function fetch_reference_item_details(frm) {
 
 function handle_status_values(frm){
 	if (frm.doc.reference_type == "GRN") {
-		frm.set_df_property("status", "options", ["Pending", "Accepted", "Rejected"]);
-
+		frm.set_df_property("status", "options", [
+			"Pending",
+			"Accepted",
+			"Partially Accepted",
+			"Partially Rejected",
+			"Rejected",
+		]);
 	}
+}
+
+// GRN: hide the raw Readings table and auto-tick Manual Inspection + Status Accepted on
+// each reading row (batch-wise readings drive QC). WO / others: show the Readings table.
+function apply_reading_table_mode(frm) {
+	const is_grn = frm.doc.reference_type === "GRN";
+	frm.toggle_display("readings", !is_grn);
+
+	if (!is_grn || frm.doc.docstatus !== 0) {
+		return;
+	}
+
+	(frm.doc.readings || []).forEach((row) => {
+		if (!cint(row.manual_inspection)) {
+			frappe.model.set_value(row.doctype, row.name, "manual_inspection", 1);
+		}
+		if ((row.status || "").trim() !== "Accepted") {
+			frappe.model.set_value(row.doctype, row.name, "status", "Accepted");
+		}
+	});
 }
 
 function toggle_supplier_coa(frm) {
@@ -1172,11 +1206,20 @@ function bread_roll_up_parent_status(frm) {
 	const map = parse_batch_readings_map(frm.doc.batch_readings_json);
 	const statuses = batches.map((b) => (map[b] && map[b].added ? (map[b].status || "").trim() : ""));
 
+	// Every batch must be added (Accepted/Rejected) before a final status is known.
+	const all_added = statuses.length > 0 && statuses.every((s) => s === "Accepted" || s === "Rejected");
+
 	let parent_status = "Pending";
-	if (statuses.some((s) => s === "Rejected")) {
-		parent_status = "Rejected";
-	} else if (statuses.length && statuses.every((s) => s === "Accepted")) {
-		parent_status = "Accepted";
+	if (all_added) {
+		const has_rejected = statuses.some((s) => s === "Rejected");
+		const has_accepted = statuses.some((s) => s === "Accepted");
+		if (has_rejected && has_accepted) {
+			parent_status = "Partially Rejected"; // mix of accepted + rejected batches
+		} else if (has_rejected) {
+			parent_status = "Rejected";
+		} else {
+			parent_status = "Accepted";
+		}
 	}
 
 	if ((frm.doc.status || "").trim() !== parent_status) {
