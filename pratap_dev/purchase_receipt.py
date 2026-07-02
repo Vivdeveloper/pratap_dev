@@ -147,15 +147,17 @@ def create_grouped_purchase_invoice_if_ready(grn):
     if not grn.meta.has_field("custom_grn_group_id"):
         return
 
-    # Idempotency: a PI for this group must not already exist.
+    # Idempotency: a (non-return) PI for this group must not already exist.
+    # (is_return=0 so the clubbed debit note for rejected qty is not mistaken for it.)
     if frappe.db.exists(
-        "Purchase Invoice", {"custom_grn_group_id": group_id, "docstatus": ["<", 2]}
+        "Purchase Invoice", {"custom_grn_group_id": group_id, "is_return": 0, "docstatus": ["<", 2]}
     ):
         return
 
+    # Only real receiving GRNs (is_return=0); return PRs also carry the group id.
     group_grns = frappe.get_all(
         "Purchase Receipt",
-        filters={"custom_grn_group_id": group_id, "docstatus": ["<", 2]},
+        filters={"custom_grn_group_id": group_id, "is_return": 0, "docstatus": ["<", 2]},
         fields=["name", "docstatus"],
         order_by="creation asc",
     )
@@ -206,16 +208,29 @@ def create_grouped_purchase_invoice_if_ready(grn):
 def create_rejection_documents_if_any(grn):
     """On GRN submit, handle rejected quantity.
 
-    For the rejected qty sitting in the rejected warehouse:
-      1. Create a Purchase Return and submit it automatically.
-      2. Create a Debit Note (Purchase Invoice Return) in Draft from that return.
+    Behaviour depends on whether the GRN belongs to a Purchase Order group
+    (`custom_grn_group_id`, shared by GRNs made together from one PO):
 
-    The GRN's group id (`custom_grn_group_id`) and supplier invoice no/date are copied
-    onto both documents. Idempotent: re-running will not create duplicates.
+    * Grouped: wait until every GRN in the group is submitted, then create the
+      per-GRN Purchase Returns and ONE clubbed draft Debit Note across the whole
+      group (mirrors the accepted-side grouped Purchase Invoice).
+    * Not grouped: create a Purchase Return + its own draft Debit Note for this GRN.
+
+    Idempotent: re-running will not create duplicates.
     """
     if grn.get("is_return"):
         return
 
+    group_id = grn.get("custom_grn_group_id")
+    if group_id and grn.meta.has_field("custom_grn_group_id"):
+        _create_grouped_rejection_documents_if_ready(grn, group_id)
+        return
+
+    _create_rejection_documents_for_grn(grn)
+
+
+def _create_rejection_documents_for_grn(grn):
+    """Single-GRN rejection flow: submitted Purchase Return + its own draft Debit Note."""
     total_rejected = sum(flt(row.get("rejected_qty")) for row in (grn.get("items") or []))
     if total_rejected <= 0:
         return
@@ -225,6 +240,93 @@ def create_rejection_documents_if_any(grn):
         return
 
     _create_draft_debit_note(grn, return_pr)
+
+
+def _create_grouped_rejection_documents_if_ready(grn, group_id):
+    """When every GRN of a PO group is submitted, create the per-GRN Purchase Returns
+    and ONE clubbed draft Debit Note (Purchase Invoice return) across the group.
+    """
+    # Only real receiving GRNs (is_return=0); return PRs also carry the group id.
+    group_grns = frappe.get_all(
+        "Purchase Receipt",
+        filters={"custom_grn_group_id": group_id, "is_return": 0, "docstatus": ["<", 2]},
+        fields=["name", "docstatus"],
+        order_by="creation asc",
+    )
+
+    for row in group_grns:
+        # `grn` is being submitted in this transaction; treat it as submitted.
+        effective_docstatus = 1 if row.name == grn.name else row.docstatus
+        if effective_docstatus != 1:
+            # A GRN in the group is still a draft — wait for the whole group.
+            return
+
+    # Ensure a submitted Purchase Return exists for every rejected GRN in the group.
+    return_prs = []
+    for row in group_grns:
+        grn_doc = grn if row.name == grn.name else frappe.get_doc("Purchase Receipt", row.name)
+        total_rejected = sum(flt(i.get("rejected_qty")) for i in (grn_doc.get("items") or []))
+        if total_rejected <= 0:
+            continue
+        return_pr = _create_submitted_purchase_return(grn_doc)
+        if return_pr:
+            return_prs.append(return_pr)
+
+    if not return_prs:
+        return
+
+    # Idempotency: only one clubbed debit note (is_return PI) per group.
+    if frappe.db.exists(
+        "Purchase Invoice",
+        {"custom_grn_group_id": group_id, "is_return": 1, "docstatus": ["<", 2]},
+    ):
+        return
+
+    _create_grouped_draft_debit_note(grn, group_id, return_prs)
+
+
+def _create_grouped_draft_debit_note(grn, group_id, return_prs):
+    """Create ONE draft Debit Note accumulating items from all the group's Purchase Returns."""
+    from erpnext.stock.doctype.purchase_receipt.purchase_receipt import make_purchase_invoice
+
+    try:
+        target = None
+        for return_pr in return_prs:
+            target = make_purchase_invoice(return_pr.name, target_doc=target)
+
+        if not target or not target.get("items"):
+            return
+
+        # Debit note spans multiple return PRs; header return_against stays empty
+        # (each item links back via its own purchase_receipt).
+        target.is_return = 1
+        if target.meta.has_field("custom_grn_group_id"):
+            target.custom_grn_group_id = group_id
+
+        _copy_grn_reference_fields(grn, target)
+        target.flags.ignore_permissions = True
+        target.save()  # leave in Draft
+
+        frappe.msgprint(
+            _("Debit Note {0} created in Draft (clubbed from {1} rejected GRN(s)).").format(
+                frappe.utils.get_link_to_form("Purchase Invoice", target.name), len(return_prs)
+            ),
+            indicator="orange",
+            alert=True,
+        )
+    except Exception:
+        frappe.log_error(
+            title="Pratap: Clubbed Debit Note creation failed",
+            message=frappe.get_traceback(),
+        )
+        frappe.msgprint(
+            _(
+                "Purchase Returns were submitted, but the clubbed draft Debit Note could not be "
+                "created automatically. Please create it manually."
+            ),
+            indicator="red",
+            alert=True,
+        )
 
 
 def _create_submitted_purchase_return(grn):

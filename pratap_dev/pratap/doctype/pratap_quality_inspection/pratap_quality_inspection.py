@@ -10,6 +10,10 @@ from erpnext.stock.doctype.quality_inspection_template.quality_inspection_templa
 	get_template_details
 )
 
+# GRN QC outcomes that still count as "passed enough" to flow to the GRN
+# (fully accepted, or partially accepted/rejected across batches).
+QC_GRN_OK_STATUSES = {"Accepted", "Partially Accepted", "Partially Rejected"}
+
 
 class PratapQualityInspection(Document):
 	def before_submit(self):
@@ -352,6 +356,15 @@ class PratapQualityInspection(Document):
 		if not self.readings:
 			return
 
+		if (self.reference_type or "").strip() == "GRN":
+			# GRN QC: per-parameter readings are auto-accepted & manual-inspected; the real
+			# accept/reject is driven by the Batch-wise Readings (per-batch status), so the
+			# parent status is left untouched here (client rolls it up, incl. partial).
+			for reading in self.readings:
+				reading.manual_inspection = 1
+				reading.status = "Accepted"
+			return
+
 		if self.status == "Rework":
 			# Keep explicit Rework status set by user.
 			return
@@ -468,7 +481,8 @@ class PratapQualityInspection(Document):
 
 	def _validate_status_for_submit(self):
 		status = (self.status or "").strip()
-		if status == "Accepted":
+		# Accepted and partial outcomes (some accepted, some rejected batches) are submittable.
+		if status in ("Accepted", "Partially Accepted", "Partially Rejected"):
 			return
 
 		if status == "Rejected":
@@ -476,7 +490,8 @@ class PratapQualityInspection(Document):
 
 		frappe.throw(
 			_(
-				"Status must be Accepted before submit. For GRN QC, set all readings to Accepted or update Status to Accepted."
+				"Status must be Accepted (or Partially Accepted/Rejected) before submit. "
+				"For GRN QC, add readings for every batch."
 			)
 		)
 
