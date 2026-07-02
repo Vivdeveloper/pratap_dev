@@ -1278,6 +1278,12 @@ function render_batch_readings_matrix(frm) {
 	const map = parse_batch_readings_map(frm.doc.batch_readings_json);
 	const is_read_only = frm.doc.docstatus === 1;
 
+	// Batch quantity from Batch QC Details rows (batch_no -> batch_qty).
+	const batch_qty_map = {};
+	(frm._grn_batch_rows || []).forEach((r) => {
+		batch_qty_map[r.batch_no] = flt(r.batch_qty);
+	});
+
 	// Default selected batch -> first batch that has not been added yet.
 	if (!frm._bread_selected || !batches.includes(frm._bread_selected)) {
 		frm._bread_selected = batches.find((b) => !(map[b] && map[b].added)) || batches[0];
@@ -1295,7 +1301,7 @@ function render_batch_readings_matrix(frm) {
 			}
 			return `<option value="${frappe.utils.escape_html(b)}"${b === selected ? " selected" : ""}>${frappe.utils.escape_html(
 				b
-			)}${tag}</option>`;
+			)} (${format_batch_display(batch_qty_map[b])})${tag}</option>`;
 		})
 		.join("");
 
@@ -1362,6 +1368,7 @@ function render_batch_readings_matrix(frm) {
 			return `<tr class="${added ? "" : "bread-row-pending"}">
 				<td class="grn-batch-col-index">${i + 1}</td>
 				<td><span class="grn-batch-badge">${frappe.utils.escape_html(b)}</span></td>
+				<td class="grn-batch-col-qty">${format_batch_display(batch_qty_map[b])}</td>
 				<td>${status_cell}</td>
 				<td class="bread-summary-actions">${actions}</td>
 			</tr>`;
@@ -1379,6 +1386,7 @@ function render_batch_readings_matrix(frm) {
 				<thead><tr>
 					<th class="grn-batch-col-index">#</th>
 					<th>${__("Batch No")}</th>
+					<th class="grn-batch-col-qty">${__("Batch Qty")}</th>
 					<th>${__("Status")}</th>
 					<th>${__("Action")}</th>
 				</tr></thead>

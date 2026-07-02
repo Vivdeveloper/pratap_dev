@@ -183,6 +183,23 @@ def get_grn_batch_entry_context(purchase_receipt, purchase_receipt_item=None):
 	}
 
 
+def _update_batch_packaging_fields(batch_no, standard_pkg_qty, batch_qty):
+	"""Write Standard Pkg Qty and No of Unit (= batch qty / standard pkg qty) onto the Batch."""
+	if not batch_no or not frappe.db.exists("Batch", batch_no):
+		return
+
+	meta = frappe.get_meta("Batch")
+	values = {}
+	pkg = flt(standard_pkg_qty)
+	if meta.has_field("custom_standard_pkg_qty"):
+		values["custom_standard_pkg_qty"] = pkg
+	if meta.has_field("custom_no_of_unit"):
+		values["custom_no_of_unit"] = (flt(batch_qty) / pkg) if pkg else 0
+
+	if values:
+		frappe.db.set_value("Batch", batch_no, values, update_modified=False)
+
+
 @frappe.whitelist()
 def add_batches_to_grn_item(purchase_receipt, purchase_receipt_item, batches):
 	"""Create batches and Serial and Batch Bundle from custom batch entry rows."""
@@ -216,6 +233,7 @@ def add_batches_to_grn_item(purchase_receipt, purchase_receipt_item, batches):
 		frappe.throw(_("Row {0}: Set No of Unit on the item row before adding batches.").format(item_row.idx))
 
 	batch_map = {}
+	batch_pkg_map = {}
 	total_no_of_unit = 0
 	standard_pkg_qty = default_pkg_qty
 
@@ -232,6 +250,7 @@ def add_batches_to_grn_item(purchase_receipt, purchase_receipt_item, batches):
 
 		batch_no = _get_or_create_grn_batch(row["batch_no"], item_row.item_code, grn)
 		batch_map[batch_no] = batch_map.get(batch_no, 0) + row["total_qty"]
+		batch_pkg_map[batch_no] = row["standard_pkg_qty"]
 		total_no_of_unit += row["no_of_unit"]
 		standard_pkg_qty = row["standard_pkg_qty"]
 
@@ -245,6 +264,12 @@ def add_batches_to_grn_item(purchase_receipt, purchase_receipt_item, batches):
 
 	total_qty = sum(batch_map.values())
 	_update_item_bundle(grn, item_row, batch_map, total_qty, is_rejected=False)
+
+	# Save Standard Pkg Qty and No of Unit (= batch qty / standard pkg qty) on each Batch.
+	for batch_no, batch_qty in batch_map.items():
+		_update_batch_packaging_fields(
+			batch_no, batch_pkg_map.get(batch_no) or standard_pkg_qty, batch_qty
+		)
 
 	item_row.qty = total_qty
 	item_row.received_qty = total_qty
