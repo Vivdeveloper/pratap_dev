@@ -311,9 +311,6 @@ doc_events = {
     "Stock Entry": {
         "before_submit": "pratap_dev.stock_entry_validation.validate_manufacture_batch_with_work_order"
     },
-    "Material Request": {
-        "validate": "pratap_dev.material_request_split.split_rows_over_threshold",
-    },
     "Pratap Quality Inspection": {
         "on_update": "pratap_dev.purchase_receipt.link_pratap_qc_to_grn_item",
     },

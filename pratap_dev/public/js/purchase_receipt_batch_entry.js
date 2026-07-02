@@ -408,10 +408,31 @@ function bind_batch_entry_grid_events(dialog, default_pkg_qty, item_code) {
 	const on_qty_field_change = (grid_row) => {
 		recalculate_batch_entry_row(grid_row.doc, default_pkg_qty);
 		refresh_row_fields(grid_row);
+		// Fallback: write the computed Total Qty straight into its (read-only) cell,
+		// in case refresh_field does not re-render the static cell live.
+		const $cell = grid.wrapper
+			.find(`.grid-row[data-name="${grid_row.doc.name}"]`)
+			.find('.grid-static-col[data-fieldname="qty"] .static-area, [data-fieldname="qty"] .static-area');
+		if ($cell.length) {
+			$cell.text(format_number(flt(grid_row.doc.qty)));
+		}
 	};
+
+	const EDIT_FIELDS = ["custom_packing_qty", "custom_total_qty"];
+	// In a Frappe grid the <input> itself usually has no data-fieldname — the
+	// enclosing cell div does. Match both so the handler reliably fires.
+	const selector = EDIT_FIELDS.map(
+		(f) => `input[data-fieldname="${f}"], [data-fieldname="${f}"] input`
+	).join(", ");
 
 	const handler = function () {
 		const $input = $(this);
+		const fieldname =
+			$input.attr("data-fieldname") ||
+			$input.closest("[data-fieldname]").attr("data-fieldname");
+		if (!EDIT_FIELDS.includes(fieldname)) {
+			return;
+		}
 		const row_name = $input.closest(".grid-row").attr("data-name");
 		const grid_row = grid.grid_rows_by_docname[row_name];
 		if (!grid_row) {
@@ -419,23 +440,11 @@ function bind_batch_entry_grid_events(dialog, default_pkg_qty, item_code) {
 		}
 		// Read the value straight from the input so Total Qty (Standard Pkg Qty x No of Unit)
 		// updates live as the user types, instead of only on save/model-commit.
-		const fieldname = $input.attr("data-fieldname");
-		if (fieldname) {
-			grid_row.doc[fieldname] = flt($input.val());
-		}
+		grid_row.doc[fieldname] = flt($input.val());
 		on_qty_field_change(grid_row);
 	};
 
-	grid.wrapper
-		.off(
-			"input change blur keyup",
-			'input[data-fieldname="custom_packing_qty"], input[data-fieldname="custom_total_qty"]'
-		)
-		.on(
-			"input change blur keyup",
-			'input[data-fieldname="custom_packing_qty"], input[data-fieldname="custom_total_qty"]',
-			handler
-		);
+	grid.wrapper.off("input change blur keyup", selector).on("input change blur keyup", selector, handler);
 }
 
 function validate_batch_entry_rows(rows, required_no_of_unit) {

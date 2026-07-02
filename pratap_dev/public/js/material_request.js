@@ -46,78 +46,112 @@ frappe.ui.form.on("Material Request Item", {
 	custom_supplier_(frm, cdt, cdn) {
 		set_supplier_name(frm, cdt, cdn);
 	},
-	qty(frm) {
-		split_mr_rows_over_threshold(frm);
-	},
 });
 
-// Any item row with qty above this is auto-split into rows capped at the threshold.
-const MR_ROW_QTY_THRESHOLD = 470000;
+function calculate_quantity(frm, cdt, cdn) {
+	const row = locals[cdt][cdn];
+	if (!row) {
+		return;
+	}
 
-function copy_mr_row_fields(src, dest) {
-	const skip = new Set([
-		"name",
-		"idx",
-		"qty",
-		"doctype",
-		"parent",
-		"parentfield",
-		"parenttype",
-		"docstatus",
-		"owner",
-		"creation",
-		"modified",
-		"modified_by",
-		"__islocal",
-		"__unsaved",
-	]);
-	Object.keys(src).forEach((key) => {
-		if (!skip.has(key) && typeof src[key] !== "object") {
-			dest[key] = src[key];
+	// Quantity = Standard Pkg Qty x No of Unit
+	const quantity = flt(row.custom_packing_qty) * flt(row.custom_total_qty);
+	frappe.model.set_value(cdt, cdn, "qty", quantity);
+
+	// Nothing to split until a real quantity is entered (both pkg qty & no of unit).
+	if (quantity <= 0) {
+		return;
+	}
+
+	// Split against the Expected Quantity (from the Sales Forecast dialog).
+	const expected = flt(row.custom_expected_qty);
+	if (expected <= 0) {
+		return;
+	}
+
+	if (quantity > expected) {
+		// Over-filled: warn, but don't touch any remainder rows the user may be editing.
+		frappe.show_alert(
+			{
+				message: __("Row {0} ({1}): Quantity {2} is more than Expected Quantity {3}.", [
+					row.idx,
+					row.item_code || "",
+					format_number(quantity),
+					format_number(expected),
+				]),
+				indicator: "orange",
+			},
+			7
+		);
+		return;
+	}
+
+	if (quantity < expected) {
+		// Push the remaining quantity into a linked next row for the same item.
+		ensure_expected_remainder_row(frm, row, expected - quantity);
+	} else {
+		// Exactly filled — no remainder row needed.
+		remove_expected_child_chain(frm, row.name);
+	}
+}
+
+// Copy the item-identifying fields to a freshly created remainder row (not the
+// pkg/unit/qty fields — those are entered fresh on the new row).
+function copy_mr_item_fields(src, dest) {
+	[
+		"item_code",
+		"item_name",
+		"uom",
+		"stock_uom",
+		"conversion_factor",
+		"warehouse",
+		"from_warehouse",
+		"schedule_date",
+		"custom_forecast_club",
+		"description",
+		"item_group",
+		"brand",
+	].forEach((f) => {
+		if (src[f] !== undefined && src[f] !== null && src[f] !== "") {
+			dest[f] = src[f];
 		}
 	});
 }
 
-// Split every item row whose qty exceeds MR_ROW_QTY_THRESHOLD into multiple
-// rows for the same item (each <= threshold, remainder in new rows).
-function split_mr_rows_over_threshold(frm) {
-	if (frm._mr_splitting || !frm.doc.items || !frm.doc.items.length) {
-		return;
-	}
-	if (MR_ROW_QTY_THRESHOLD <= 0) {
-		return;
-	}
-	if (!frm.doc.items.some((row) => flt(row.qty) > MR_ROW_QTY_THRESHOLD)) {
-		return;
+// Create or update the single "remainder" row linked to a parent row.
+function ensure_expected_remainder_row(frm, parentRow, remaining) {
+	frm._mr_expected_child = frm._mr_expected_child || {};
+	const childName = frm._mr_expected_child[parentRow.name];
+	let child = childName ? (frm.doc.items || []).find((r) => r.name === childName) : null;
+
+	if (!child) {
+		child = frm.add_child("items");
+		copy_mr_item_fields(parentRow, child);
+		frm._mr_expected_child[parentRow.name] = child.name;
 	}
 
-	frm._mr_splitting = true;
-	try {
-		frm.doc.items.slice().forEach((row) => {
-			const qty = flt(row.qty);
-			if (qty <= MR_ROW_QTY_THRESHOLD) {
-				return;
-			}
-			frappe.model.set_value(row.doctype, row.name, "qty", MR_ROW_QTY_THRESHOLD);
-			let remaining = qty - MR_ROW_QTY_THRESHOLD;
-			while (remaining > 0) {
-				const chunk = Math.min(remaining, MR_ROW_QTY_THRESHOLD);
-				const new_row = frm.add_child("items");
-				copy_mr_row_fields(row, new_row);
-				new_row.qty = chunk;
-				remaining -= chunk;
-			}
-		});
-		frm.refresh_field("items");
-	} finally {
-		frm._mr_splitting = false;
-	}
+	// The remainder becomes the new row's Expected Quantity (and its default qty);
+	// the user can split it further via Standard Pkg Qty / No of Unit.
+	frappe.model.set_value(child.doctype, child.name, "custom_expected_qty", remaining);
+	frappe.model.set_value(child.doctype, child.name, "qty", remaining);
+	frm.refresh_field("items");
 }
 
-function calculate_quantity(frm, cdt, cdn) {
-	const row = locals[cdt][cdn];
-	const quantity = (row.custom_packing_qty || 0) * (row.custom_total_qty || 0);
-	frappe.model.set_value(cdt, cdn, "qty", quantity);
+// Remove a parent's remainder row (and its own remainder chain).
+function remove_expected_child_chain(frm, parentName) {
+	frm._mr_expected_child = frm._mr_expected_child || {};
+	const childName = frm._mr_expected_child[parentName];
+	if (!childName) {
+		return;
+	}
+	remove_expected_child_chain(frm, childName);
+
+	if ((frm.doc.items || []).some((r) => r.name === childName)) {
+		frm.doc.items = frm.doc.items.filter((r) => r.name !== childName);
+		frm.doc.items.forEach((r, i) => (r.idx = i + 1));
+		frm.refresh_field("items");
+	}
+	delete frm._mr_expected_child[parentName];
 }
 
 function set_supplier_if_single_vendor(frm, cdt, cdn) {
@@ -641,6 +675,8 @@ function show_sales_forecast_dialog(frm, data) {
 
 				if (existing) {
 					frappe.model.set_value(existing.doctype, existing.name, "qty", total_qty);
+					// Expected Quantity = what came from the Sales Forecast dialog.
+					frappe.model.set_value(existing.doctype, existing.name, "custom_expected_qty", total_qty);
 					if (!existing.custom_forecast_club) {
 						frappe.model.set_value(
 							existing.doctype,
@@ -657,6 +693,7 @@ function show_sales_forecast_dialog(frm, data) {
 
 				frappe.model.set_value(row.doctype, row.name, "item_code", item_code);
 				frappe.model.set_value(row.doctype, row.name, "qty", total_qty);
+				frappe.model.set_value(row.doctype, row.name, "custom_expected_qty", total_qty);
 				frappe.model.set_value(row.doctype, row.name, "custom_forecast_club", forecast_club);
 
 				if (frm.doc.set_warehouse) {
@@ -667,7 +704,6 @@ function show_sales_forecast_dialog(frm, data) {
 				}
 			});
 
-			split_mr_rows_over_threshold(frm);
 			frm.refresh_field("items");
 			frappe.msgprint(__("Items inserted Successfully"));
 			dialog.hide();
