@@ -63,6 +63,24 @@
    "translatable": 0,
    "unique": 0,
    "width": null
+  },
+  {
+   "dt": "Batch",
+   "fieldname": "custom_standard_pkg_qty",
+   "fieldtype": "Float",
+   "label": "Standard Pkg Qty",
+   "insert_after": "batch_qty",
+   "name": "Batch-custom_standard_pkg_qty",
+   "module": null
+  },
+  {
+   "dt": "Batch",
+   "fieldname": "custom_no_of_unit",
+   "fieldtype": "Float",
+   "label": "No of Unit",
+   "insert_after": "custom_standard_pkg_qty",
+   "name": "Batch-custom_no_of_unit",
+   "module": null
   }
  ],
  "custom_perms": [],
