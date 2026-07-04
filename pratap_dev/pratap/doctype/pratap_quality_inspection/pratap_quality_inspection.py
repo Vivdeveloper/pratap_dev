@@ -20,9 +20,45 @@ class PratapQualityInspection(Document):
 		self._ensure_density_for_submit()
 		self._validate_custom_density()
 		self._validate_inspected_qty()
+		self._validate_all_batches_qc_done()
 		self._validate_readings_status_mandatory()
 		self._validate_status_for_submit()
 		self._freeze_batch_qc_json()
+
+	def _validate_all_batches_qc_done(self):
+		"""GRN: block submit until every batch has an Accept/Reject decision (batch-wise readings)."""
+		if (self.reference_type or "").strip() != "GRN":
+			return
+
+		import json
+
+		def _parse(value):
+			try:
+				data = json.loads(value or "[]")
+				return data if isinstance(data, list) else []
+			except Exception:
+				return []
+
+		batch_rows = _parse(self.batch_qc_json)
+		if not batch_rows:
+			return
+
+		status_by_batch = {
+			row.get("batch_no"): (row.get("status") or "").strip()
+			for row in _parse(self.batch_readings_json)
+		}
+		pending = [
+			str(row.get("batch_no"))
+			for row in batch_rows
+			if status_by_batch.get(row.get("batch_no")) not in ("Accepted", "Rejected")
+		]
+		if pending:
+			frappe.throw(
+				_(
+					"Accept/Reject readings are pending for {0} batch(es): {1}. "
+					"Complete all batches before submit."
+				).format(len(pending), ", ".join(pending))
+			)
 
 	def on_cancel(self):
 		self.ignore_linked_doctypes = ["Serial and Batch Bundle"]

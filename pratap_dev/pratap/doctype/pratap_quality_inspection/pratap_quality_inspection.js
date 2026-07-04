@@ -110,11 +110,26 @@ frappe.ui.form.on("Pratap Quality Inspection", {
 	},
 
 	before_submit(frm) {
-		if ((frm.doc.status || "").trim() !== "Accepted") {
+		// GRN: every batch must have its readings added (Accept/Reject) before submit.
+		if (frm.doc.reference_type === "GRN") {
+			const pending = bread_pending_batches(frm);
+			if (pending.length) {
+				frappe.throw({
+					title: __("Incomplete Batch Readings"),
+					message: __(
+						"Accept/Reject readings are pending for {0} batch(es): {1}. Complete all batches before submit.",
+						[pending.length, pending.join(", ")]
+					),
+				});
+			}
+		}
+
+		const status = (frm.doc.status || "").trim();
+		if (!["Accepted", "Partially Accepted", "Partially Rejected"].includes(status)) {
 			frappe.throw({
 				title: __("Cannot Submit"),
 				message: __(
-					"Status must be Accepted before submit. Complete readings and set Status to Accepted."
+					"Status must be Accepted (or Partially Accepted/Rejected) before submit. Complete all batch readings."
 				),
 			});
 		}
@@ -1479,6 +1494,26 @@ function set_batch_reading_value(frm, rIdx, value) {
 	frappe.model.set_value(reading.doctype, reading.name, `reading_${col + 1}`, value);
 }
 
+// When a batch's reading status is decided, auto-fill the Batch QC Details units/qty:
+// Accepted -> all units accepted (rejected 0); Rejected -> all units rejected (accepted 0).
+function sync_batch_qc_from_status(frm, batch_no, status) {
+	if (status !== "Accepted" && status !== "Rejected") {
+		return;
+	}
+	const rows = frm._grn_batch_rows || [];
+	const idx = rows.findIndex((r) => r.batch_no === batch_no);
+	if (idx < 0) {
+		return;
+	}
+	const row = rows[idx];
+	const units = get_row_batch_units(row);
+	row.accepted_unit = status === "Accepted" ? units : 0;
+	const { row: synced } = sync_row_from_accepted_unit(row);
+	frm._grn_batch_rows[idx] = synced;
+	frm.set_value("batch_qc_json", serialize_batch_qc_rows(frm._grn_batch_rows));
+	render_grn_batch_html(frm);
+}
+
 function add_or_update_batch(frm) {
 	const batches = get_batch_readings_columns(frm);
 	const selected = frm._bread_selected;
@@ -1493,6 +1528,8 @@ function add_or_update_batch(frm) {
 		added: true,
 		values: bread_collect_values(frm, col),
 	});
+	// Auto-fill Batch QC Details (Accepted/Rejected units & qty) for this batch.
+	sync_batch_qc_from_status(frm, selected, status);
 	bread_roll_up_parent_status(frm);
 
 	// Move to the next batch that still needs readings.
