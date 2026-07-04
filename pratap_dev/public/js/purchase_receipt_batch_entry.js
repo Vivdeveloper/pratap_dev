@@ -244,6 +244,8 @@ function setup_batch_link_query(grid, item_code, default_pkg_qty = 1) {
 	const batch_query = () => ({
 		filters: {
 			item: item_code,
+			// Only batches whose Standard Pkg Qty is still empty (not yet assigned).
+			custom_standard_pkg_qty: ["is", "not set"],
 		},
 	});
 
@@ -384,6 +386,8 @@ function get_batch_entry_table_fields(default_pkg_qty, is_read_only = false, ite
 				return {
 					filters: {
 						item: item_code,
+						// Only batches whose Standard Pkg Qty is still empty (not yet assigned).
+						custom_standard_pkg_qty: ["is", "not set"],
 					},
 				};
 			},

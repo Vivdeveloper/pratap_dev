@@ -314,6 +314,9 @@ doc_events = {
     "Pratap Quality Inspection": {
         "on_update": "pratap_dev.purchase_receipt.link_pratap_qc_to_grn_item",
     },
+    "Batch": {
+        "validate": "pratap_dev.batch_hooks.set_batch_no_of_unit",
+    },
     "Custom Field": {
         "on_update": "pratap_dev.fixture_export.export_custom_field_on_save",
     },
