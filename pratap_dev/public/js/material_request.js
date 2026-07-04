@@ -338,6 +338,7 @@ function open_supplier_quotation_dialog(frm) {
 					qty: row.qty,
 					supplier: supplier || "",
 					supplier_name: row.custom_supplier_name || "",
+					material_request_item: row.name,
 				});
 			});
 
@@ -442,6 +443,7 @@ function show_sq_selection_dialog(frm, table_data) {
 				item_code: row.item_code,
 				qty: row.qty,
 				supplier: row.supplier,
+				material_request_item: row.material_request_item,
 			}));
 
 			frappe.call({

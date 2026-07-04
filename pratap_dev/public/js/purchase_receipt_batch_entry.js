@@ -1,3 +1,5 @@
+console.log("[BatchEntry] purchase_receipt_batch_entry.js LOADED — build 2026-07-04-live-qty");
+
 frappe.ui.form.on("Purchase Receipt", {
 	setup(frm) {
 		patch_pratap_batch_entry_handler(frm);
@@ -338,6 +340,35 @@ function style_batch_entry_dialog(dialog) {
 	grid.refresh();
 }
 
+// Recompute Total Qty (= Std Pkg Qty x No of Unit) for EVERY batch row, reading straight
+// from the DOM. Called from onchange (where `this` is the window, not the control) via
+// the dialog kept in pratap_batch_entry_state — so it never depends on control internals.
+function recompute_all_batch_qty() {
+	const dialog = pratap_batch_entry_state.dialog;
+	const grid = dialog && dialog.fields_dict.batches ? dialog.fields_dict.batches.grid : null;
+	if (!grid) {
+		console.log("[BatchEntry] recompute_all_batch_qty: no dialog/grid");
+		return;
+	}
+	const default_pkg = flt(pratap_batch_entry_state.default_pkg_qty) || 1;
+
+	// Use the grid's data model (not the DOM) so Total Qty = Std Pkg Qty x No of Unit
+	// is computed reliably, then re-render the whole grid to show it.
+	const data = grid.data || (grid.df && grid.df.data) || [];
+	data.forEach((row) => {
+		const pkg = flt(row.custom_packing_qty) || default_pkg;
+		const units = flt(row.custom_total_qty);
+		row.custom_packing_qty = pkg;
+		row.qty = pkg * units;
+	});
+	grid.refresh();
+
+	console.log(
+		"[BatchEntry] recompute_all_batch_qty (grid.data) rows:",
+		data.map((r) => ({ pkg: r.custom_packing_qty, units: r.custom_total_qty, qty: r.qty }))
+	);
+}
+
 function get_batch_entry_table_fields(default_pkg_qty, is_read_only = false, item_code = "") {
 	return [
 		{
@@ -370,6 +401,10 @@ function get_batch_entry_table_fields(default_pkg_qty, is_read_only = false, ite
 			default: default_pkg_qty,
 			read_only: 1,
 			columns: 3,
+			onchange() {
+				console.log("[BatchEntry] custom_packing_qty onchange");
+				setTimeout(recompute_all_batch_qty, 0);
+			},
 		},
 		{
 			fieldname: "custom_total_qty",
@@ -378,6 +413,10 @@ function get_batch_entry_table_fields(default_pkg_qty, is_read_only = false, ite
 			in_list_view: 1,
 			read_only: is_read_only,
 			columns: 2,
+			onchange() {
+				console.log("[BatchEntry] custom_total_qty (No of Unit) onchange");
+				setTimeout(recompute_all_batch_qty, 0);
+			},
 		},
 		{
 			fieldname: "qty",
@@ -398,53 +437,9 @@ function bind_batch_entry_grid_events(dialog, default_pkg_qty, item_code) {
 
 	grid._pratap_default_pkg_qty = default_pkg_qty;
 	setup_batch_link_query(grid, item_code, default_pkg_qty);
-
-	const refresh_row_fields = (grid_row) => {
-		grid_row.refresh_field("custom_packing_qty");
-		grid_row.refresh_field("custom_total_qty");
-		grid_row.refresh_field("qty");
-	};
-
-	const on_qty_field_change = (grid_row) => {
-		recalculate_batch_entry_row(grid_row.doc, default_pkg_qty);
-		refresh_row_fields(grid_row);
-		// Fallback: write the computed Total Qty straight into its (read-only) cell,
-		// in case refresh_field does not re-render the static cell live.
-		const $cell = grid.wrapper
-			.find(`.grid-row[data-name="${grid_row.doc.name}"]`)
-			.find('.grid-static-col[data-fieldname="qty"] .static-area, [data-fieldname="qty"] .static-area');
-		if ($cell.length) {
-			$cell.text(format_number(flt(grid_row.doc.qty)));
-		}
-	};
-
-	const EDIT_FIELDS = ["custom_packing_qty", "custom_total_qty"];
-	// In a Frappe grid the <input> itself usually has no data-fieldname — the
-	// enclosing cell div does. Match both so the handler reliably fires.
-	const selector = EDIT_FIELDS.map(
-		(f) => `input[data-fieldname="${f}"], [data-fieldname="${f}"] input`
-	).join(", ");
-
-	const handler = function () {
-		const $input = $(this);
-		const fieldname =
-			$input.attr("data-fieldname") ||
-			$input.closest("[data-fieldname]").attr("data-fieldname");
-		if (!EDIT_FIELDS.includes(fieldname)) {
-			return;
-		}
-		const row_name = $input.closest(".grid-row").attr("data-name");
-		const grid_row = grid.grid_rows_by_docname[row_name];
-		if (!grid_row) {
-			return;
-		}
-		// Read the value straight from the input so Total Qty (Standard Pkg Qty x No of Unit)
-		// updates live as the user types, instead of only on save/model-commit.
-		grid_row.doc[fieldname] = flt($input.val());
-		on_qty_field_change(grid_row);
-	};
-
-	grid.wrapper.off("input change blur keyup", selector).on("input change blur keyup", selector, handler);
+	// Live recompute is driven by the per-field onchange handlers (custom_packing_qty /
+	// custom_total_qty) which call recompute_all_batch_qty. No DOM-level binding needed.
+	console.log("[BatchEntry] bind_batch_entry_grid_events ready");
 }
 
 function validate_batch_entry_rows(rows, required_no_of_unit) {
