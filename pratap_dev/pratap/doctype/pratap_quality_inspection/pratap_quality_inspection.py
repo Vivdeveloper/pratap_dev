@@ -516,6 +516,10 @@ class PratapQualityInspection(Document):
 				frappe.throw(f"Row #{reading.idx}: Status is mandatory.")
 
 	def _validate_status_for_submit(self):
+		# The status-must-be-Accepted gate applies only to GRN inspections.
+		if (self.reference_type or "").strip() != "GRN":
+			return
+
 		status = (self.status or "").strip()
 		# Accepted and partial outcomes (some accepted, some rejected batches) are submittable.
 		if status in ("Accepted", "Partially Accepted", "Partially Rejected"):

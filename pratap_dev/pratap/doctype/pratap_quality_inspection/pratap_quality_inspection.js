@@ -124,14 +124,17 @@ frappe.ui.form.on("Pratap Quality Inspection", {
 			}
 		}
 
-		const status = (frm.doc.status || "").trim();
-		if (!["Accepted", "Partially Accepted", "Partially Rejected"].includes(status)) {
-			frappe.throw({
-				title: __("Cannot Submit"),
-				message: __(
-					"Status must be Accepted (or Partially Accepted/Rejected) before submit. Complete all batch readings."
-				),
-			});
+		// Status-must-be-Accepted check applies only to GRN inspections.
+		if (frm.doc.reference_type === "GRN") {
+			const status = (frm.doc.status || "").trim();
+			if (!["Accepted", "Partially Accepted", "Partially Rejected"].includes(status)) {
+				frappe.throw({
+					title: __("Cannot Submit"),
+					message: __(
+						"Status must be Accepted (or Partially Accepted/Rejected) before submit. Complete all batch readings."
+					),
+				});
+			}
 		}
 		if (flt(frm.doc.inspected_qty) <= 0) {
 			frappe.throw({
