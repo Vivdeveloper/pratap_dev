@@ -433,15 +433,44 @@ def _copy_grn_reference_fields(grn, target):
         target.custom_supplier_invoice_date = bill_date
 
 
+def _get_grn_item_qc_map(grn_name):
+    """Return {item_code: qc_name} for the latest non-cancelled QC of each item on this GRN.
+
+    Lets one QC cover multiple GRN rows of the SAME item (a single QC per item).
+    """
+    qcs = frappe.get_all(
+        "Pratap Quality Inspection",
+        filters={
+            "reference_doctype": "Purchase Receipt",
+            "reference_name": grn_name,
+            "reference_type": "GRN",
+            "docstatus": ["<", 2],
+        },
+        fields=["name", "production_item"],
+        order_by="creation desc",
+    )
+    item_map = {}
+    for qc in qcs:
+        if qc.production_item and qc.production_item not in item_map:
+            item_map[qc.production_item] = qc.name
+    return item_map
+
+
 def _get_grn_qc_submit_errors(grn_doc):
-    """Collect QC validation messages for every QC-required GRN line."""
+    """Collect QC validation messages for every QC-required GRN line.
+
+    A QC is matched by item_code (one QC can cover multiple rows of the same item),
+    so only one QC per item is required even when the item spans several GRN rows.
+    """
     errors = []
+    item_qc_map = _get_grn_item_qc_map(grn_doc.name)
 
     for row in grn_doc.get("items") or []:
         if not _grn_item_needs_qc(row):
             continue
 
-        qc_name = row.get("custom_pratap_quality_inspection")
+        # The row's own link, else any QC for this item on the GRN.
+        qc_name = row.get("custom_pratap_quality_inspection") or item_qc_map.get(row.item_code)
         item_label = row.item_code or row.item_name or row.idx
 
         if not qc_name:
@@ -475,10 +504,8 @@ def _get_pratap_qc_row_error(qc_name, row, grn_name):
             "Row {0}: Pratap Quality Inspection {1} is for item {2}, not {3}."
         ).format(row.idx, qc_name, qc.production_item, row.item_code)
 
-    if qc.get("purchase_receipt_item") and qc.purchase_receipt_item != row.name:
-        return _(
-            "Row {0}: Pratap Quality Inspection {1} is linked to a different GRN item row."
-        ).format(row.idx, qc_name)
+    # Note: no purchase_receipt_item == row.name check here — one QC may cover several
+    # GRN rows of the same item, so matching by item_code (above) is sufficient.
 
     submitting_qc = frappe.flags.get("submitting_pratap_qc") == qc_name
 
@@ -689,11 +716,13 @@ def get_grn_qc_submit_status(purchase_receipt):
         return {"can_submit": True, "pending_items": [], "message": ""}
 
     pending_items = []
+    item_qc_map = _get_grn_item_qc_map(grn.name)
     for row in grn.items:
         if not _grn_item_needs_qc(row):
             continue
 
-        qc_name = row.get("custom_pratap_quality_inspection")
+        # Match by the row's own link, else any QC for this item on the GRN.
+        qc_name = row.get("custom_pratap_quality_inspection") or item_qc_map.get(row.item_code)
         error = None
         if not qc_name:
             error = True
@@ -766,11 +795,24 @@ def get_pratap_qc_status_for_grn(purchase_receipt):
         if qc.production_item and qc.production_item not in qc_by_item:
             qc_by_item[qc.production_item] = qc
 
+    # De-duplicate "needs QC" entries by item_code: if the same item spans multiple GRN
+    # rows, only ONE QC is created for it (qtys are summed across those rows).
     items_need_create = []
+    need_create_by_item = {}
     open_qcs = []
     view_qcs = []
     seen_open = set()
     seen_view = set()
+
+    def _add_needs_create(row):
+        existing = need_create_by_item.get(row.item_code)
+        if existing:
+            existing["qty"] = flt(existing.get("qty")) + flt(row.qty)
+            existing["received_qty"] = flt(existing.get("received_qty")) + flt(row.get("received_qty"))
+            return
+        entry = _grn_item_row_for_qc(row)
+        need_create_by_item[row.item_code] = entry
+        items_need_create.append(entry)
 
     for row in doc.items:
         if not _grn_item_needs_qc(row):
@@ -792,11 +834,11 @@ def get_pratap_qc_status_for_grn(purchase_receipt):
             qc = qc_by_item[row.item_code]
 
         if not qc:
-            items_need_create.append(_grn_item_row_for_qc(row))
+            _add_needs_create(row)
             continue
 
         if qc.docstatus == 2:
-            items_need_create.append(_grn_item_row_for_qc(row))
+            _add_needs_create(row)
             continue
 
         if qc.docstatus == 0:

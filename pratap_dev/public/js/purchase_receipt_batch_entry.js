@@ -51,12 +51,8 @@ function ensure_batch_entry_button(frm) {
 
 	const label = __("Add Batch Nos");
 	const $btn = grid.add_custom_button(label, () => {
-		const row = get_selected_batch_item_row(frm);
-		if (!row) {
-			frappe.msgprint(__("Please select an item row in the table first."));
-			return;
-		}
-		open_batch_entry_dialog(frm, row.doctype, row.name);
+		// Open one dialog with a section per GRN item row (all items stacked).
+		open_multi_batch_entry_dialog(frm);
 	});
 
 	$btn.detach().insertAfter(grid.wrapper.find(".grid-add-multiple-rows"));
@@ -165,6 +161,189 @@ async function open_batch_entry_dialog(frm, cdt, cdn) {
 	);
 
 	show_batch_entry_dialog(frm, row, initial_rows, default_pkg_qty, required_no_of_unit);
+}
+
+// Open a single dialog with one section per GRN item row (all items stacked).
+async function open_multi_batch_entry_dialog(frm) {
+	if (frm.is_new()) {
+		frappe.throw(__("Please save this GRN before adding batch numbers."));
+	}
+
+	const item_rows = (frm.doc.items || []).filter((r) => r.item_code);
+	if (!item_rows.length) {
+		frappe.msgprint(__("Please add an item with an Item Code first."));
+		return;
+	}
+
+	// Ensure batch tracking for every distinct item.
+	const unique_items = [...new Set(item_rows.map((r) => r.item_code))];
+	for (const item_code of unique_items) {
+		const ok = await ensure_item_batch_tracking(item_code);
+		if (!ok) {
+			return;
+		}
+	}
+
+	frappe.dom.freeze(__("Loading batch details..."));
+	const sections = [];
+	try {
+		for (const row of item_rows) {
+			const default_pkg_qty = flt(row.custom_packing_qty) || 1;
+			const required_no_of_unit = flt(row.custom_total_qty);
+			const { message: context } = await frappe.call({
+				method: "pratap_dev.purchase_receipt_batch_entry.get_grn_batch_entry_context",
+				args: { purchase_receipt: frm.doc.name, purchase_receipt_item: row.name },
+			});
+			const batch_rows = context?.batch_rows || [];
+			const initial_rows = (batch_rows.length ? batch_rows : [{}]).map((entry) =>
+				prepare_batch_entry_row(entry, default_pkg_qty)
+			);
+			sections.push({
+				row,
+				item_code: row.item_code,
+				item_name: row.item_name,
+				default_pkg_qty,
+				required_no_of_unit,
+				initial_rows,
+				fieldname: `batches_${sections.length}`,
+			});
+		}
+	} finally {
+		frappe.dom.unfreeze();
+	}
+
+	show_multi_batch_entry_dialog(frm, sections);
+}
+
+function show_multi_batch_entry_dialog(frm, sections) {
+	if (pratap_batch_entry_state.dialog) {
+		pratap_batch_entry_state.dialog.hide();
+		pratap_batch_entry_state.dialog = null;
+	}
+
+	const is_read_only = frm.doc.docstatus !== 0;
+	const fields = [];
+
+	sections.forEach((s, i) => {
+		fields.push({
+			fieldtype: "HTML",
+			fieldname: `header_${i}`,
+			options: `<div class="pratap-batch-dialog-meta">
+				<div class="pratap-batch-dialog-meta-item">
+					<span class="pratap-batch-dialog-label">${__("Item")}</span>
+					<strong>${frappe.utils.escape_html(s.item_code || "")}</strong>
+					${s.item_name ? `<span class="text-muted"> — ${frappe.utils.escape_html(s.item_name)}</span>` : ""}
+				</div>
+				<div class="pratap-batch-dialog-meta-bundle">
+					<span class="pratap-batch-dialog-label">${__("Required No of Unit")}</span>
+					<strong>${format_batch_qty(s.required_no_of_unit)}</strong>
+				</div>
+			</div>`,
+		});
+		fields.push({
+			fieldtype: "Table",
+			fieldname: s.fieldname,
+			label: "",
+			cannot_add_rows: is_read_only,
+			cannot_delete_rows: is_read_only,
+			in_place_edit: !is_read_only,
+			data: s.initial_rows,
+			fields: get_batch_entry_table_fields(s.default_pkg_qty, is_read_only, s.item_code),
+		});
+		if (i < sections.length - 1) {
+			fields.push({ fieldtype: "Section Break" });
+		}
+	});
+
+	const dialog = new frappe.ui.Dialog({
+		title: __("Add Batch Nos"),
+		size: "extra-large",
+		fields: fields,
+		primary_action_label: is_read_only ? __("Close") : __("Save Batch Nos"),
+		primary_action() {
+			if (is_read_only) {
+				dialog.hide();
+				return;
+			}
+			save_multi_batch_entry(frm, dialog, sections);
+		},
+	});
+
+	pratap_batch_entry_state.dialog = dialog;
+	dialog.show();
+
+	sections.forEach((s) => {
+		const grid = dialog.fields_dict[s.fieldname]?.grid;
+		if (!grid) {
+			return;
+		}
+		grid.wrapper.find(".form-grid").css("overflow-x", "visible");
+		if (!is_read_only) {
+			bind_batch_entry_grid(grid, s.default_pkg_qty, s.item_code);
+		}
+	});
+}
+
+async function save_multi_batch_entry(frm, dialog, sections) {
+	// Validate every section that has batch data BEFORE saving anything.
+	const payloads = [];
+	for (const s of sections) {
+		const grid = dialog.fields_dict[s.fieldname]?.grid;
+		const rows = (grid?.data || [])
+			.map((entry) => {
+				recalculate_batch_entry_row(entry, s.default_pkg_qty);
+				return entry;
+			})
+			.filter((entry) => (entry.batch_no || "").trim() || flt(entry.custom_total_qty) > 0);
+
+		if (!rows.length) {
+			continue; // section left empty — skip it
+		}
+		validate_batch_entry_rows(rows, s.required_no_of_unit); // throws on mismatch
+		payloads.push({ row: s.row, default_pkg_qty: s.default_pkg_qty, rows });
+	}
+
+	if (!payloads.length) {
+		frappe.msgprint(__("Please enter batch details for at least one item."));
+		return;
+	}
+
+	dialog.hide();
+	frappe.dom.freeze(__("Updating batch details..."));
+	try {
+		for (const p of payloads) {
+			const response = await frappe.call({
+				method: "pratap_dev.purchase_receipt_batch_entry.add_batches_to_grn_item",
+				args: {
+					purchase_receipt: frm.doc.name,
+					purchase_receipt_item: p.row.name,
+					batches: p.rows.map((entry) => ({
+						batch_no: (entry.batch_no || "").trim(),
+						standard_pkg_qty: flt(entry.custom_packing_qty) || p.default_pkg_qty,
+						no_of_unit: flt(entry.custom_total_qty),
+						total_qty: flt(entry.qty),
+					})),
+				},
+			});
+			const result = response.message || {};
+			frappe.model.set_value(p.row.doctype, p.row.name, {
+				qty: result.qty,
+				received_qty: result.received_qty,
+				stock_qty: result.stock_qty,
+				custom_packing_qty: result.custom_packing_qty,
+				serial_and_batch_bundle: result.serial_and_batch_bundle,
+				use_serial_batch_fields: 0,
+			});
+		}
+	} finally {
+		frappe.dom.unfreeze();
+	}
+
+	frm.refresh_field("items");
+	frappe.show_alert({
+		message: __("Batch details updated for {0} item(s)", [payloads.length]),
+		indicator: "green",
+	});
 }
 
 function show_batch_entry_dialog(frm, row, initial_rows, default_pkg_qty, required_no_of_unit) {
@@ -347,28 +526,29 @@ function style_batch_entry_dialog(dialog) {
 // the dialog kept in pratap_batch_entry_state — so it never depends on control internals.
 function recompute_all_batch_qty() {
 	const dialog = pratap_batch_entry_state.dialog;
-	const grid = dialog && dialog.fields_dict.batches ? dialog.fields_dict.batches.grid : null;
-	if (!grid) {
-		console.log("[BatchEntry] recompute_all_batch_qty: no dialog/grid");
+	if (!dialog || !dialog.fields_dict) {
 		return;
 	}
-	const default_pkg = flt(pratap_batch_entry_state.default_pkg_qty) || 1;
-
-	// Use the grid's data model (not the DOM) so Total Qty = Std Pkg Qty x No of Unit
-	// is computed reliably, then re-render the whole grid to show it.
-	const data = grid.data || (grid.df && grid.df.data) || [];
-	data.forEach((row) => {
-		const pkg = flt(row.custom_packing_qty) || default_pkg;
-		const units = flt(row.custom_total_qty);
-		row.custom_packing_qty = pkg;
-		row.qty = pkg * units;
+	// Recompute Total Qty (= Std Pkg Qty x No of Unit) for EVERY batch grid in the
+	// dialog (single- or multi-item), each using its own default Standard Pkg Qty.
+	Object.values(dialog.fields_dict).forEach((field) => {
+		const grid = field && field.grid;
+		if (!grid) {
+			return;
+		}
+		const data = grid.data || (grid.df && grid.df.data) || [];
+		if (!data.length && !(grid.df && grid.df.fieldtype === "Table")) {
+			return;
+		}
+		const default_pkg = flt(grid._pratap_default_pkg_qty) || 1;
+		data.forEach((row) => {
+			const pkg = flt(row.custom_packing_qty) || default_pkg;
+			const units = flt(row.custom_total_qty);
+			row.custom_packing_qty = pkg;
+			row.qty = pkg * units;
+		});
+		grid.refresh();
 	});
-	grid.refresh();
-
-	console.log(
-		"[BatchEntry] recompute_all_batch_qty (grid.data) rows:",
-		data.map((r) => ({ pkg: r.custom_packing_qty, units: r.custom_total_qty, qty: r.qty }))
-	);
 }
 
 function get_batch_entry_table_fields(default_pkg_qty, is_read_only = false, item_code = "") {
@@ -435,15 +615,18 @@ function get_batch_entry_table_fields(default_pkg_qty, is_read_only = false, ite
 
 function bind_batch_entry_grid_events(dialog, default_pkg_qty, item_code) {
 	const grid = dialog.fields_dict.batches?.grid;
+	bind_batch_entry_grid(grid, default_pkg_qty, item_code);
+}
+
+// Wire a single batch-entry grid: remember its default pkg qty and apply the batch query.
+// Live recompute is driven by the per-field onchange handlers (custom_packing_qty /
+// custom_total_qty) which call recompute_all_batch_qty.
+function bind_batch_entry_grid(grid, default_pkg_qty, item_code) {
 	if (!grid) {
 		return;
 	}
-
 	grid._pratap_default_pkg_qty = default_pkg_qty;
 	setup_batch_link_query(grid, item_code, default_pkg_qty);
-	// Live recompute is driven by the per-field onchange handlers (custom_packing_qty /
-	// custom_total_qty) which call recompute_all_batch_qty. No DOM-level binding needed.
-	console.log("[BatchEntry] bind_batch_entry_grid_events ready");
 }
 
 function validate_batch_entry_rows(rows, required_no_of_unit) {

@@ -298,25 +298,28 @@ def _validate_grn_qty(po_item_name, item_row):
 	return receive_qty, packing_qty, no_of_unit
 
 
-def _make_single_purchase_receipt(
+def _make_purchase_receipt_for_rows(
 	purchase_order,
-	item_row,
+	item_rows,
 	group_id=None,
 	sales_invoice_number=None,
 	sales_invoice_date=None,
 ):
-	"""Create and save one Purchase Receipt containing a single PO item."""
-	po_item = item_row.get("po_item")
-	receive_qty, packing_qty, no_of_unit = _validate_grn_qty(po_item, item_row)
+	"""Create and save one Purchase Receipt containing the given PO item rows.
 
-	item_data_map = {
-		po_item: {
+	Multiple rows of the SAME item (each with its own Standard Pkg Qty / No of Unit)
+	are placed into ONE GRN, so batches for each row can be handled together.
+	"""
+	item_data_map = {}
+	for item_row in item_rows:
+		po_item = item_row.get("po_item")
+		receive_qty, packing_qty, no_of_unit = _validate_grn_qty(po_item, item_row)
+		item_data_map[po_item] = {
 			**item_row,
 			"grn_qty": receive_qty,
 			"custom_packing_qty": packing_qty,
 			"custom_total_qty": no_of_unit,
 		}
-	}
 
 	def update_item(obj, target, source_parent):
 		row_data = item_data_map.get(obj.name)
@@ -415,12 +418,24 @@ def make_purchase_receipts_from_po(
 
 	group_id = make_autoname(GRN_GROUP_SERIES)
 
-	purchase_receipts = []
+	# Group selected rows by item_code -> one GRN per unique item. So a PO where the
+	# same item appears in multiple rows (different Std Pkg Qty / No of Unit) makes a
+	# single GRN for that item (e.g. 4 rows with 2 same item -> 3 GRNs, not 4).
+	from collections import OrderedDict
+
+	grouped = OrderedDict()
 	for row in valid_items:
+		item_code = row.get("item_code") or frappe.db.get_value(
+			"Purchase Order Item", row.get("po_item"), "item_code"
+		)
+		grouped.setdefault(item_code, []).append(row)
+
+	purchase_receipts = []
+	for item_rows in grouped.values():
 		purchase_receipts.append(
-			_make_single_purchase_receipt(
+			_make_purchase_receipt_for_rows(
 				purchase_order,
-				row,
+				item_rows,
 				group_id=group_id,
 				sales_invoice_number=sales_invoice_number,
 				sales_invoice_date=sales_invoice_date,

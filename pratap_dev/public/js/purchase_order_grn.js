@@ -165,6 +165,7 @@ function open_create_grn_dialog(frm, items) {
 
 				payload.push({
 					po_item: row.po_item,
+					item_code: row.item_code,
 					grn_qty: total_qty,
 					qty: total_qty,
 					custom_packing_qty: row.custom_packing_qty,
