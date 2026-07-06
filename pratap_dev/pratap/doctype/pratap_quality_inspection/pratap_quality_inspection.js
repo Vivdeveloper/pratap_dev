@@ -456,6 +456,10 @@ function handle_status_values(frm){
 function apply_reading_table_mode(frm) {
 	const is_grn = frm.doc.reference_type === "GRN";
 	frm.toggle_display("readings", !is_grn);
+	// GRN uses per-batch density in the Batch QC Details table, so hide the
+	// doc-level Density and Density Qty fields.
+	frm.toggle_display("custom_density", !is_grn);
+	frm.toggle_display("density_qty", !is_grn);
 
 	if (!is_grn || frm.doc.docstatus !== 0) {
 		return;
@@ -533,6 +537,7 @@ function serialize_batch_qc_rows(rows) {
 	return JSON.stringify(
 		(rows || []).map((row) => {
 			const normalized = normalize_grn_batch_row(row);
+			const density = flt(normalized.density);
 			return {
 				batch_no: normalized.batch_no,
 				batch_qty: normalized.batch_qty,
@@ -542,9 +547,23 @@ function serialize_batch_qc_rows(rows) {
 				rejected_unit: normalized.rejected_unit,
 				accepted_qty: normalized.accepted_qty,
 				rejected_qty: normalized.rejected_qty,
+				// Per-batch density and the density-converted accepted/rejected qty.
+				density,
+				accepted_density_qty: batch_qty_by_density(normalized.accepted_qty, density),
+				rejected_density_qty: batch_qty_by_density(normalized.rejected_qty, density),
 			};
 		})
 	);
+}
+
+// Qty ÷ density; falls back to the raw qty when density is 0 (nothing to convert by).
+function batch_qty_by_density(qty, density) {
+	const d = flt(density);
+	return d ? flt(qty) / d : flt(qty);
+}
+
+function format_batch_qty_by_density(qty, density) {
+	return format_batch_display(batch_qty_by_density(qty, density));
 }
 
 function get_row_batch_units(row) {
@@ -583,12 +602,20 @@ function normalize_grn_batch_row(row, saved = {}) {
 		accepted_unit = standard_pkg_qty ? flt(row.accepted_qty) / standard_pkg_qty : 0;
 	}
 
+	let density = 0;
+	if (row.density !== null && row.density !== undefined && row.density !== "") {
+		density = flt(row.density);
+	} else if (saved.density !== null && saved.density !== undefined && saved.density !== "") {
+		density = flt(saved.density);
+	}
+
 	const normalized = {
 		batch_no: row.batch_no,
 		batch_qty,
 		standard_pkg_qty,
 		no_of_unit,
 		accepted_unit,
+		density,
 	};
 
 	return sync_row_from_accepted_unit(normalized).row;
@@ -691,9 +718,13 @@ function render_grn_batch_html(frm) {
 			const no_of_unit = format_batch_display(get_row_batch_units(row));
 			const accepted_unit = format_batch_input(row.accepted_unit);
 			const rejected_unit = format_batch_display(row.rejected_unit);
-			const accepted_qty = format_batch_display(row.accepted_qty);
-			const rejected_qty = format_batch_display(calc_rejected_qty(row));
 			const batch_qty = format_batch_display(row.batch_qty);
+			const row_density = flt(row.density);
+			const density_input = format_batch_input(row_density);
+			// Accepted/Rejected Qty are shown divided by this batch's own density
+			// (raw qty when density is 0 — nothing to convert by).
+			const accepted_qty = format_batch_qty_by_density(row.accepted_qty, row_density);
+			const rejected_qty = format_batch_qty_by_density(calc_rejected_qty(row), row_density);
 
 			if (is_read_only) {
 				return `<tr data-batch-index="${index}">
@@ -706,6 +737,7 @@ function render_grn_batch_html(frm) {
 					<td class="grn-batch-col-qty">${no_of_unit}</td>
 					<td class="grn-batch-col-qty grn-batch-col-accepted">${format_batch_display(row.accepted_unit)}</td>
 					<td class="grn-batch-col-qty grn-batch-col-rejected">${rejected_unit}</td>
+					<td class="grn-batch-col-qty grn-batch-col-density">${format_batch_display(row_density)}</td>
 					<td class="grn-batch-col-qty grn-batch-col-accepted">${accepted_qty}</td>
 					<td class="grn-batch-col-qty grn-batch-col-rejected">${rejected_qty}</td>
 				</tr>`;
@@ -727,6 +759,10 @@ function render_grn_batch_html(frm) {
 				<td class="grn-batch-col-qty grn-batch-col-rejected">
 					<span class="grn-batch-rejected-unit-display" data-batch-index="${index}">${rejected_unit}</span>
 				</td>
+				<td class="grn-batch-col-input grn-batch-col-density">
+					<input type="number" class="grn-batch-input grn-batch-density"
+						data-batch-index="${index}" min="0" step="any" value="${density_input}" placeholder="0">
+				</td>
 				<td class="grn-batch-col-qty grn-batch-col-accepted">
 					<span class="grn-batch-accepted-qty-display" data-batch-index="${index}">${accepted_qty}</span>
 				</td>
@@ -738,6 +774,15 @@ function render_grn_batch_html(frm) {
 		.join("");
 
 	const totals = get_grn_batch_totals(rows);
+	// Accepted/Rejected Qty totals use the per-batch density-divided values (match the rows).
+	const total_accepted_density = (rows || []).reduce(
+		(sum, row) => sum + batch_qty_by_density(row.accepted_qty, flt(row.density)),
+		0
+	);
+	const total_rejected_density = (rows || []).reduce(
+		(sum, row) => sum + batch_qty_by_density(calc_rejected_qty(row), flt(row.density)),
+		0
+	);
 
 	const item_label = frm.doc.production_item
 		? frappe.utils.escape_html(frm.doc.production_item)
@@ -763,6 +808,7 @@ function render_grn_batch_html(frm) {
 							<th class="grn-batch-col-qty">${__("No of Unit")}</th>
 							<th class="grn-batch-col-input grn-batch-col-accepted">${__("Accepted Unit")}</th>
 							<th class="grn-batch-col-input grn-batch-col-rejected">${__("Rejected Unit")}</th>
+							<th class="grn-batch-col-input grn-batch-col-density">${__("Density")}</th>
 							<th class="grn-batch-col-input grn-batch-col-accepted">${__("Accepted Qty")}</th>
 							<th class="grn-batch-col-input grn-batch-col-rejected">${__("Rejected Qty")}</th>
 						</tr>
@@ -776,8 +822,9 @@ function render_grn_batch_html(frm) {
 							<td class="grn-batch-col-qty grn-batch-total-no-of-unit">${format_batch_display(totals.no_of_unit)}</td>
 							<td class="grn-batch-col-qty grn-batch-col-accepted grn-batch-total-accepted-unit">${format_batch_display(totals.accepted_unit)}</td>
 							<td class="grn-batch-col-qty grn-batch-col-rejected grn-batch-total-rejected-unit">${format_batch_display(totals.rejected_unit)}</td>
-							<td class="grn-batch-col-qty grn-batch-col-accepted grn-batch-total-accepted-qty">${format_batch_display(totals.accepted_qty)}</td>
-							<td class="grn-batch-col-qty grn-batch-col-rejected grn-batch-total-rejected-qty">${format_batch_display(totals.rejected_qty)}</td>
+							<td class="grn-batch-col-qty grn-batch-col-density"></td>
+							<td class="grn-batch-col-qty grn-batch-col-accepted grn-batch-total-accepted-qty">${format_batch_display(total_accepted_density)}</td>
+							<td class="grn-batch-col-qty grn-batch-col-rejected grn-batch-total-rejected-qty">${format_batch_display(total_rejected_density)}</td>
 						</tr>
 					</tfoot>
 				</table>
@@ -800,10 +847,43 @@ function bind_grn_batch_html_events(frm, $wrapper) {
 		.on("input blur", ".grn-batch-accepted-unit", function () {
 			sync_grn_batch_row_inputs(frm, $wrapper, $(this));
 		});
+	$wrapper
+		.off("input blur", ".grn-batch-density")
+		.on("input blur", ".grn-batch-density", function () {
+			sync_grn_batch_density_input(frm, $wrapper, $(this));
+		});
 }
 
 function calc_rejected_qty(row) {
 	return flt(row.rejected_qty);
+}
+
+function refresh_grn_batch_row_qty_cells(frm, $wrapper, index, row) {
+	const density = flt(row.density);
+	$wrapper
+		.find(`.grn-batch-accepted-qty-display[data-batch-index="${index}"]`)
+		.text(format_batch_qty_by_density(row.accepted_qty, density));
+	$wrapper
+		.find(`.grn-batch-rejected-display[data-batch-index="${index}"]`)
+		.text(format_batch_qty_by_density(calc_rejected_qty(row), density));
+}
+
+function refresh_grn_batch_qty_totals(frm, $wrapper) {
+	const rows = frm._grn_batch_rows || [];
+	const totals = get_grn_batch_totals(rows);
+	const total_accepted_density = rows.reduce(
+		(sum, r) => sum + batch_qty_by_density(r.accepted_qty, flt(r.density)),
+		0
+	);
+	const total_rejected_density = rows.reduce(
+		(sum, r) => sum + batch_qty_by_density(calc_rejected_qty(r), flt(r.density)),
+		0
+	);
+	$wrapper.find(".grn-batch-total-no-of-unit").text(format_batch_display(totals.no_of_unit));
+	$wrapper.find(".grn-batch-total-accepted-unit").text(format_batch_display(totals.accepted_unit));
+	$wrapper.find(".grn-batch-total-rejected-unit").text(format_batch_display(totals.rejected_unit));
+	$wrapper.find(".grn-batch-total-accepted-qty").text(format_batch_display(total_accepted_density));
+	$wrapper.find(".grn-batch-total-rejected-qty").text(format_batch_display(total_rejected_density));
 }
 
 function sync_grn_batch_row_inputs(frm, $wrapper, $changed_input) {
@@ -821,12 +901,7 @@ function sync_grn_batch_row_inputs(frm, $wrapper, $changed_input) {
 	$wrapper
 		.find(`.grn-batch-rejected-unit-display[data-batch-index="${index}"]`)
 		.text(format_batch_display(synced_row.rejected_unit));
-	$wrapper
-		.find(`.grn-batch-accepted-qty-display[data-batch-index="${index}"]`)
-		.text(format_batch_display(synced_row.accepted_qty));
-	$wrapper
-		.find(`.grn-batch-rejected-display[data-batch-index="${index}"]`)
-		.text(format_batch_display(synced_row.rejected_qty));
+	refresh_grn_batch_row_qty_cells(frm, $wrapper, index, synced_row);
 
 	if (capped) {
 		$changed_input.addClass("grn-batch-input-capped");
@@ -834,14 +909,21 @@ function sync_grn_batch_row_inputs(frm, $wrapper, $changed_input) {
 	}
 
 	frm._grn_batch_rows[index] = synced_row;
+	refresh_grn_batch_qty_totals(frm, $wrapper);
+	frm.set_value("batch_qc_json", serialize_batch_qc_rows(frm._grn_batch_rows));
+}
 
-	const totals = get_grn_batch_totals(frm._grn_batch_rows);
-	$wrapper.find(".grn-batch-total-no-of-unit").text(format_batch_display(totals.no_of_unit));
-	$wrapper.find(".grn-batch-total-accepted-unit").text(format_batch_display(totals.accepted_unit));
-	$wrapper.find(".grn-batch-total-rejected-unit").text(format_batch_display(totals.rejected_unit));
-	$wrapper.find(".grn-batch-total-accepted-qty").text(format_batch_display(totals.accepted_qty));
-	$wrapper.find(".grn-batch-total-rejected-qty").text(format_batch_display(totals.rejected_qty));
+// Per-batch density edit: recompute that row's Accepted/Rejected Qty (÷ density) and totals.
+function sync_grn_batch_density_input(frm, $wrapper, $changed_input) {
+	const index = parseInt($changed_input.attr("data-batch-index"), 10);
+	const row = frm._grn_batch_rows?.[index];
+	if (!row) {
+		return;
+	}
 
+	row.density = flt($changed_input.val());
+	refresh_grn_batch_row_qty_cells(frm, $wrapper, index, row);
+	refresh_grn_batch_qty_totals(frm, $wrapper);
 	frm.set_value("batch_qc_json", serialize_batch_qc_rows(frm._grn_batch_rows));
 }
 

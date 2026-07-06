@@ -540,7 +540,10 @@ class PratapQualityInspection(Document):
 		if (self.reference_type or "").strip() != "GRN":
 			return
 
-		from pratap_dev.purchase_receipt_batch_qc import parse_batch_qc_json
+		from pratap_dev.purchase_receipt_batch_qc import (
+			apply_density_to_batch_qc_rows,
+			parse_batch_qc_json,
+		)
 
 		rows = parse_batch_qc_json(self.batch_qc_json)
 		if not rows:
@@ -564,39 +567,60 @@ class PratapQualityInspection(Document):
 						"rejected_unit": no_of_unit,
 						"accepted_qty": 0,
 						"rejected_qty": batch_qty,
+						"density": frappe.utils.flt(batch.get("density")),
 					}
 				)
 
 		if rows:
 			import json
 
+			# Freeze density-converted qtys from each batch's own (GRN-fetched) density.
+			apply_density_to_batch_qc_rows(rows)
 			self.batch_qc_json = json.dumps(rows)
 
 	def _update_grn_item(self):
 		from pratap_dev.purchase_receipt_batch_qc import parse_batch_qc_json, update_grn_from_batch_qc
 
 		grn_doc = frappe.get_doc("Purchase Receipt", self.reference_name)
-		item_row = _get_grn_item_row(
+		# A QC covers every GRN row of the item, so write results back to each row.
+		item_rows = _get_grn_item_rows(
 			grn_doc, self.production_item, self.get("purchase_receipt_item")
 		)
-		if not item_row:
+		if not item_rows:
 			return
 
 		batch_rows = parse_batch_qc_json(self.batch_qc_json)
+
 		if batch_rows:
-			update_grn_from_batch_qc(
-				grn_doc, item_row, batch_rows, custom_density=self.custom_density
-			)
+			# Route each batch's accept/reject decision to the GRN row that owns it.
+			rows_by_batch = _map_grn_batches_to_rows(item_rows)
+			grouped = {}
+			for batch_row in batch_rows:
+				owner = rows_by_batch.get(batch_row.get("batch_no")) or item_rows[0]
+				grouped.setdefault(owner.name, (owner, []))[1].append(batch_row)
+
+			for owner, owner_batch_rows in grouped.values():
+				# Density is per-batch (fetched from the GRN row); use the row's own value.
+				owner_density = _first_row_density(owner_batch_rows)
+				update_grn_from_batch_qc(
+					grn_doc, owner, owner_batch_rows, custom_density=owner_density
+				)
+				self._apply_grn_item_qc_meta(owner, owner_density)
 		else:
-			self._update_batch_custom_density(grn_doc, item_row)
+			for item_row in item_rows:
+				self._update_batch_custom_density(grn_doc, item_row)
+				self._apply_grn_item_qc_meta(item_row, frappe.utils.flt(self.custom_density))
 
-		if frappe.utils.flt(self.reference_qty):
-			conversion_factor = frappe.utils.flt(self.density_qty) / frappe.utils.flt(self.reference_qty)
-			item_row.conversion_factor = conversion_factor
-
-		item_row.custom_density = self.custom_density
-		item_row.custom_pratap_quality_inspection = self.name
 		grn_doc.save(ignore_permissions=True)
+
+	def _apply_grn_item_qc_meta(self, item_row, density):
+		# conversion_factor = 1 / density (density_qty / reference_qty reduces to this).
+		density = frappe.utils.flt(density)
+		if density > 0:
+			item_row.conversion_factor = 1.0 / density
+			item_row.custom_density = density
+
+		item_row.custom_pratap_quality_inspection = self.name
 
 	def _update_batch_custom_density(self, grn_doc, item_row=None):
 		item = item_row or (grn_doc.items[0] if grn_doc.items else None)
@@ -732,7 +756,12 @@ class PratapQualityInspection(Document):
 	
 @frappe.whitelist()
 def get_grn_batch_list(purchase_receipt, item_code=None, purchase_receipt_item=None):
-	"""Return batch rows from GRN item serial_and_batch_bundle (or legacy batch_no)."""
+	"""Return batch rows from GRN item serial_and_batch_bundle (or legacy batch_no).
+
+	A GRN QC covers EVERY GRN row of the same item (their qtys are summed into one
+	QC), so batches are collected from all matching rows — not just the linked row —
+	otherwise batches sitting on the other rows would be silently dropped from QC.
+	"""
 	if not purchase_receipt:
 		return []
 
@@ -740,16 +769,40 @@ def get_grn_batch_list(purchase_receipt, item_code=None, purchase_receipt_item=N
 		frappe.throw(_("Purchase Receipt {0} does not exist.").format(purchase_receipt))
 
 	pr = frappe.get_doc("Purchase Receipt", purchase_receipt)
-	item_row = _get_grn_item_row(pr, item_code, purchase_receipt_item)
-	if not item_row:
+	item_rows = _get_grn_item_rows(pr, item_code, purchase_receipt_item)
+	if not item_rows:
 		return []
 
+	batches = []
+	for item_row in item_rows:
+		batches.extend(_batches_for_grn_item_row(item_row))
+
+	return batches
+
+
+def _first_row_density(batch_rows):
+	"""First non-zero density among a GRN row's batch QC rows (they share one row density)."""
+	for row in batch_rows or []:
+		density = frappe.utils.flt(row.get("density"))
+		if density > 0:
+			return density
+	return 0
+
+
+def _batches_for_grn_item_row(item_row):
+	"""Batch rows (batch_no/qty/pkg/units/density) for a single GRN item row.
+
+	Density is fetched from the GRN item row's own density field, so every batch of
+	that row carries the row's density into the QC table.
+	"""
 	standard_pkg_qty = frappe.utils.flt(item_row.get("custom_packing_qty")) or 1
+	purchase_receipt_item = item_row.name
+	row_density = frappe.utils.flt(item_row.get("custom_density"))
 
 	batches = []
-	seen_batches = {}
 
 	if item_row.get("serial_and_batch_bundle"):
+		seen_batches = {}
 		entries = frappe.get_all(
 			"Serial and Batch Entry",
 			filters={"parent": item_row.serial_and_batch_bundle, "batch_no": ["is", "set"]},
@@ -773,6 +826,8 @@ def get_grn_batch_list(purchase_receipt, item_code=None, purchase_receipt_item=N
 					"batch_qty": qty,
 					"standard_pkg_qty": standard_pkg_qty,
 					"no_of_unit": qty / standard_pkg_qty if standard_pkg_qty else 0,
+					"purchase_receipt_item": purchase_receipt_item,
+					"density": row_density,
 				}
 			)
 
@@ -784,6 +839,8 @@ def get_grn_batch_list(purchase_receipt, item_code=None, purchase_receipt_item=N
 				"batch_qty": batch_qty,
 				"standard_pkg_qty": standard_pkg_qty,
 				"no_of_unit": batch_qty / standard_pkg_qty if standard_pkg_qty else 0,
+				"purchase_receipt_item": purchase_receipt_item,
+				"density": row_density,
 			}
 		)
 
@@ -806,6 +863,50 @@ def _get_grn_item_row(purchase_receipt_doc, item_code=None, purchase_receipt_ite
 				return row
 
 	return items[0]
+
+
+def _get_grn_item_rows(purchase_receipt_doc, item_code=None, purchase_receipt_item=None):
+	"""All GRN rows a QC spans: every row of the item (GRN QC is item-level).
+
+	Falls back to the single linked row / first row when no item_code is given.
+	"""
+	items = purchase_receipt_doc.get("items") or []
+	if not items:
+		return []
+
+	if item_code:
+		rows = [row for row in items if row.item_code == item_code]
+		if rows:
+			return rows
+
+	if purchase_receipt_item:
+		rows = [row for row in items if row.name == purchase_receipt_item]
+		if rows:
+			return rows
+
+	return [items[0]]
+
+
+def _map_grn_batches_to_rows(item_rows):
+	"""batch_no -> owning GRN item row, scanning accepted & rejected bundles (and legacy batch_no)."""
+	mapping = {}
+	for row in item_rows:
+		for field in ("serial_and_batch_bundle", "rejected_serial_and_batch_bundle"):
+			bundle = row.get(field)
+			if not bundle:
+				continue
+			entries = frappe.get_all(
+				"Serial and Batch Entry",
+				filters={"parent": bundle, "batch_no": ["is", "set"]},
+				fields=["batch_no"],
+			)
+			for entry in entries:
+				mapping.setdefault(entry.batch_no, row)
+
+		if row.get("batch_no"):
+			mapping.setdefault(row.batch_no, row)
+
+	return mapping
 
 
 @frappe.whitelist()

@@ -55,9 +55,29 @@ def parse_batch_qc_json(value):
 				"rejected_unit": rejected_unit,
 				"accepted_qty": accepted_qty,
 				"rejected_qty": rejected_qty,
+				# Per-batch density and the density-converted accepted/rejected qty.
+				"density": flt(row.get("density")),
+				"accepted_density_qty": flt(row.get("accepted_density_qty")),
+				"rejected_density_qty": flt(row.get("rejected_density_qty")),
 			}
 		)
 
+	return rows
+
+
+def apply_density_to_batch_qc_rows(rows):
+	"""Recompute accepted_density_qty / rejected_density_qty = qty / (per-batch) density.
+
+	Falls back to the raw qty when a batch's density is 0 (nothing to convert by).
+	"""
+	for row in rows or []:
+		density = flt(row.get("density"))
+		if density:
+			row["accepted_density_qty"] = flt(row.get("accepted_qty")) / density
+			row["rejected_density_qty"] = flt(row.get("rejected_qty")) / density
+		else:
+			row["accepted_density_qty"] = flt(row.get("accepted_qty"))
+			row["rejected_density_qty"] = flt(row.get("rejected_qty"))
 	return rows
 
 
@@ -249,19 +269,17 @@ def _cancel_linked_bundle(bundle_name):
 
 
 def _update_batch_density_from_qc(batch_rows, custom_density):
-	if custom_density in (None, ""):
-		return
-
+	"""Write each batch's density onto its Batch record (per-batch, else the fallback)."""
 	for row in batch_rows:
 		batch_no = row.get("batch_no")
-		if not batch_no or not frappe.db.exists("Batch", batch_no):
+		density = flt(row.get("density")) or flt(custom_density)
+		if not batch_no or density <= 0 or not frappe.db.exists("Batch", batch_no):
 			continue
 
-		if custom_density not in (None, ""):
-			frappe.db.set_value(
-				"Batch",
-				batch_no,
-				"custom_density",
-				flt(custom_density),
-				update_modified=False,
-			)
+		frappe.db.set_value(
+			"Batch",
+			batch_no,
+			"custom_density",
+			density,
+			update_modified=False,
+		)
