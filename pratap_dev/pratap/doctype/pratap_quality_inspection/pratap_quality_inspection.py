@@ -359,6 +359,22 @@ class PratapQualityInspection(Document):
 		self._set_batch_custom_density()
 		self.db_set("stock_entry", stock_entry.name, update_modified=False)
 
+	def _submit_linked_work_order(self):
+		"""Auto-submit the linked Work Order if it is still in draft.
+
+		Only reached from the Accepted QC path in _create_stock_entry, so we submit
+		exactly when a Manufacture stock entry is about to be created against the WO.
+		"""
+		if not self.reference_name:
+			return
+
+		wo_docstatus = frappe.db.get_value("Work Order", self.reference_name, "docstatus")
+		if wo_docstatus != 0:
+			return
+
+		work_order = frappe.get_doc("Work Order", self.reference_name)
+		work_order.submit()
+
 	def _set_batch_custom_density(self):
 		batch_name = frappe.db.get_value(
 			"Batch",
