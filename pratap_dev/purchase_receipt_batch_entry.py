@@ -160,9 +160,13 @@ def get_grn_batch_entry_context(purchase_receipt, purchase_receipt_item=None):
 
 		item_batches = get_item_batches(selected_item["item_code"], limit=100)
 
+		# Pass item_code=None so batches are read ONLY from this specific GRN row's
+		# bundle (via purchase_receipt_item), not merged across every row of the same
+		# item. This keeps each row's batch section independent when one item has 2+
+		# rows. (QC still merges by item_code through its own get_grn_batch_list call.)
 		for batch in get_grn_batch_list(
 			purchase_receipt,
-			selected_item["item_code"],
+			None,
 			selected_item["name"],
 		):
 			batch_rows.append(

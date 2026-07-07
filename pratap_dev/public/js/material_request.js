@@ -95,26 +95,42 @@ function calculate_quantity(frm, cdt, cdn) {
 	}
 }
 
-// Copy the item-identifying fields to a freshly created remainder row (not the
-// pkg/unit/qty fields — those are entered fresh on the new row).
+// Copy everything the user filled on the parent row onto the freshly created
+// remainder row, so it comes pre-filled (supplier, warehouse, dates, etc.). Only
+// the split-quantity fields and system/identity fields are left out — the split
+// quantities are re-entered on the new row, and identity fields must stay unique.
+const MR_ITEM_NO_COPY_FIELDS = new Set([
+	// Identity / system fields — never copy.
+	"name",
+	"idx",
+	"docstatus",
+	"parent",
+	"parentfield",
+	"parenttype",
+	"doctype",
+	"owner",
+	"creation",
+	"modified",
+	"modified_by",
+	// Split-quantity fields — entered fresh on the remainder row.
+	"custom_packing_qty",
+	"custom_total_qty",
+	"qty",
+	"stock_qty",
+	"amount",
+	"custom_expected_qty",
+]);
+
 function copy_mr_item_fields(src, dest) {
-	[
-		"item_code",
-		"item_name",
-		"uom",
-		"stock_uom",
-		"conversion_factor",
-		"warehouse",
-		"from_warehouse",
-		"schedule_date",
-		"custom_forecast_club",
-		"description",
-		"item_group",
-		"brand",
-	].forEach((f) => {
-		if (src[f] !== undefined && src[f] !== null && src[f] !== "") {
-			dest[f] = src[f];
+	Object.keys(src).forEach((f) => {
+		if (f.startsWith("__") || MR_ITEM_NO_COPY_FIELDS.has(f)) {
+			return;
 		}
+		const value = src[f];
+		if (value === undefined || value === null || value === "") {
+			return;
+		}
+		dest[f] = value;
 	});
 }
 
@@ -128,12 +144,36 @@ function ensure_expected_remainder_row(frm, parentRow, remaining) {
 		child = frm.add_child("items");
 		copy_mr_item_fields(parentRow, child);
 		frm._mr_expected_child[parentRow.name] = child.name;
+		// New remainder row should sit right after its parent row, not at the
+		// end of the table (frm.add_child appends at the end).
+		insert_row_after_parent(frm, parentRow.name, child.name);
 	}
 
 	// The remainder becomes the new row's Expected Quantity (and its default qty);
 	// the user can split it further via Standard Pkg Qty / No of Unit.
 	frappe.model.set_value(child.doctype, child.name, "custom_expected_qty", remaining);
 	frappe.model.set_value(child.doctype, child.name, "qty", remaining);
+	frm.refresh_field("items");
+}
+
+// Move a freshly added child row so it sits immediately after its parent row,
+// then renumber idx so the grid renders in the new order.
+function insert_row_after_parent(frm, parentName, childName) {
+	const items = frm.doc.items || [];
+	const childIdx = items.findIndex((r) => r.name === childName);
+	if (childIdx === -1) {
+		return;
+	}
+
+	const [child] = items.splice(childIdx, 1);
+	const parentIdx = items.findIndex((r) => r.name === parentName);
+	if (parentIdx === -1) {
+		items.push(child);
+	} else {
+		items.splice(parentIdx + 1, 0, child);
+	}
+
+	items.forEach((r, i) => (r.idx = i + 1));
 	frm.refresh_field("items");
 }
 

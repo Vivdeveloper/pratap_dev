@@ -3,7 +3,10 @@ frappe.ui.form.on("Work Order", {
         if (![0, 1].includes(frm.doc.docstatus)) {
             return;
         }
-        if (frm.doc.custom_rework_qc && frm.doc.docstatus != 1) {
+        // Show the Rework Consumption button whenever a Rework QC is linked — on both
+        // draft and submitted Work Orders (rework typically happens on a submitted WO,
+        // where the button used to disappear).
+        if (frm.doc.custom_rework_qc) {
             handle_rework_consumption(frm);
         }
         // Show "Create Pratap QC" for both draft and submitted Work Orders

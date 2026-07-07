@@ -344,6 +344,10 @@ class PratapQualityInspection(Document):
 		if qty <= 0:
 			return
 
+		# A Manufacture stock entry needs a submitted Work Order, so auto-submit the
+		# linked WO (if still draft) once the QC is Accepted.
+		self._submit_linked_work_order()
+
 		stock_entry_data = self.make_stock_entry(
 			work_order_id=self.reference_name,
 			purpose="Manufacture",
@@ -679,8 +683,11 @@ class PratapQualityInspection(Document):
 		# ERPNext requires fg_completed_qty to match finished item qty.
 		stock_entry.fg_completed_qty = finished_qty or reference_qty
 
-		if work_order.bom_no:
-			stock_entry.inspection_required = frappe.db.get_value("BOM", work_order.bom_no, "inspection_required")
+		# The Pratap Quality Inspection IS the quality gate for this stock entry (it is
+		# only created once the QC is Accepted), so never inherit BOM.inspection_required
+		# here — doing so makes ERPNext demand a separate native Quality Inspection and
+		# blocks submit with "Quality Inspection required".
+		stock_entry.inspection_required = 0
 
 		if purpose == "Material Transfer for Manufacture":
 			stock_entry.to_warehouse = wip_warehouse
