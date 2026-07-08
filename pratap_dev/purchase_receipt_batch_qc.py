@@ -81,30 +81,68 @@ def apply_density_to_batch_qc_rows(rows):
 	return rows
 
 
+def _row_converted_qty(row, base_key, converted_key, fallback_density):
+	"""Density-converted (stock UOM) qty for a batch row.
+
+	Prefers the frozen *_density_qty value; otherwise divides the raw qty by the
+	batch's own density (or the fallback), matching apply_density_to_batch_qc_rows.
+	"""
+	converted = flt(row.get(converted_key))
+	if converted:
+		return converted
+
+	base = flt(row.get(base_key))
+	density = flt(row.get("density")) or flt(fallback_density)
+	return base / density if density > 0 else base
+
+
 def update_grn_from_batch_qc(grn_doc, item_row, batch_rows, custom_density=None):
-	"""Update GRN item qty and Serial and Batch Bundles from QC batch rows."""
+	"""Update GRN item qty and Serial and Batch Bundles from QC batch rows.
+
+	Density converts purchase-UOM batch qtys into stock-UOM qtys. The GRN row keeps
+	its accepted/rejected/received qty in purchase UOM and carries conversion_factor
+	= 1 / density; stock_qty and both Serial and Batch Bundles (always stock UOM) use
+	the density-converted qtys so ERPNext's bundle-vs-stock_qty check passes.
+	"""
 	if not batch_rows:
 		return
 
+	# Purchase-UOM totals (what the GRN row's qty / rejected_qty / received_qty hold).
 	total_accepted = sum(flt(row["accepted_qty"]) for row in batch_rows)
 	total_rejected = sum(flt(row["rejected_qty"]) for row in batch_rows)
 	total_received = total_accepted + total_rejected
 
+	# Stock-UOM totals (density-converted) for stock_qty and the bundles.
+	total_accepted_stock = sum(
+		_row_converted_qty(row, "accepted_qty", "accepted_density_qty", custom_density)
+		for row in batch_rows
+	)
+	total_rejected_stock = sum(
+		_row_converted_qty(row, "rejected_qty", "rejected_density_qty", custom_density)
+		for row in batch_rows
+	)
+
+	# Serial and Batch Bundle entries are in stock UOM, so use the converted qtys.
 	accepted_batches = {
-		row["batch_no"]: flt(row["accepted_qty"])
+		row["batch_no"]: _row_converted_qty(row, "accepted_qty", "accepted_density_qty", custom_density)
 		for row in batch_rows
 		if flt(row["accepted_qty"]) > 0
 	}
 	rejected_batches = {
-		row["batch_no"]: flt(row["rejected_qty"])
+		row["batch_no"]: _row_converted_qty(row, "rejected_qty", "rejected_density_qty", custom_density)
 		for row in batch_rows
 		if flt(row["rejected_qty"]) > 0
 	}
 
+	density = flt(custom_density)
+	if density > 0:
+		item_row.conversion_factor = 1.0 / density
+		item_row.custom_density = density
+
 	item_row.qty = total_accepted
 	item_row.rejected_qty = total_rejected
 	item_row.received_qty = total_received
-	item_row.stock_qty = flt(total_accepted) * flt(item_row.conversion_factor or 1)
+	item_row.stock_qty = total_accepted_stock
 
 	if total_rejected > 0:
 		rejected_warehouse = item_row.rejected_warehouse or grn_doc.rejected_warehouse
@@ -118,14 +156,14 @@ def update_grn_from_batch_qc(grn_doc, item_row, batch_rows, custom_density=None)
 		grn_doc,
 		item_row,
 		accepted_batches,
-		total_accepted,
+		total_accepted_stock,
 		is_rejected=False,
 	)
 	_update_item_bundle(
 		grn_doc,
 		item_row,
 		rejected_batches,
-		total_rejected,
+		total_rejected_stock,
 		is_rejected=True,
 	)
 
