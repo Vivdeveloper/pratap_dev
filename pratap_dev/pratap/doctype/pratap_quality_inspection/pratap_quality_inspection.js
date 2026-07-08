@@ -602,11 +602,13 @@ function normalize_grn_batch_row(row, saved = {}) {
 		accepted_unit = standard_pkg_qty ? flt(row.accepted_qty) / standard_pkg_qty : 0;
 	}
 
+	// User-edited (saved) density wins over the GRN-fetched default, mirroring how
+	// accepted_unit prefers the saved value — otherwise a reload overwrites edits.
 	let density = 0;
-	if (row.density !== null && row.density !== undefined && row.density !== "") {
-		density = flt(row.density);
-	} else if (saved.density !== null && saved.density !== undefined && saved.density !== "") {
+	if (saved.density !== null && saved.density !== undefined && saved.density !== "") {
 		density = flt(saved.density);
+	} else if (row.density !== null && row.density !== undefined && row.density !== "") {
+		density = flt(row.density);
 	}
 
 	const normalized = {
