@@ -627,17 +627,23 @@ class PratapQualityInspection(Document):
 				)
 				self._apply_grn_item_qc_meta(owner, owner_density)
 		else:
+			# No batch breakdown: legacy single-density path applies one conversion
+			# factor to the whole GRN item row.
 			for item_row in item_rows:
 				self._update_batch_custom_density(grn_doc, item_row)
-				self._apply_grn_item_qc_meta(item_row, frappe.utils.flt(self.custom_density))
+				density = frappe.utils.flt(self.custom_density)
+				if density > 0:
+					item_row.conversion_factor = 1.0 / density
+				self._apply_grn_item_qc_meta(item_row, density)
 
 		grn_doc.save(ignore_permissions=True)
 
 	def _apply_grn_item_qc_meta(self, item_row, density):
-		# conversion_factor = 1 / density (density_qty / reference_qty reduces to this).
+		# Store QC meta only. conversion_factor is owned by the batch path
+		# (update_grn_from_batch_qc sets it to 1) and by the no-batch caller above,
+		# so this must not overwrite it.
 		density = frappe.utils.flt(density)
 		if density > 0:
-			item_row.conversion_factor = 1.0 / density
 			item_row.custom_density = density
 
 		item_row.custom_pratap_quality_inspection = self.name

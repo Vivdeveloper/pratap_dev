@@ -134,14 +134,19 @@ def update_grn_from_batch_qc(grn_doc, item_row, batch_rows, custom_density=None)
 		if flt(row["rejected_qty"]) > 0
 	}
 
+	# Per-batch density means each batch converts by its own factor, so a single
+	# item-level conversion_factor can't reproduce the summed bundle total (and for
+	# NOS/NOS items ERPNext forces conversion_factor = 1 anyway). Instead the
+	# density-converted qty *becomes* the received qty: qty == stock_qty == bundle
+	# total, with conversion_factor = 1, so ERPNext's bundle-vs-stock_qty check passes.
 	density = flt(custom_density)
 	if density > 0:
-		item_row.conversion_factor = 1.0 / density
 		item_row.custom_density = density
+	item_row.conversion_factor = 1
 
-	item_row.qty = total_accepted
-	item_row.rejected_qty = total_rejected
-	item_row.received_qty = total_received
+	item_row.qty = total_accepted_stock
+	item_row.rejected_qty = total_rejected_stock
+	item_row.received_qty = total_accepted_stock + total_rejected_stock
 	item_row.stock_qty = total_accepted_stock
 
 	if total_rejected > 0:
