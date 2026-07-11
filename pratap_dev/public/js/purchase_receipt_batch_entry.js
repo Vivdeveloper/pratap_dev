@@ -308,6 +308,27 @@ async function save_multi_batch_entry(frm, dialog, sections) {
 		return;
 	}
 
+	// A batch can belong to only one item row — reject the same batch across sections.
+	const seen_batches = new Set();
+	for (const p of payloads) {
+		for (const entry of p.rows) {
+			const batch_no = (entry.batch_no || "").trim();
+			if (!batch_no) {
+				continue;
+			}
+			if (seen_batches.has(batch_no)) {
+				frappe.throw({
+					title: __("Duplicate Batch"),
+					message: __(
+						"Batch {0} is used for more than one item row. Each batch can be added to only one row.",
+						[batch_no]
+					),
+				});
+			}
+			seen_batches.add(batch_no);
+		}
+	}
+
 	dialog.hide();
 	frappe.dom.freeze(__("Updating batch details..."));
 	try {
@@ -441,8 +462,22 @@ function setup_batch_link_query(grid, item_code, default_pkg_qty = 1) {
 	const apply_query = (grid_row) => {
 		const field = grid_row?.get_field?.("batch_no");
 		if (field) {
-			field.get_query = batch_query;
-			field.df.get_query = batch_query;
+			// Row-aware query: same base filters, but also hide any batch already
+			// picked in another row/section of this dialog (excluding this row itself).
+			const row_query = () => {
+				const filters = {
+					item: item_code,
+					// Only batches whose Standard Pkg Qty is still empty (not yet assigned).
+					custom_standard_pkg_qty: ["is", "not set"],
+				};
+				const used = get_used_batch_nos(grid_row?.doc);
+				if (used.length) {
+					filters.name = ["not in", used];
+				}
+				return { filters };
+			};
+			field.get_query = row_query;
+			field.df.get_query = row_query;
 			field.df.get_route_options_for_new_doc = batch_route_options;
 		}
 	};
@@ -489,7 +524,14 @@ function finalize_new_batch_entry_row(grid, default_pkg_qty, item_code) {
 		grid_row.refresh_field("qty");
 
 		if (item_code) {
-			const batch_query = () => ({ filters: { item: item_code } });
+			const batch_query = () => {
+				const filters = { item: item_code };
+				const used = get_used_batch_nos(grid_row?.doc);
+				if (used.length) {
+					filters.name = ["not in", used];
+				}
+				return { filters };
+			};
 			const batch_route_options = () => ({ item: item_code });
 			const field = grid_row.get_field?.("batch_no");
 			if (field) {
@@ -549,6 +591,34 @@ function recompute_all_batch_qty() {
 		});
 		grid.refresh();
 	});
+}
+
+// Batch Nos already chosen anywhere in the current dialog (every section + row),
+// excluding `current_row`. Used to stop the same batch being picked for two item
+// rows: a batch entered in one table is filtered out of every other table's picker.
+function get_used_batch_nos(current_row) {
+	const dialog = pratap_batch_entry_state.dialog;
+	if (!dialog || !dialog.fields_dict) {
+		return [];
+	}
+	const used = new Set();
+	Object.values(dialog.fields_dict).forEach((field) => {
+		const grid = field && field.grid;
+		if (!grid) {
+			return;
+		}
+		const data = grid.data || (grid.df && grid.df.data) || [];
+		data.forEach((row) => {
+			if (row === current_row) {
+				return;
+			}
+			const batch_no = (row.batch_no || "").trim();
+			if (batch_no) {
+				used.add(batch_no);
+			}
+		});
+	});
+	return [...used];
 }
 
 function get_batch_entry_table_fields(default_pkg_qty, is_read_only = false, item_code = "") {
@@ -639,12 +709,17 @@ function validate_batch_entry_rows(rows, required_no_of_unit) {
 	}
 
 	let total_no_of_unit = 0;
+	const seen_batches = new Set();
 
 	for (const entry of rows) {
 		const batch_no = (entry.batch_no || "").trim();
 		if (!batch_no) {
 			frappe.throw(__("Batch No is required for all rows."));
 		}
+		if (seen_batches.has(batch_no)) {
+			frappe.throw(__("Batch {0} is added more than once. Each batch can be added only once.", [batch_no]));
+		}
+		seen_batches.add(batch_no);
 		if (flt(entry.custom_total_qty) <= 0) {
 			frappe.throw(__("No of Unit must be greater than 0 for batch {0}.", [batch_no]));
 		}
