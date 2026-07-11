@@ -465,7 +465,7 @@
    "description": null,
    "docstatus": 0,
    "dt": "Purchase Receipt Item",
-   "fetch_from": "custom_pratap_quality_inspection.custom_density",
+   "fetch_from": null,
    "fetch_if_empty": 0,
    "fieldname": "custom_density",
    "fieldtype": "Float",

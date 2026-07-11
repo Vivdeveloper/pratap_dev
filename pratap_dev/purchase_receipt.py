@@ -105,6 +105,12 @@ class PratapPurchaseReceipt(PurchaseReceipt):
             qc_name = row.get("custom_pratap_quality_inspection")
             if not qc_name:
                 continue
+            # Only seed the row's density when it doesn't already carry one. On submit
+            # the per-batch GRN QC path (Pratap QC -> _update_grn_item) writes each row's
+            # real per-batch density directly; this doc-level sync runs again during that
+            # grn_doc.save() and must not clobber it back to the QC's doc-level default.
+            if flt(row.get("custom_density")):
+                continue
             density = frappe.db.get_value("Pratap Quality Inspection", qc_name, "custom_density")
             if density not in (None, ""):
                 row.custom_density = flt(density)

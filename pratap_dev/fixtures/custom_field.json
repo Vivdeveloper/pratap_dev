@@ -816,7 +816,7 @@
   "hide_days": 0,
   "options": null,
   "sort_options": 0,
-  "fetch_from": "custom_pratap_quality_inspection.custom_density",
+  "fetch_from": null,
   "fetch_if_empty": 0,
   "collapsible": 0,
   "collapsible_depends_on": null,
