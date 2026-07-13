@@ -3,7 +3,7 @@
 
 import frappe
 from frappe import _
-from frappe.utils import flt
+from frappe.utils import flt, getdate
 
 from erpnext.stock.doctype.purchase_receipt.purchase_receipt import PurchaseReceipt
 
@@ -142,6 +142,22 @@ class PratapPurchaseReceipt(PurchaseReceipt):
         batch.insert()
         return batch.name
 
+def _ensure_due_date_not_before_bill_date(target, bill_date):
+    """Keep due_date >= supplier invoice (bill) date on an auto-created invoice.
+
+    With no payment terms template the due date defaults to the posting date. When the
+    supplier invoice date is later than posting (a future-dated bill), ERPNext's
+    validate_due_date then fails with "Due Date cannot be before Posting / Supplier
+    Invoice Date". Push the due date out to the bill date so the document can save.
+    """
+    if not bill_date or not target.meta.has_field("due_date"):
+        return
+
+    current_due = target.get("due_date") or target.get("posting_date")
+    if not current_due or getdate(bill_date) > getdate(current_due):
+        target.due_date = bill_date
+
+
 def create_grouped_purchase_invoice_if_ready(grn):
     """Create one combined Purchase Invoice once every GRN in the group is submitted.
 
@@ -201,6 +217,7 @@ def create_grouped_purchase_invoice_if_ready(grn):
         target.bill_no = bill_no
     if bill_date and target.meta.has_field("bill_date"):
         target.bill_date = bill_date
+    _ensure_due_date_not_before_bill_date(target, bill_date)
 
     target.flags.ignore_permissions = True
     target.save()
@@ -438,6 +455,8 @@ def _copy_grn_reference_fields(grn, target):
     if bill_date and target.meta.has_field("custom_supplier_invoice_date"):
         target.custom_supplier_invoice_date = bill_date
 
+    _ensure_due_date_not_before_bill_date(target, bill_date)
+
 
 def _get_grn_item_qc_map(grn_name):
     """Return {item_code: qc_name} for the latest non-cancelled QC of each item on this GRN.
@@ -551,7 +570,15 @@ def link_pratap_qc_to_grn_item(doc, method=None):
         return
 
     values = {"custom_pratap_quality_inspection": doc.name}
-    if doc.get("custom_density") not in (None, ""):
+    # Don't clobber a per-batch density already written on the row by the GRN QC
+    # submit flow (_update_grn_item). This function runs again from _submit_linked_grn
+    # AFTER _update_grn_item, and it only targets the first matching row — so without
+    # this guard it overwrites that row's correct per-batch density with the doc-level
+    # default. Only seed the doc-level density when the row has none yet.
+    existing_density = frappe.db.get_value(
+        "Purchase Receipt Item", target_row_name, "custom_density"
+    )
+    if doc.get("custom_density") not in (None, "") and not flt(existing_density):
         values["custom_density"] = flt(doc.custom_density)
 
     frappe.db.set_value(
@@ -581,13 +608,17 @@ def sync_grn_item_density_from_pratap_qc(grn_name, item_code, qc_name, purchase_
         )
 
     if row_name:
-        frappe.db.set_value(
-            "Purchase Receipt Item",
-            row_name,
-            "custom_density",
-            flt(density),
-            update_modified=False,
-        )
+        # Only seed doc-level density when the row has none; never overwrite a
+        # per-batch density set by the GRN QC submit flow (_update_grn_item).
+        existing_density = frappe.db.get_value("Purchase Receipt Item", row_name, "custom_density")
+        if not flt(existing_density):
+            frappe.db.set_value(
+                "Purchase Receipt Item",
+                row_name,
+                "custom_density",
+                flt(density),
+                update_modified=False,
+            )
 
 
 def clear_pratap_qc_from_grn_item(doc, remove_reference=False):
