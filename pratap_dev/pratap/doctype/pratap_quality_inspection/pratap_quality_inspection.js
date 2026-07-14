@@ -81,6 +81,7 @@ frappe.ui.form.on("Pratap Quality Inspection", {
 		}
 		if (!frm.doc.quality_inspection_template) {
 			frm.call("get_item_specification_details").then(() => {
+				persist_reading_specs(frm);
 				frm.refresh_field("readings");
 				apply_reading_table_mode(frm);
 				render_batch_readings_matrix(frm);
@@ -90,6 +91,7 @@ frappe.ui.form.on("Pratap Quality Inspection", {
 
 	quality_inspection_template(frm) {
 		frm.call("get_item_specification_details").then(() => {
+			persist_reading_specs(frm);
 			frm.refresh_field("readings");
 			apply_reading_table_mode(frm);
 			render_batch_readings_matrix(frm);
@@ -242,6 +244,20 @@ function update_reading_row_status(frm, cdt, cdn) {
 	}
 
 	update_document_status_from_readings(frm);
+}
+
+// Persist template-fetched acceptance limits onto each reading row so they are
+// committed to the model — not just displayed. Without this the fetched min/max
+// can show once and then vanish when the row is edited / the grid re-renders.
+function persist_reading_specs(frm) {
+    (frm.doc.readings || []).forEach((row) => {
+        ["min_value", "max_value"].forEach((field) => {
+            const val = row[field];
+            if (val !== undefined && val !== null && val !== "") {
+                frappe.model.set_value(row.doctype, row.name, field, flt(val));
+            }
+        });
+    });
 }
 
 function update_document_status_from_readings(frm) {
