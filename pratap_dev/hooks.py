@@ -274,6 +274,7 @@ doctype_js = {
     "Delivery Note": "public/js/pratap_quality_inspection_reference_override.js",
     "Sales Invoice": "public/js/pratap_quality_inspection_reference_override.js",
     "Material Request": "public/js/material_request.js",
+    "BOM": "public/js/bom.js",
 }
 
 doctype_list_js = {
