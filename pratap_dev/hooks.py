@@ -318,6 +318,9 @@ doc_events = {
     "Batch": {
         "validate": "pratap_dev.batch_hooks.set_batch_no_of_unit",
     },
+    "Work Order": {
+        "validate": "pratap_dev.work_order_instruction.set_operation_instructions",
+    },
     "Custom Field": {
         "on_update": "pratap_dev.fixture_export.export_custom_field_on_save",
     },

@@ -27,20 +27,67 @@ frappe.ui.form.on("Work Order", {
         // Populate the Plant 1 / Plant 2 WIP RM (and Main Store RM) stock columns for
         // every required item on a draft Work Order.
         populate_wo_stock_all(frm);
+        populate_wo_instructions(frm);
         },
 
     // When the item / BOM / qty changes, ERPNext re-fetches Required Items from the BOM
     // asynchronously. Re-scan the rows after a short delay so the stock columns fill in.
     item_to_manufacture(frm) {
         populate_wo_stock_all(frm, 1000);
+        populate_wo_instructions(frm, 1000);
     },
     bom_no(frm) {
         populate_wo_stock_all(frm, 1000);
+        populate_wo_instructions(frm, 1000);
     },
     qty(frm) {
         populate_wo_stock_all(frm, 1000);
+        populate_wo_instructions(frm, 1000);
     },
 });
+
+// Copy the Operation Instruction columns from the BOM onto the Required Items rows.
+// The server sets these on validate too; doing it here as well means they show up as
+// soon as the rows appear, rather than only after the first save.
+function populate_wo_instructions(frm, delay) {
+    if (frm.doc.docstatus !== 0 || !frm.doc.bom_no) {
+        return;
+    }
+    const run = () => {
+        frappe
+            .xcall("pratap_dev.work_order_instruction.get_bom_operation_instructions", {
+                bom_no: frm.doc.bom_no,
+            })
+            .then((instructions) => {
+                (frm.doc.required_items || []).forEach((row) => {
+                    // A multi-level BOM explodes sub-assemblies, so some rows have no
+                    // BOM Item row on this BOM; leave those blank.
+                    const source = instructions[row.item_code] || {};
+                    WO_INSTRUCTION_FIELDS.forEach((fieldname) => {
+                        frappe.model.set_value(
+                            row.doctype,
+                            row.name,
+                            fieldname,
+                            source[fieldname] || "",
+                            null,
+                            true
+                        );
+                    });
+                });
+            })
+            .catch(() => {});
+    };
+    if (delay) {
+        setTimeout(run, delay);
+    } else {
+        run();
+    }
+}
+
+const WO_INSTRUCTION_FIELDS = [
+    "custom_operation_instruction",
+    "custom_operation_instruction_marathi",
+];
 
 frappe.ui.form.on("Work Order Item", {
     item_code(frm, cdt, cdn) {
