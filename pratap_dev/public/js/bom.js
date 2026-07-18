@@ -1,5 +1,15 @@
 frappe.ui.form.on("BOM", {
 	setup(frm) {
+		// Filter dropdown: show only parent (group) item groups, e.g. Finished
+		// Goods / Raw Material — not the leaf item groups.
+		frm.set_query("custom_item_group_filter", function () {
+			return {
+				filters: {
+					is_group: 1,
+				},
+			};
+		});
+
 		// Runs after ERPNext's own setup handler, so this query wins.
 		frm.set_query("item_code", "items", function () {
 			return {
