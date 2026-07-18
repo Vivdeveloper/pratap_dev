@@ -1,4 +1,13 @@
+const MR_DEFAULT_SOURCE_WAREHOUSE = "Plant 1 WIP FG - PTPL";
+
 frappe.ui.form.on("Material Request", {
+	onload(frm) {
+		// Default the Set Source Warehouse to Plant 1 WIP FG on new Material Requests.
+		if (frm.is_new() && !frm.doc.set_from_warehouse) {
+			frm.set_value("set_from_warehouse", MR_DEFAULT_SOURCE_WAREHOUSE);
+		}
+	},
+
 	refresh(frm) {
 		frm.remove_custom_button(__("Purchase Order"), __("Create"));
 
