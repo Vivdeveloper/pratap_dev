@@ -6,13 +6,37 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import cint
 # from erpnext.manufacturing.doctype.work_order.work_order import make_stock_entry
-from erpnext.stock.doctype.quality_inspection_template.quality_inspection_template import (
-	get_template_details
-)
 
 # GRN QC outcomes that still count as "passed enough" to flow to the GRN
 # (fully accepted, or partially accepted/rejected across batches).
 QC_GRN_OK_STATUSES = {"Accepted", "Partially Accepted", "Partially Rejected"}
+
+
+def get_template_parameters(template):
+	"""Template parameters incl. our custom fields (qc_method, specifications).
+
+	ERPNext's get_template_details() only returns a fixed set of columns and
+	drops custom fields, so we fetch the same rows ourselves and add ours.
+	"""
+	if not template:
+		return []
+
+	return frappe.get_all(
+		"Item Quality Inspection Parameter",
+		fields=[
+			"specification",
+			"value",
+			"acceptance_formula",
+			"numeric",
+			"formula_based_criteria",
+			"min_value",
+			"max_value",
+			"qc_method",
+			"specifications",
+		],
+		filters={"parenttype": "Quality Inspection Template", "parent": template},
+		order_by="idx",
+	)
 
 
 class PratapQualityInspection(Document):
@@ -293,7 +317,7 @@ class PratapQualityInspection(Document):
 		if not self.quality_inspection_template:
 			return
 
-		parameters = get_template_details(self.quality_inspection_template)
+		parameters = get_template_parameters(self.quality_inspection_template)
 		self.set("readings", [])
 		for parameter in parameters:
 			row = self.append("readings", {})
@@ -315,7 +339,7 @@ class PratapQualityInspection(Document):
 		if not self.quality_inspection_template:
 			return
 
-		parameters = get_template_details(self.quality_inspection_template)
+		parameters = get_template_parameters(self.quality_inspection_template)
 		for parameter in parameters:
 			row = self.append("readings", {})
 			row.update(parameter)
