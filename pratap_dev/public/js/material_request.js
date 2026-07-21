@@ -3,9 +3,9 @@ const MR_DEFAULT_SOURCE_WAREHOUSE = "Plant 1 WIP FG - PTPL";
 frappe.ui.form.on("Material Request", {
 	onload(frm) {
 		// Default the Set Source Warehouse to Plant 1 WIP FG on new Material Requests.
-		if (frm.is_new() && !frm.doc.set_from_warehouse) {
-			frm.set_value("set_from_warehouse", MR_DEFAULT_SOURCE_WAREHOUSE);
-		}
+		// if (frm.is_new() && !frm.doc.set_from_warehouse) {
+		// 	frm.set_value("set_from_warehouse", MR_DEFAULT_SOURCE_WAREHOUSE);
+		// }
 	},
 
 	refresh(frm) {
@@ -38,8 +38,150 @@ frappe.ui.form.on("Material Request", {
 			});
 			$(sf_btn).css({ "background-color": "black", color: "white" });
 		}
+
+		// ERPNext adds its own Create > Work Order; ours is the picker below.
+		setTimeout(() => frm.remove_custom_button(__("Work Order"), __("Create")), 200);
+
+		const wo_btn = frm.add_custom_button(__("Work Order"), () => {
+			open_work_order_dialog(frm);
+		});
+		$(wo_btn).css({ "background-color": "black", color: "white" });
+
+		// Keep the warehouse stock columns filled on drafts too, so they are
+		// visible before the Material Request is ever saved.
+		populate_rm_stock_all(frm);
+
+		setup_reject_button(frm);
+	},
+
+	company(frm) {
+		populate_rm_stock_all(frm);
 	},
 });
+
+function populate_rm_stock_all(frm) {
+	if (frm.doc.docstatus !== 0) {
+		return;
+	}
+	(frm.doc.items || []).forEach((row) => set_rm_warehouse_qty(frm, row.doctype, row.name));
+}
+
+// "Reject" lets the current approver peel selected items off this Material
+// Request into a brand-new one. It appears both at the top (form toolbar) and at
+// the bottom (next to the grid's Delete button) — but ONLY when this user is at
+// the workflow decision point where Approve/Reject is available to them.
+// "Reject" lets the current approver peel selected item rows off this Material
+// Request into a brand-new one. It shows both at the top (form toolbar) and at
+// the bottom (next to the grid's Delete button) — but ONLY when this user is at
+// the workflow decision point where Approve/Reject is available to them.
+function setup_reject_button(frm) {
+	const grid = frm.fields_dict.items && frm.fields_dict.items.grid;
+	if (!grid) {
+		return;
+	}
+
+	// Reset on every refresh: the bottom grid button persists on the grid object,
+	// so hide it and drop the top button until we re-confirm this user may reject.
+	frm._mr_can_reject = false;
+	frm.remove_custom_button(__("Reject"));
+	const hide_bottom = () => {
+		const $btn = grid.custom_buttons[__("Reject")];
+		if ($btn) {
+			$btn.addClass("hidden");
+		}
+	};
+	hide_bottom();
+
+	// Bottom button tracks row selection, but only when rejecting is allowed.
+	const toggle_bottom = () => {
+		const $btn = grid.custom_buttons[__("Reject")];
+		if (!$btn) {
+			return;
+		}
+		const any = grid.wrapper.find(".grid-body .grid-row-check:checked:first").length > 0;
+		$btn.toggleClass("hidden", !(frm._mr_can_reject && any));
+	};
+	grid.wrapper.off("click.mrreject").on("click.mrreject", ".grid-row-check", () => {
+		setTimeout(toggle_bottom, 50);
+	});
+
+	if (frm.is_new() || frm.doc.docstatus !== 0) {
+		return;
+	}
+
+	// Only wire up the buttons if a workflow "Reject" action is available to this
+	// user on this document right now (i.e. the Approve/Reject decision point).
+	frappe
+		.xcall("frappe.model.workflow.get_transitions", { doc: frm.doc })
+		.then((transitions) => {
+			const can_reject = (transitions || []).some((t) =>
+				(t.action || "").toLowerCase().includes("reject")
+			);
+			frm._mr_can_reject = can_reject;
+			if (!can_reject) {
+				hide_bottom();
+				return;
+			}
+
+			// Bottom button (next to Delete).
+			grid
+				.add_custom_button(__("Reject"), () => reject_selected_items(frm, grid))
+				.removeClass("btn-secondary")
+				.addClass("btn-danger");
+			toggle_bottom();
+
+			// Top button (form toolbar).
+			frm.add_custom_button(__("Reject"), () => reject_selected_items(frm, grid));
+		})
+		.catch(() => {});
+}
+
+function reject_selected_items(frm, grid) {
+	const selected = grid.get_selected_children();
+	if (!selected.length) {
+		frappe.msgprint(__("Select at least one item to reject"));
+		return;
+	}
+	if (frm.is_dirty()) {
+		frappe.msgprint(__("Please save the document before rejecting items."));
+		return;
+	}
+	if (selected.length >= (frm.doc.items || []).length) {
+		frappe.msgprint(__("Cannot reject all items — at least one item must remain here."));
+		return;
+	}
+
+	frappe.confirm(
+		__("Move {0} selected item(s) to a new Material Request and remove them from here?", [
+			selected.length,
+		]),
+		() => {
+			frappe.call({
+				method: "pratap_dev.material_request_reject.reject_items_to_new_mr",
+				args: {
+					source_name: frm.doc.name,
+					item_rows: JSON.stringify(selected.map((d) => d.name)),
+				},
+				freeze: true,
+				freeze_message: __("Rejecting items..."),
+				callback(r) {
+					if (!r.message) {
+						return;
+					}
+					frm.reload_doc();
+					const link = `<a href="/app/material-request/${r.message}">${frappe.utils.escape_html(
+						r.message
+					)}</a>`;
+					frappe.msgprint({
+						title: __("Items Rejected"),
+						indicator: "green",
+						message: __("New Material Request {0} created with the rejected items.", [link]),
+					});
+				},
+			});
+		}
+	);
+}
 
 frappe.ui.form.on("Material Request Item", {
 	item_code(frm, cdt, cdn) {
@@ -271,57 +413,49 @@ function set_rm_qty_field(cdt, cdn, fieldname, value) {
 	frappe.model.set_value(cdt, cdn, fieldname, next_value, null, true);
 }
 
+// Warehouses to show per item row: [warehouse_name prefix, target field].
+const MR_STOCK_WAREHOUSES = [
+	["Main Store RM", "custom_main_store_rm_qty"],
+	["Plant 1 WIP RM", "custom_plant_1_wip_rm"],
+	["Plant 2 WIP RM", "custom_plant_2_wip_rm"],
+];
+
 function set_rm_warehouse_qty(frm, cdt, cdn) {
 	if (frm.doc.docstatus !== 0) {
 		return;
 	}
 
 	const row = locals[cdt][cdn];
-	if (!row.item_code || !frm.doc.company) {
-		set_rm_qty_field(cdt, cdn, "custom_wip_rm_qty", 0);
-		set_rm_qty_field(cdt, cdn, "custom_main_store_rm_qty", 0);
+	if (!row || !row.item_code || !frm.doc.company) {
+		MR_STOCK_WAREHOUSES.forEach(([, fieldname]) => set_rm_qty_field(cdt, cdn, fieldname, 0));
 		return;
 	}
 
-	Promise.all([
-		frappe.db.get_value("Warehouse", { warehouse_name: "WIP RM", company: frm.doc.company }, "name"),
-		frappe.db.get_value(
-			"Warehouse",
-			{ warehouse_name: "Main Store RM", company: frm.doc.company },
-			"name"
-		),
-	])
-		.then(([wip_warehouse, main_store_warehouse]) => {
-			const wip_wh = wip_warehouse?.message?.name;
-			const main_wh = main_store_warehouse?.message?.name;
-
-			return Promise.all([
-				wip_wh
-					? frappe
-							.xcall("erpnext.stock.utils.get_latest_stock_qty", {
-								item_code: row.item_code,
-								warehouse: wip_wh,
-							})
-							.then((qty) => flt(qty))
-					: Promise.resolve(0),
-				main_wh
-					? frappe
-							.xcall("erpnext.stock.utils.get_latest_stock_qty", {
-								item_code: row.item_code,
-								warehouse: main_wh,
-							})
-							.then((qty) => flt(qty))
-					: Promise.resolve(0),
-			]);
-		})
-		.then(([wip_qty, main_qty]) => {
-			set_rm_qty_field(cdt, cdn, "custom_wip_rm_qty", wip_qty);
-			set_rm_qty_field(cdt, cdn, "custom_main_store_rm_qty", main_qty);
-		})
-		.catch(() => {
-			set_rm_qty_field(cdt, cdn, "custom_wip_rm_qty", 0);
-			set_rm_qty_field(cdt, cdn, "custom_main_store_rm_qty", 0);
+	MR_STOCK_WAREHOUSES.forEach(([warehouse_name, fieldname]) => {
+		get_rm_warehouse_stock(row.item_code, warehouse_name, frm.doc.company).then((qty) => {
+			set_rm_qty_field(cdt, cdn, fieldname, qty);
 		});
+	});
+}
+
+// Warehouse names may carry a trailing space (e.g. "Plant 1 WIP RM "), so match by prefix.
+function get_rm_warehouse_stock(item_code, warehouse_name, company) {
+	return frappe.db
+		.get_list("Warehouse", {
+			filters: { warehouse_name: ["like", `${warehouse_name}%`], company: company },
+			fields: ["name"],
+			limit: 1,
+		})
+		.then((rows) => {
+			const warehouse = rows && rows.length ? rows[0].name : null;
+			if (!warehouse) {
+				return 0;
+			}
+			return frappe
+				.xcall("erpnext.stock.utils.get_latest_stock_qty", { item_code, warehouse })
+				.then((qty) => flt(qty));
+		})
+		.catch(() => 0);
 }
 
 function fetch_supplier_name_map(suppliers) {
@@ -619,18 +753,84 @@ function open_sales_forecast_dialog(frm) {
 				frappe.msgprint(__("No Sales Forecast items found."));
 				return;
 			}
-			show_sales_forecast_dialog(frm, data);
+			fetch_forecast_stock_map(frm, data).then((stock_map) => {
+				show_sales_forecast_dialog(frm, data, stock_map);
+			});
 		},
 	});
 }
 
-function show_sales_forecast_dialog(frm, data) {
+// Stock columns are only meaningful when we are buying, so skip the lookup for
+// other purposes and render the dialog without them.
+function fetch_forecast_stock_map(frm, data) {
+	if (frm.doc.material_request_type !== "Purchase" || !frm.doc.company) {
+		return Promise.resolve(null);
+	}
+
+	const item_codes = [];
+	data.forEach((d) => {
+		(d.items || []).forEach((i) => {
+			if (i.item_code && !item_codes.includes(i.item_code)) {
+				item_codes.push(i.item_code);
+			}
+		});
+	});
+
+	if (!item_codes.length) {
+		return Promise.resolve(null);
+	}
+
+	// Warehouse names may carry a trailing space, so resolve each one by prefix.
+	return Promise.all(
+		MR_STOCK_WAREHOUSES.map(([warehouse_name]) =>
+			frappe.db
+				.get_list("Warehouse", {
+					filters: {
+						warehouse_name: ["like", `${warehouse_name}%`],
+						company: frm.doc.company,
+					},
+					fields: ["name"],
+					limit: 1,
+				})
+				.then((rows) => (rows && rows.length ? rows[0].name : null))
+		)
+	)
+		.then((warehouses) => {
+			const known = warehouses.filter(Boolean);
+			if (!known.length) {
+				return null;
+			}
+			return frappe.db
+				.get_list("Bin", {
+					filters: { item_code: ["in", item_codes], warehouse: ["in", known] },
+					fields: ["item_code", "warehouse", "actual_qty"],
+					limit: 0,
+				})
+				.then((bins) => {
+					const by_warehouse = {};
+					(bins || []).forEach((bin) => {
+						by_warehouse[bin.warehouse] = by_warehouse[bin.warehouse] || {};
+						by_warehouse[bin.warehouse][bin.item_code] = flt(bin.actual_qty);
+					});
+					// Column order mirrors MR_STOCK_WAREHOUSES; null warehouse => blank column.
+					return MR_STOCK_WAREHOUSES.map(([label], idx) => ({
+						label,
+						qty_by_item: by_warehouse[warehouses[idx]] || {},
+					}));
+				});
+		})
+		.catch(() => null);
+}
+
+function show_sales_forecast_dialog(frm, data, stock_map) {
 	const existing_fcs = [];
 	(frm.doc.items || []).forEach((row) => {
 		if (row.custom_forecast_club && !existing_fcs.includes(row.custom_forecast_club)) {
 			existing_fcs.push(row.custom_forecast_club);
 		}
 	});
+
+	const stock_cols = stock_map || [];
 
 	let html = `
 <style>
@@ -645,7 +845,10 @@ function show_sales_forecast_dialog(frm, data) {
 .sf-table th { background: #f7f7f7; padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
 .sf-table td { padding: 8px; border-bottom: 1px solid #eee; }
 .sf-qty-badge { background: #f1f3f5; padding: 3px 8px; border-radius: 6px; font-weight: 500; }
+.sf-stock-badge { background: #e8f1fc; color: #1d6fc0; padding: 3px 8px; border-radius: 6px; font-weight: 500; }
+.sf-select-all { display: flex; align-items: center; gap: 8px; padding: 8px 4px; margin-bottom: 8px; font-weight: 600; font-size: 13px; }
 </style>
+<label class="sf-select-all"><input type="checkbox" class="sf-select-all-box"> ${__("Select All")}</label>
 `;
 
 	data.forEach((d) => {
@@ -663,9 +866,12 @@ function show_sales_forecast_dialog(frm, data) {
 			<table class="sf-table">
 				<thead>
 					<tr>
-						<th style="width:20%">${__("Item Code")}</th>
-						<th style="width:60%">${__("Item Name")}</th>
-						<th style="width:20%">${__("MR Qty")}</th>
+						<th style="width:${stock_cols.length ? "16%" : "20%"}">${__("Item Code")}</th>
+						<th style="width:${stock_cols.length ? "32%" : "60%"}">${__("Item Name")}</th>
+						<th style="width:${stock_cols.length ? "13%" : "20%"}">${__("Expected Qty")}</th>
+						${stock_cols
+							.map((col) => `<th style="width:13%">${__(col.label)}</th>`)
+							.join("")}
 					</tr>
 				</thead>
 				<tbody>`;
@@ -677,10 +883,18 @@ function show_sales_forecast_dialog(frm, data) {
 						<td>${frappe.utils.escape_html(i.item_code)}</td>
 						<td>${frappe.utils.escape_html(i.item_name || "")}</td>
 						<td><span class="sf-qty-badge">${i.qty}</span></td>
+						${stock_cols
+							.map(
+								(col) =>
+									`<td><span class="sf-stock-badge">${format_number(
+										flt(col.qty_by_item[i.item_code])
+									)}</span></td>`
+							)
+							.join("")}
 					</tr>`;
 			});
 		} else {
-			html += `<tr><td colspan="3" style="text-align:center; color:#999;">${__(
+			html += `<tr><td colspan="${3 + stock_cols.length}" style="text-align:center; color:#999;">${__(
 				"No Items"
 			)}</td></tr>`;
 		}
@@ -762,5 +976,205 @@ function show_sales_forecast_dialog(frm, data) {
 	});
 
 	dialog.fields_dict.html.$wrapper.html(html);
+
+	// "Select All" drives only the enabled boxes — already-inserted forecasts stay
+	// checked-and-disabled either way.
+	const $wrapper = dialog.fields_dict.html.$wrapper;
+	const $all = $wrapper.find(".sf-select-all-box");
+	$all.on("change", function () {
+		$wrapper.find(".sf-checkbox:not(:disabled)").prop("checked", this.checked);
+	});
+	$wrapper.on("change", ".sf-checkbox", () => {
+		const $boxes = $wrapper.find(".sf-checkbox:not(:disabled)");
+		$all.prop("checked", $boxes.length > 0 && $boxes.length === $boxes.filter(":checked").length);
+	});
+
+	dialog.show();
+}
+
+// ---------------------------------------------------------------------------
+// Work Order picker — ported from the "Work Order Button" Client Script so it
+// lives with the rest of the Material Request code. Lists Work Orders with
+// their required items; selected items are inserted into the Material Request
+// (qty set, not added) and the source Work Orders are recorded on the row.
+// ---------------------------------------------------------------------------
+
+function open_work_order_dialog(frm) {
+	frappe.call({
+		method: "create_work_order",
+		freeze: true,
+		freeze_message: __("Loading Work Orders..."),
+		callback(r) {
+			const data = r.message || [];
+			if (!data.length) {
+				frappe.msgprint(__("No Work Orders found"));
+				return;
+			}
+			show_work_order_dialog(frm, data);
+		},
+	});
+}
+
+function show_work_order_dialog(frm, data) {
+	const existing_wos = [];
+	(frm.doc.items || []).forEach((row) => {
+		(row.custom_work_order_connection || "").split(", ").forEach((wo) => {
+			if (wo && !existing_wos.includes(wo)) {
+				existing_wos.push(wo);
+			}
+		});
+	});
+
+	let html = `
+<style>
+.wo-card { border: 1px solid #e0e0e0; border-radius: 10px; padding: 12px; margin-bottom: 12px; background: #fff; transition: all 0.2s ease; }
+.wo-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+.wo-header { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 6px; font-weight: 600; }
+.wo-selected { background: #e6f4ea; border: 1px solid #28a745; }
+.wo-title { font-size: 14px; }
+.wo-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+.wo-table th { background: #f7f7f7; padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
+.wo-table td { padding: 8px; border-bottom: 1px solid #eee; }
+.wo-qty-badge { background: #f1f3f5; padding: 3px 8px; border-radius: 6px; font-weight: 500; }
+.wo-select-all { display: flex; align-items: center; gap: 8px; padding: 8px 4px; margin-bottom: 8px; font-weight: 600; font-size: 13px; }
+</style>
+<label class="wo-select-all"><input type="checkbox" class="wo-select-all-box"> ${__("Select All")}</label>
+`;
+
+	data.forEach((d) => {
+		const isSelected = existing_wos.includes(d.work_order);
+		html += `
+		<div class="wo-card">
+			<div class="wo-header ${isSelected ? "wo-selected" : ""}">
+				<input type="checkbox" class="wo-checkbox" data-wo="${frappe.utils.escape_html(
+					d.work_order
+				)}" ${isSelected ? "checked disabled" : ""}>
+				<span class="wo-title">${frappe.utils.escape_html(d.work_order)}</span>
+			</div>
+			<table class="wo-table">
+				<thead>
+					<tr>
+						<th style="width:20%">${__("Item Code")}</th>
+						<th style="width:60%">${__("Item Name")}</th>
+						<th style="width:20%">${__("MR Qty")}</th>
+					</tr>
+				</thead>
+				<tbody>`;
+
+		if (d.items && d.items.length) {
+			d.items.forEach((i) => {
+				html += `
+					<tr>
+						<td>${frappe.utils.escape_html(i.item_code)}</td>
+						<td>${frappe.utils.escape_html(i.item_name || "")}</td>
+						<td><span class="wo-qty-badge">${i.qty}</span></td>
+					</tr>`;
+			});
+		} else {
+			html += `<tr><td colspan="3" style="text-align:center; color:#999;">${__(
+				"No Items"
+			)}</td></tr>`;
+		}
+
+		html += `</tbody></table></div>`;
+	});
+
+	const dialog = new frappe.ui.Dialog({
+		title: __("Select Items from Work Orders"),
+		size: "large",
+		fields: [{ fieldtype: "HTML", fieldname: "html" }],
+		primary_action_label: __("Insert into MR"),
+		primary_action() {
+			const selected_wos = [];
+			dialog.$wrapper.find(".wo-checkbox:checked").each(function () {
+				selected_wos.push($(this).data("wo"));
+			});
+
+			if (!selected_wos.length) {
+				frappe.msgprint(__("Select at least one Work Order"));
+				return;
+			}
+
+			const item_qty_map = {};
+			const item_wo_map = {};
+
+			data.forEach((d) => {
+				if (!selected_wos.includes(d.work_order)) {
+					return;
+				}
+				(d.items || []).forEach((i) => {
+					item_qty_map[i.item_code] = (item_qty_map[i.item_code] || 0) + (i.qty || 0);
+					item_wo_map[i.item_code] = item_wo_map[i.item_code] || [];
+					if (!item_wo_map[i.item_code].includes(d.work_order)) {
+						item_wo_map[i.item_code].push(d.work_order);
+					}
+				});
+			});
+
+			Object.keys(item_qty_map).forEach((item_code) => {
+				const total_qty = item_qty_map[item_code];
+				const wo_list = item_wo_map[item_code] || [];
+				const existing = frm.doc.items.find((row) => row.item_code === item_code);
+
+				if (existing) {
+					frappe.model.set_value(existing.doctype, existing.name, "qty", total_qty);
+
+					const existing_list = (existing.custom_work_order_connection || "")
+						.split(", ")
+						.filter(Boolean);
+					wo_list.forEach((wo) => {
+						if (!existing_list.includes(wo)) {
+							existing_list.push(wo);
+						}
+					});
+					frappe.model.set_value(
+						existing.doctype,
+						existing.name,
+						"custom_work_order_connection",
+						existing_list.join(", ")
+					);
+					return;
+				}
+
+				const empty_row = frm.doc.items.find((row) => !row.item_code);
+				const row = empty_row || frm.add_child("items");
+
+				frappe.model.set_value(row.doctype, row.name, "item_code", item_code);
+				frappe.model.set_value(row.doctype, row.name, "qty", total_qty);
+				frappe.model.set_value(
+					row.doctype,
+					row.name,
+					"custom_work_order_connection",
+					wo_list.join(", ")
+				);
+
+				if (frm.doc.set_warehouse) {
+					frappe.model.set_value(row.doctype, row.name, "warehouse", frm.doc.set_warehouse);
+				}
+				if (frm.doc.schedule_date) {
+					frappe.model.set_value(row.doctype, row.name, "schedule_date", frm.doc.schedule_date);
+				}
+			});
+
+			frm.refresh_field("items");
+			frappe.msgprint(__("Items inserted Successfully"));
+			dialog.hide();
+		},
+	});
+
+	dialog.fields_dict.html.$wrapper.html(html);
+
+	// "Select All" drives only the enabled boxes — Work Orders already linked to
+	// this Material Request stay checked-and-disabled either way.
+	const $wrapper = dialog.fields_dict.html.$wrapper;
+	const $all = $wrapper.find(".wo-select-all-box");
+	$all.on("change", function () {
+		$wrapper.find(".wo-checkbox:not(:disabled)").prop("checked", this.checked);
+	});
+	$wrapper.on("change", ".wo-checkbox", () => {
+		const $boxes = $wrapper.find(".wo-checkbox:not(:disabled)");
+		$all.prop("checked", $boxes.length > 0 && $boxes.length === $boxes.filter(":checked").length);
+	});
+
 	dialog.show();
 }
