@@ -30,6 +30,9 @@ frappe.ui.form.on("Material Request", {
 			frm.add_custom_button(__("Supplier Quotation"), () => {
 				open_supplier_quotation_dialog(frm);
 			});
+			frm.add_custom_button(__("Request for Quotation"), () => {
+				open_rfq_dialog(frm);
+			});
 		}
 
 		if (frm.doc.docstatus === 0) {
@@ -196,6 +199,9 @@ frappe.ui.form.on("Material Request Item", {
 	},
 	custom_supplier_(frm, cdt, cdn) {
 		set_supplier_name(frm, cdt, cdn);
+	},
+	custom_expected_qty(frm, cdt, cdn) {
+		recompute_required_qty_for_pr(cdt, cdn);
 	},
 });
 
@@ -428,14 +434,66 @@ function set_rm_warehouse_qty(frm, cdt, cdn) {
 	const row = locals[cdt][cdn];
 	if (!row || !row.item_code || !frm.doc.company) {
 		MR_STOCK_WAREHOUSES.forEach(([, fieldname]) => set_rm_qty_field(cdt, cdn, fieldname, 0));
+		set_rm_qty_field(cdt, cdn, "custom_total_stock_qty", 0);
+		set_rm_qty_field(cdt, cdn, "custom_pending_pr_for_grn", 0);
+		set_rm_qty_field(cdt, cdn, "custom_pending_grn_qc", 0);
+		recompute_required_qty_for_pr(cdt, cdn);
 		return;
 	}
 
-	MR_STOCK_WAREHOUSES.forEach(([warehouse_name, fieldname]) => {
-		get_rm_warehouse_stock(row.item_code, warehouse_name, frm.doc.company).then((qty) => {
-			set_rm_qty_field(cdt, cdn, fieldname, qty);
-		});
+	Promise.all(
+		MR_STOCK_WAREHOUSES.map(([warehouse_name, fieldname]) =>
+			get_rm_warehouse_stock(row.item_code, warehouse_name, frm.doc.company).then((qty) => {
+				set_rm_qty_field(cdt, cdn, fieldname, qty);
+				return qty;
+			})
+		)
+	).then((quantities) => {
+		const total_stock_qty = quantities.reduce((sum, qty) => sum + flt(qty), 0);
+		set_rm_qty_field(cdt, cdn, "custom_total_stock_qty", total_stock_qty);
+		recompute_required_qty_for_pr(cdt, cdn);
 	});
+
+	set_material_pipeline_status(frm, cdt, cdn);
+}
+
+// "Pending PR for GRN" / "Pending for GRN Approved (QC Pending)" come from open
+// Purchase Orders company-wide for this item, not from this Material Request
+// alone — see pratap_dev.material_request_stock.get_item_pipeline_status.
+function set_material_pipeline_status(frm, cdt, cdn) {
+	const row = locals[cdt][cdn];
+	if (!row || !row.item_code || !frm.doc.company) {
+		return;
+	}
+
+	frappe
+		.xcall("pratap_dev.material_request_stock.get_item_pipeline_status", {
+			item_code: row.item_code,
+			company: frm.doc.company,
+		})
+		.then((data) => {
+			set_rm_qty_field(cdt, cdn, "custom_pending_pr_for_grn", data?.pending_pr_for_grn || 0);
+			set_rm_qty_field(cdt, cdn, "custom_pending_grn_qc", data?.pending_grn_qc || 0);
+			recompute_required_qty_for_pr(cdt, cdn);
+		})
+		.catch(() => {});
+}
+
+// Required Qty for PR = Forecast Qty - Total Qty - Pending PR for GRN - Pending GRN QC.
+function recompute_required_qty_for_pr(cdt, cdn) {
+	const row = locals[cdt][cdn];
+	if (!row) {
+		return;
+	}
+
+	const required = Math.max(
+		flt(row.custom_expected_qty) -
+			flt(row.custom_total_stock_qty) -
+			flt(row.custom_pending_pr_for_grn) -
+			flt(row.custom_pending_grn_qc),
+		0
+	);
+	set_rm_qty_field(cdt, cdn, "custom_required_qty_for_pr", required);
 }
 
 // Warehouse names may carry a trailing space (e.g. "Plant 1 WIP RM "), so match by prefix.
@@ -1174,6 +1232,191 @@ function show_work_order_dialog(frm, data) {
 	$wrapper.on("change", ".wo-checkbox", () => {
 		const $boxes = $wrapper.find(".wo-checkbox:not(:disabled)");
 		$all.prop("checked", $boxes.length > 0 && $boxes.length === $boxes.filter(":checked").length);
+	});
+
+	dialog.show();
+}
+
+// ---------------------------------------------------------------------------
+// Request for Quotation picker — Supplier (rows) x Item (columns) matrix.
+// Suppliers per item come from Party Specific Item (party_type=Supplier,
+// restrict_based_on=Item). Checking a row's own checkbox selects every item
+// that supplier is mapped to; cells already covered by a live RFQ for this
+// Material Request are shown disabled and marked "Already Created". Submitting
+// creates ONE Request for Quotation with the union of selected items/suppliers.
+// ---------------------------------------------------------------------------
+
+function open_rfq_dialog(frm) {
+	frappe.call({
+		method: "pratap_dev.material_request_rfq.get_rfq_matrix_data",
+		args: { material_request: frm.doc.name },
+		freeze: true,
+		freeze_message: __("Loading Suppliers..."),
+		callback(r) {
+			const data = r.message || {};
+			if (!data.items || !data.items.length) {
+				frappe.msgprint(__("No items found on this Material Request."));
+				return;
+			}
+			if (!data.suppliers || !data.suppliers.length) {
+				frappe.msgprint(
+					__(
+						"No suppliers are mapped to these items. Add them via Party Specific Item (Party Type = Supplier)."
+					)
+				);
+				return;
+			}
+			show_rfq_matrix_dialog(frm, data);
+		},
+	});
+}
+
+function show_rfq_matrix_dialog(frm, data) {
+	const items = data.items;
+	const suppliers = data.suppliers;
+	const supplier_item_map = data.supplier_item_map || {};
+	const already_created = new Set(
+		(data.already_created || []).map(([item_code, supplier]) => `${item_code}::${supplier}`)
+	);
+
+	let html = `
+<style>
+.rfq-matrix-wrapper { overflow-x: auto; max-height: 60vh; overflow-y: auto; }
+.rfq-matrix { border-collapse: collapse; width: 100%; font-size: 12px; }
+.rfq-matrix th, .rfq-matrix td { border: 1px solid #e0e0e0; padding: 6px 8px; text-align: center; white-space: nowrap; }
+.rfq-matrix th { background: #f7f7f7; position: sticky; top: 0; z-index: 1; }
+.rfq-matrix td:first-child, .rfq-matrix th:first-child { text-align: left; position: sticky; left: 0; background: #fff; z-index: 2; }
+.rfq-matrix th:first-child { background: #f7f7f7; z-index: 3; }
+.rfq-already { color: #6c757d; font-size: 10px; display: block; margin-top: 2px; }
+.rfq-select-all { display: flex; align-items: center; gap: 8px; padding: 8px 4px; margin-bottom: 8px; font-weight: 600; font-size: 13px; }
+</style>
+<label class="rfq-select-all"><input type="checkbox" class="rfq-select-all-box"> ${__("Select All")}</label>
+<div class="rfq-matrix-wrapper">
+<table class="rfq-matrix">
+<thead><tr><th>${__("Supplier")}</th>`;
+
+	items.forEach((i) => {
+		html += `<th title="${frappe.utils.escape_html(i.item_code)}">${frappe.utils.escape_html(
+			i.item_name || i.item_code
+		)}</th>`;
+	});
+	html += `</tr></thead><tbody>`;
+
+	suppliers.forEach((s) => {
+		html += `<tr>
+			<td><label><input type="checkbox" class="rfq-row-checkbox" data-supplier="${frappe.utils.escape_html(
+				s.supplier
+			)}"> ${frappe.utils.escape_html(s.supplier_name || s.supplier)}</label></td>`;
+
+		items.forEach((i) => {
+			const mapped = (supplier_item_map[i.item_code] || []).includes(s.supplier);
+			if (!mapped) {
+				html += `<td>&mdash;</td>`;
+				return;
+			}
+
+			const done = already_created.has(`${i.item_code}::${s.supplier}`);
+			if (done) {
+				html += `<td>
+					<input type="checkbox" class="rfq-cell-checkbox" disabled checked
+						data-item="${frappe.utils.escape_html(i.item_code)}"
+						data-supplier="${frappe.utils.escape_html(s.supplier)}">
+					<span class="rfq-already">${__("Already Created")}</span>
+				</td>`;
+			} else {
+				html += `<td>
+					<input type="checkbox" class="rfq-cell-checkbox"
+						data-item="${frappe.utils.escape_html(i.item_code)}"
+						data-supplier="${frappe.utils.escape_html(s.supplier)}">
+				</td>`;
+			}
+		});
+
+		html += `</tr>`;
+	});
+
+	html += `</tbody></table></div>`;
+
+	const dialog = new frappe.ui.Dialog({
+		title: __("Request for Quotation — Select Items per Supplier"),
+		size: "extra-large",
+		fields: [{ fieldtype: "HTML", fieldname: "html" }],
+		primary_action_label: __("Create Request for Quotation"),
+		primary_action() {
+			const $wrapper = dialog.$wrapper;
+			const selected_items = new Set();
+			const selected_suppliers = new Set();
+
+			$wrapper.find(".rfq-cell-checkbox:checked:not(:disabled)").each(function () {
+				selected_items.add($(this).data("item"));
+				selected_suppliers.add($(this).data("supplier"));
+			});
+
+			if (!selected_items.size || !selected_suppliers.size) {
+				frappe.msgprint(__("Please select at least one item/supplier combination."));
+				return;
+			}
+
+			frappe.call({
+				method: "pratap_dev.material_request_rfq.create_request_for_quotation",
+				args: {
+					material_request: frm.doc.name,
+					item_codes: JSON.stringify(Array.from(selected_items)),
+					suppliers: JSON.stringify(Array.from(selected_suppliers)),
+				},
+				freeze: true,
+				freeze_message: __("Creating Request for Quotation..."),
+				callback(res) {
+					if (!res.message) {
+						return;
+					}
+					dialog.hide();
+					const link = `<a href="/app/request-for-quotation/${res.message}">${frappe.utils.escape_html(
+						res.message
+					)}</a>`;
+					frappe.msgprint({
+						title: __("Request for Quotation Created"),
+						indicator: "green",
+						message: __("{0} created.", [link]),
+					});
+				},
+			});
+		},
+	});
+
+	dialog.fields_dict.html.$wrapper.html(html);
+	const $wrapper = dialog.fields_dict.html.$wrapper;
+
+	// Row checkbox -> check every enabled item-cell for that supplier.
+	$wrapper.on("change", ".rfq-row-checkbox", function () {
+		const supplier = $(this).data("supplier");
+		const checked = this.checked;
+		$wrapper.find(".rfq-cell-checkbox:not(:disabled)").each(function () {
+			if ($(this).data("supplier") === supplier) {
+				this.checked = checked;
+			}
+		});
+	});
+
+	// Item-cell checkbox -> keep that supplier's row-checkbox in sync (checked
+	// only once every enabled cell in the row is checked).
+	$wrapper.on("change", ".rfq-cell-checkbox:not(:disabled)", function () {
+		const supplier = $(this).data("supplier");
+		const $cells = $wrapper.find(".rfq-cell-checkbox:not(:disabled)").filter(function () {
+			return $(this).data("supplier") === supplier;
+		});
+		const all_checked = $cells.length > 0 && $cells.length === $cells.filter(":checked").length;
+		$wrapper.find(".rfq-row-checkbox").each(function () {
+			if ($(this).data("supplier") === supplier) {
+				this.checked = all_checked;
+			}
+		});
+	});
+
+	$wrapper.on("change", ".rfq-select-all-box", function () {
+		const checked = this.checked;
+		$wrapper.find(".rfq-cell-checkbox:not(:disabled)").prop("checked", checked);
+		$wrapper.find(".rfq-row-checkbox").prop("checked", checked);
 	});
 
 	dialog.show();
