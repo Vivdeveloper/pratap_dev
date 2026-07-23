@@ -64,14 +64,13 @@ function populate_wo_instructions(frm, delay) {
                     // BOM Item row on this BOM; leave those blank.
                     const source = instructions[row.item_code] || {};
                     WO_INSTRUCTION_FIELDS.forEach((fieldname) => {
-                        frappe.model.set_value(
-                            row.doctype,
-                            row.name,
-                            fieldname,
-                            source[fieldname] || "",
-                            null,
-                            true
-                        );
+                        const next_value = source[fieldname] || "";
+                        // Skip when unchanged — always writing here (even when equal)
+                        // marks the form dirty on every refresh with no real change.
+                        if ((row[fieldname] || "") === next_value) {
+                            return;
+                        }
+                        frappe.model.set_value(row.doctype, row.name, fieldname, next_value, null, true);
                     });
                 });
             })
@@ -159,11 +158,21 @@ function get_wo_warehouse_stock(item_code, warehouse_name, company) {
 
 function set_wo_qty_field(cdt, cdn, fieldname, value) {
     const row = locals[cdt][cdn];
-    const next_value = flt(value);
+    // Round to a fixed precision so repeated live-stock lookups settle on the same
+    // stored value instead of drifting on floating-point noise (these are Data fields
+    // with no precision of their own, so nothing normalizes this for us otherwise).
+    const next_value = flt(value, 3);
     // Always write a number so "no stock" shows 0, not blank. Skip only when the row
-    // already holds a value equal to it (an unset/null field must still be set to 0).
+    // already holds a value within tolerance of it (an unset/null field must still be
+    // set to 0). A strict === here false-triggers on float noise between two live
+    // queries of the same on-hand qty, marking the form dirty with no real change.
     const current = row[fieldname];
-    if (current !== undefined && current !== null && current !== "" && flt(current) === next_value) {
+    if (
+        current !== undefined &&
+        current !== null &&
+        current !== "" &&
+        Math.abs(flt(current) - next_value) < 1e-6
+    ) {
         return;
     }
     frappe.model.set_value(cdt, cdn, fieldname, next_value, null, true);
