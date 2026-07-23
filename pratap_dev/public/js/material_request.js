@@ -1243,7 +1243,8 @@ function show_work_order_dialog(frm, data) {
 // restrict_based_on=Item). Checking a row's own checkbox selects every item
 // that supplier is mapped to; cells already covered by a live RFQ for this
 // Material Request are shown disabled and marked "Already Created". Submitting
-// creates ONE Request for Quotation with the union of selected items/suppliers.
+// creates one Request for Quotation per selected supplier, each containing
+// only that supplier's checked items.
 // ---------------------------------------------------------------------------
 
 function open_rfq_dialog(frm) {
@@ -1344,15 +1345,18 @@ function show_rfq_matrix_dialog(frm, data) {
 		primary_action_label: __("Create Request for Quotation"),
 		primary_action() {
 			const $wrapper = dialog.$wrapper;
-			const selected_items = new Set();
-			const selected_suppliers = new Set();
+			const supplier_items = {};
 
 			$wrapper.find(".rfq-cell-checkbox:checked:not(:disabled)").each(function () {
-				selected_items.add($(this).data("item"));
-				selected_suppliers.add($(this).data("supplier"));
+				const supplier = $(this).data("supplier");
+				const item = $(this).data("item");
+				if (!supplier_items[supplier]) {
+					supplier_items[supplier] = [];
+				}
+				supplier_items[supplier].push(item);
 			});
 
-			if (!selected_items.size || !selected_suppliers.size) {
+			if (!Object.keys(supplier_items).length) {
 				frappe.msgprint(__("Please select at least one item/supplier combination."));
 				return;
 			}
@@ -1361,23 +1365,26 @@ function show_rfq_matrix_dialog(frm, data) {
 				method: "pratap_dev.material_request_rfq.create_request_for_quotation",
 				args: {
 					material_request: frm.doc.name,
-					item_codes: JSON.stringify(Array.from(selected_items)),
-					suppliers: JSON.stringify(Array.from(selected_suppliers)),
+					supplier_items: JSON.stringify(supplier_items),
 				},
 				freeze: true,
-				freeze_message: __("Creating Request for Quotation..."),
+				freeze_message: __("Creating Requests for Quotation..."),
 				callback(res) {
-					if (!res.message) {
+					const names = res.message || [];
+					if (!names.length) {
 						return;
 					}
 					dialog.hide();
-					const link = `<a href="/app/request-for-quotation/${res.message}">${frappe.utils.escape_html(
-						res.message
-					)}</a>`;
+					const links = names
+						.map(
+							(name) =>
+								`<a href="/app/request-for-quotation/${name}">${frappe.utils.escape_html(name)}</a>`
+						)
+						.join(", ");
 					frappe.msgprint({
-						title: __("Request for Quotation Created"),
+						title: __("Requests for Quotation Created"),
 						indicator: "green",
-						message: __("{0} created.", [link]),
+						message: __("{0} created.", [links]),
 					});
 				},
 			});

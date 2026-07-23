@@ -108,36 +108,38 @@ def _get_already_created_pairs(material_request):
 
 
 @frappe.whitelist()
-def create_request_for_quotation(material_request, item_codes, suppliers):
-    """Create a single Request for Quotation carrying the union of the
-    selected items, sent to the union of the selected suppliers. Left as a
-    draft (not submitted/emailed) so the user can review it first.
+def create_request_for_quotation(material_request, supplier_items):
+    """Create one Request for Quotation per supplier, each carrying only the
+    items selected for that supplier. Left as drafts (not submitted/emailed)
+    so the user can review them first.
     """
-    if isinstance(item_codes, str):
-        item_codes = json.loads(item_codes)
-    if isinstance(suppliers, str):
-        suppliers = json.loads(suppliers)
+    if isinstance(supplier_items, str):
+        supplier_items = json.loads(supplier_items)
 
-    item_codes = set(item_codes or [])
-    suppliers = list(dict.fromkeys(suppliers or []))
-
-    if not item_codes:
-        frappe.throw(_("Please select at least one item."))
-    if not suppliers:
-        frappe.throw(_("Please select at least one supplier."))
+    if not supplier_items:
+        frappe.throw(_("Please select at least one item/supplier combination."))
 
     from erpnext.stock.doctype.material_request.material_request import make_request_for_quotation
 
-    doc = make_request_for_quotation(material_request)
-    doc.items = [row for row in doc.items if row.item_code in item_codes]
-    for idx, row in enumerate(doc.items):
-        row.idx = idx + 1
+    rfq_names = []
+    for supplier, item_codes in supplier_items.items():
+        item_codes = set(item_codes or [])
+        if not item_codes:
+            continue
 
-    if not doc.items:
+        doc = make_request_for_quotation(material_request)
+        doc.items = [row for row in doc.items if row.item_code in item_codes]
+        for idx, row in enumerate(doc.items):
+            row.idx = idx + 1
+
+        if not doc.items:
+            continue
+
+        doc.append("suppliers", {"supplier": supplier, "send_email": 1})
+        doc.insert()
+        rfq_names.append(doc.name)
+
+    if not rfq_names:
         frappe.throw(_("Selected items were not found on this Material Request."))
 
-    for supplier in suppliers:
-        doc.append("suppliers", {"supplier": supplier, "send_email": 1})
-
-    doc.insert()
-    return doc.name
+    return rfq_names
