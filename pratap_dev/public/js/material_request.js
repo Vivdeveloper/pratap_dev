@@ -980,11 +980,26 @@ function open_rfq_dialog(frm) {
 				return;
 			}
 			if (!data.suppliers || !data.suppliers.length) {
-				frappe.msgprint(
-					__(
-						"No suppliers are mapped to these items. Add them via Party Specific Item (Party Type = Supplier)."
-					)
-				);
+				// Nothing can be requested — name the items so the user knows exactly
+				// which ones to map, rather than just "no suppliers".
+				frappe.msgprint({
+					title: __("No Suppliers Mapped"),
+					indicator: "red",
+					message:
+						__(
+							"None of these items have a supplier mapped, so no Request for Quotation can be created. Map them via Party Specific Item (Party Type = Supplier, Restrict Based On = Item)."
+						) +
+						`<ul style="margin-top:10px">${(data.unmapped_items || [])
+							.map(
+								(i) =>
+									`<li><b>${frappe.utils.escape_html(i.item_code)}</b>${
+										i.item_name
+											? ` — ${frappe.utils.escape_html(i.item_name)}`
+											: ""
+									}</li>`
+							)
+							.join("")}</ul>`,
+				});
 				return;
 			}
 			show_rfq_matrix_dialog(frm, data);
@@ -1010,6 +1025,10 @@ function show_rfq_matrix_dialog(frm, data) {
 .rfq-table td { padding: 8px; border-bottom: 1px solid #eee; vertical-align: middle; }
 .rfq-already { color: #6c757d; font-size: 11px; font-weight: 500; }
 .rfq-select-all { display: flex; align-items: center; gap: 8px; padding: 8px 4px; margin-bottom: 8px; font-weight: 600; font-size: 13px; }
+.rfq-unmapped-card { border: 1px solid #f5c2c7; border-radius: 10px; padding: 12px; margin-bottom: 12px; background: #fff8f8; }
+.rfq-unmapped-title { font-size: 14px; font-weight: 600; color: #b02a37; }
+.rfq-unmapped-hint { font-size: 12px; color: #6c757d; margin-top: 4px; }
+.rfq-unmapped-card .rfq-table th { background: #fdeced; }
 </style>
 <label class="rfq-select-all"><input type="checkbox" class="rfq-select-all-box"> ${__("Select All")}</label>
 <div class="rfq-cards-wrapper">`;
@@ -1058,6 +1077,41 @@ function show_rfq_matrix_dialog(frm, data) {
 
 		html += `</tbody></table></div>`;
 	});
+
+	// Items with no supplier mapped belong to no supplier card, so list them last with no
+	// checkboxes — otherwise they just vanish from the dialog and the Material Request
+	// looks like it lost rows.
+	const unmapped_items = data.unmapped_items || [];
+	if (unmapped_items.length) {
+		html += `
+		<div class="rfq-unmapped-card">
+			<div class="rfq-unmapped-title">${__("No Supplier Mapped ({0})", [
+				unmapped_items.length,
+			])}</div>
+			<div class="rfq-unmapped-hint">${__(
+				"These items cannot be included in any Request for Quotation. Map a supplier via Party Specific Item (Party Type = Supplier, Restrict Based On = Item), then reopen this dialog."
+			)}</div>
+			<table class="rfq-table">
+				<thead>
+					<tr>
+						<th style="width:8%"></th>
+						<th style="width:20%">${__("Item Code")}</th>
+						<th style="width:72%">${__("Item Name")}</th>
+					</tr>
+				</thead>
+				<tbody>`;
+
+		unmapped_items.forEach((i) => {
+			html += `
+					<tr>
+						<td></td>
+						<td>${frappe.utils.escape_html(i.item_code)}</td>
+						<td>${frappe.utils.escape_html(i.item_name || "")}</td>
+					</tr>`;
+		});
+
+		html += `</tbody></table></div>`;
+	}
 
 	html += `</div>`;
 

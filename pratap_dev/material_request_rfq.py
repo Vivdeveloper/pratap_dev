@@ -65,6 +65,11 @@ def get_rfq_matrix_data(material_request):
 
     supplier_list = sorted(suppliers, key=lambda s: (supplier_names.get(s) or s))
 
+    # Items with no supplier mapped cannot appear under any supplier card. Returning them
+    # separately lets the dialog call them out instead of silently dropping them, which
+    # made it look like the Material Request had fewer items than it does.
+    unmapped_items = [row for row in items if not supplier_item_map.get(row["item_code"])]
+
     return {
         "items": items,
         "suppliers": [
@@ -72,6 +77,7 @@ def get_rfq_matrix_data(material_request):
         ],
         "supplier_item_map": {item_code: sorted(v) for item_code, v in supplier_item_map.items()},
         "already_created": [list(pair) for pair in already_created],
+        "unmapped_items": unmapped_items,
     }
 
 
