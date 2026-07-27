@@ -30,7 +30,13 @@ def get_rfq_matrix_data(material_request):
 
     item_codes = list(seen_items)
     if not item_codes:
-        return {"items": [], "suppliers": [], "supplier_item_map": {}, "already_created": []}
+        return {
+            "items": [],
+            "suppliers": [],
+            "supplier_item_map": {},
+            "already_created": [],
+            "unmapped_items": [],
+        }
 
     psi_rows = frappe.get_all(
         "Party Specific Item",

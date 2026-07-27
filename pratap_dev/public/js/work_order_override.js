@@ -24,6 +24,8 @@ frappe.ui.form.on("Work Order", {
             });
         });
 
+        add_material_request_button(frm);
+
         // Populate the Plant 1 / Plant 2 WIP RM (and Main Store RM) stock columns for
         // every required item on a draft Work Order.
         populate_wo_stock_all(frm);
@@ -178,6 +180,52 @@ function set_wo_qty_field(cdt, cdn, fieldname, value) {
     frappe.model.set_value(cdt, cdn, fieldname, next_value, null, true);
 }
 
+
+// "Create Material Request" for the required items that are short (MR Qty > 0).
+// Fully-stocked rows carry MR Qty 0 and are skipped server-side, so a single item with
+// enough stock no longer blocks the request for every other item.
+//
+// Deliberately a standalone button, not an entry under the "Create" group: the site's
+// "Hide Create Dropdown" Client Script hides that whole group 300ms after refresh, which
+// would swallow this button too.
+function add_material_request_button(frm) {
+    if (frm.doc.docstatus !== 1) {
+        return;
+    }
+    const has_shortage = (frm.doc.required_items || []).some(
+        (row) => flt(row.custom_qty_amount) > 0
+    );
+    if (!has_shortage) {
+        return;
+    }
+
+    frm.add_custom_button(
+        __("Create Material Request"),
+        () => {
+            frappe
+                .xcall("pratap_dev.work_order_material_request.create_and_submit_material_request", {
+                    work_order_name: frm.doc.name,
+                })
+                .then((result) => {
+                    if (!result) {
+                        return;
+                    }
+                    // Say how many rows were left out, so a short Material Request does not
+                    // look like items went missing.
+                    const skipped_note = result.skipped
+                        ? " " +
+                          __("{0} item(s) already in stock were skipped.", [result.skipped])
+                        : "";
+                    frappe.show_alert({
+                        message:
+                            __("Material Request {0} submitted.", [result.name]) + skipped_note,
+                        indicator: "green",
+                    });
+                    frappe.set_route("Form", "Material Request", result.name);
+                });
+        }
+    );
+}
 
 function handle_rework_consumption(frm) {
     frm.add_custom_button(__("Rework Consumption"), () => {
