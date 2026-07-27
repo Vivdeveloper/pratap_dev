@@ -958,10 +958,10 @@ function show_work_order_dialog(frm, data) {
 }
 
 // ---------------------------------------------------------------------------
-// Request for Quotation picker — Supplier (rows) x Item (columns) matrix.
+// Request for Quotation picker — Item (cards) x Supplier (rows) matrix.
 // Suppliers per item come from Party Specific Item (party_type=Supplier,
-// restrict_based_on=Item). Checking a row's own checkbox selects every item
-// that supplier is mapped to; cells already covered by a live RFQ for this
+// restrict_based_on=Item). Checking an item's own checkbox selects every
+// supplier mapped to it; cells already covered by a live RFQ for this
 // Material Request are shown disabled and marked "Already Created". Submitting
 // creates one Request for Quotation per selected supplier, each containing
 // only that supplier's checked items.
@@ -1033,34 +1033,38 @@ function show_rfq_matrix_dialog(frm, data) {
 <label class="rfq-select-all"><input type="checkbox" class="rfq-select-all-box"> ${__("Select All")}</label>
 <div class="rfq-cards-wrapper">`;
 
-	suppliers.forEach((s) => {
-		const mapped_items = items.filter((i) =>
+	items.forEach((i) => {
+		const mapped_suppliers = suppliers.filter((s) =>
 			(supplier_item_map[i.item_code] || []).includes(s.supplier)
 		);
-		if (!mapped_items.length) {
+		if (!mapped_suppliers.length) {
 			return;
 		}
+
+		const item_label = i.item_name
+			? `${frappe.utils.escape_html(i.item_code)} — ${frappe.utils.escape_html(i.item_name)}`
+			: frappe.utils.escape_html(i.item_code);
 
 		html += `
 		<div class="rfq-card">
 			<div class="rfq-header">
-				<input type="checkbox" class="rfq-row-checkbox" data-supplier="${frappe.utils.escape_html(
-					s.supplier
+				<input type="checkbox" class="rfq-row-checkbox" data-item="${frappe.utils.escape_html(
+					i.item_code
 				)}">
-				<span class="rfq-title">${frappe.utils.escape_html(s.supplier_name || s.supplier)}</span>
+				<span class="rfq-title">${item_label}</span>
 			</div>
 			<table class="rfq-table">
 				<thead>
 					<tr>
 						<th style="width:8%"></th>
-						<th style="width:20%">${__("Item Code")}</th>
-						<th style="width:52%">${__("Item Name")}</th>
+						<th style="width:30%">${__("Supplier")}</th>
+						<th style="width:42%">${__("Supplier Name")}</th>
 						<th style="width:20%"></th>
 					</tr>
 				</thead>
 				<tbody>`;
 
-		mapped_items.forEach((i) => {
+		mapped_suppliers.forEach((s) => {
 			const done = already_created.has(`${i.item_code}::${s.supplier}`);
 			html += `
 					<tr>
@@ -1069,8 +1073,8 @@ function show_rfq_matrix_dialog(frm, data) {
 								data-item="${frappe.utils.escape_html(i.item_code)}"
 								data-supplier="${frappe.utils.escape_html(s.supplier)}">
 						</td>
-						<td>${frappe.utils.escape_html(i.item_code)}</td>
-						<td>${frappe.utils.escape_html(i.item_name || "")}</td>
+						<td>${frappe.utils.escape_html(s.supplier)}</td>
+						<td>${frappe.utils.escape_html(s.supplier_name || "")}</td>
 						<td>${done ? `<span class="rfq-already">${__("Already Created")}</span>` : ""}</td>
 					</tr>`;
 		});
@@ -1116,7 +1120,7 @@ function show_rfq_matrix_dialog(frm, data) {
 	html += `</div>`;
 
 	const dialog = new frappe.ui.Dialog({
-		title: __("Request for Quotation — Select Items per Supplier"),
+		title: __("Request for Quotation — Select Suppliers per Item"),
 		size: "extra-large",
 		fields: [{ fieldtype: "HTML", fieldname: "html" }],
 		primary_action_label: __("Create Request for Quotation"),
@@ -1171,27 +1175,27 @@ function show_rfq_matrix_dialog(frm, data) {
 	dialog.fields_dict.html.$wrapper.html(html);
 	const $wrapper = dialog.fields_dict.html.$wrapper;
 
-	// Row checkbox -> check every enabled item-cell for that supplier.
+	// Item checkbox -> check every enabled supplier-cell for that item.
 	$wrapper.on("change", ".rfq-row-checkbox", function () {
-		const supplier = $(this).data("supplier");
+		const item = $(this).data("item");
 		const checked = this.checked;
 		$wrapper.find(".rfq-cell-checkbox:not(:disabled)").each(function () {
-			if ($(this).data("supplier") === supplier) {
+			if ($(this).data("item") === item) {
 				this.checked = checked;
 			}
 		});
 	});
 
-	// Item-cell checkbox -> keep that supplier's row-checkbox in sync (checked
-	// only once every enabled cell in the row is checked).
+	// Supplier-cell checkbox -> keep that item's header checkbox in sync (checked
+	// only once every enabled cell in the card is checked).
 	$wrapper.on("change", ".rfq-cell-checkbox:not(:disabled)", function () {
-		const supplier = $(this).data("supplier");
+		const item = $(this).data("item");
 		const $cells = $wrapper.find(".rfq-cell-checkbox:not(:disabled)").filter(function () {
-			return $(this).data("supplier") === supplier;
+			return $(this).data("item") === item;
 		});
 		const all_checked = $cells.length > 0 && $cells.length === $cells.filter(":checked").length;
 		$wrapper.find(".rfq-row-checkbox").each(function () {
-			if ($(this).data("supplier") === supplier) {
+			if ($(this).data("item") === item) {
 				this.checked = all_checked;
 			}
 		});
