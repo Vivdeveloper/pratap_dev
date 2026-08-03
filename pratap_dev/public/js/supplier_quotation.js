@@ -48,20 +48,44 @@ function show_last_buying_rates(frm) {
 }
 
 function show_create_purchase_order_dialog(frm) {
-	const data = (frm.doc.items || []).map((d) => ({
-		docname: d.name,
-		item_code: d.item_code,
-		item_name: d.item_name,
-		qty: d.qty,
-		uom: d.uom,
-		select: 1,
-	}));
-
-	if (!data.length) {
+	if (!(frm.doc.items || []).length) {
 		frappe.msgprint(__("No items to create a Purchase Order from."));
 		return;
 	}
 
+	// Rows already covered by a submitted Purchase Order can't be selected again --
+	// look these up by the child row name (supplier_quotation_item) before building the dialog.
+	frappe.db
+		.get_list("Purchase Order Item", {
+			filters: { supplier_quotation: frm.doc.name, docstatus: 1 },
+			fields: ["supplier_quotation_item", "parent"],
+			limit: 0,
+		})
+		.then((rows) => {
+			const po_by_row = {};
+			(rows || []).forEach((row) => {
+				po_by_row[row.supplier_quotation_item] = po_by_row[row.supplier_quotation_item] || [];
+				if (!po_by_row[row.supplier_quotation_item].includes(row.parent)) {
+					po_by_row[row.supplier_quotation_item].push(row.parent);
+				}
+			});
+
+			const data = (frm.doc.items || []).map((d) => ({
+				docname: d.name,
+				item_code: d.item_code,
+				item_name: d.item_name,
+				qty: d.qty,
+				uom: d.uom,
+				select: 0,
+				already_created: po_by_row[d.name] ? 1 : 0,
+				purchase_order: (po_by_row[d.name] || []).join(", "),
+			}));
+
+			render_create_purchase_order_dialog(frm, data);
+		});
+}
+
+function render_create_purchase_order_dialog(frm, data) {
 	const dialog = new frappe.ui.Dialog({
 		title: __("Select Items for Purchase Order"),
 		size: "large",
@@ -76,12 +100,14 @@ function show_create_purchase_order_dialog(frm) {
 				get_data: () => data,
 				fields: [
 					{ fieldtype: "Data", fieldname: "docname", hidden: 1 },
+					{ fieldtype: "Check", fieldname: "already_created", hidden: 1 },
 					{
 						fieldtype: "Check",
 						fieldname: "select",
 						label: __("Select"),
 						in_list_view: 1,
 						columns: 1,
+						read_only_depends_on: "eval:doc.already_created",
 					},
 					{
 						fieldtype: "Data",
@@ -111,6 +137,14 @@ function show_create_purchase_order_dialog(frm) {
 						fieldtype: "Data",
 						fieldname: "uom",
 						label: __("UOM"),
+						in_list_view: 1,
+						read_only: 1,
+						columns: 2,
+					},
+					{
+						fieldtype: "Data",
+						fieldname: "purchase_order",
+						label: __("Already Created"),
 						in_list_view: 1,
 						read_only: 1,
 						columns: 2,

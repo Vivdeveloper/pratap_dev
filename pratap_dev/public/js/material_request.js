@@ -53,12 +53,35 @@ frappe.ui.form.on("Material Request", {
 		populate_rm_stock_all(frm);
 
 		setup_reject_button(frm);
+		clear_stale_from_warehouse(frm);
 	},
 
 	company(frm) {
 		populate_rm_stock_all(frm);
 	},
+
+	material_request_type(frm) {
+		clear_stale_from_warehouse(frm);
+	},
 });
+
+// "Source Warehouse" (from_warehouse) only applies when material_request_type is
+// "Material Transfer" — its depends_on hides it for every other type. But hidden
+// doesn't mean cleared: if a row carries a leftover from_warehouse (e.g. the type
+// was switched away from Material Transfer, or an empty row was reused by the
+// Sales Forecast / Work Order picker) it can end up equal to "Accepted Warehouse"
+// (warehouse) once that gets set, and ERPNext throws "Accepted Warehouse and
+// Supplier Warehouse cannot be same" even though from_warehouse isn't visible.
+function clear_stale_from_warehouse(frm) {
+	if (frm.doc.material_request_type === "Material Transfer") {
+		return;
+	}
+	(frm.doc.items || []).forEach((row) => {
+		if (row.from_warehouse) {
+			frappe.model.set_value(row.doctype, row.name, "from_warehouse", "");
+		}
+	});
+}
 
 function populate_rm_stock_all(frm) {
 	if (frm.doc.docstatus !== 0) {
@@ -274,6 +297,10 @@ const MR_ITEM_NO_COPY_FIELDS = new Set([
 	"stock_qty",
 	"amount",
 	"custom_expected_qty",
+	// Only meaningful for Material Transfer requests (hidden otherwise) — copying it
+	// onto a Purchase-type remainder row can collide with "warehouse" and trip the
+	// "Accepted Warehouse and Supplier Warehouse cannot be same" validation.
+	"from_warehouse",
 ]);
 
 function copy_mr_item_fields(src, dest) {
@@ -1099,8 +1126,9 @@ function show_rfq_matrix_dialog(frm, data) {
 				<thead>
 					<tr>
 						<th style="width:8%"></th>
-						<th style="width:20%">${__("Item Code")}</th>
-						<th style="width:72%">${__("Item Name")}</th>
+						<th style="width:18%">${__("Item Code")}</th>
+						<th style="width:54%">${__("Item Name")}</th>
+						<th style="width:20%"></th>
 					</tr>
 				</thead>
 				<tbody>`;
@@ -1111,6 +1139,12 @@ function show_rfq_matrix_dialog(frm, data) {
 						<td></td>
 						<td>${frappe.utils.escape_html(i.item_code)}</td>
 						<td>${frappe.utils.escape_html(i.item_name || "")}</td>
+						<td>
+							<button type="button" class="btn btn-xs btn-default rfq-create-psi"
+								data-item="${frappe.utils.escape_html(i.item_code)}">
+								${__("Map Supplier")}
+							</button>
+						</td>
 					</tr>`;
 		});
 
@@ -1205,6 +1239,19 @@ function show_rfq_matrix_dialog(frm, data) {
 		const checked = this.checked;
 		$wrapper.find(".rfq-cell-checkbox:not(:disabled)").prop("checked", checked);
 		$wrapper.find(".rfq-row-checkbox").prop("checked", checked);
+	});
+
+	// Item has no supplier mapped -- jump to a new Party Specific Item with the
+	// known half (Supplier / Item) filled in; the user still has to pick which
+	// supplier to map it to.
+	$wrapper.on("click", ".rfq-create-psi", function () {
+		const item_code = $(this).data("item");
+		dialog.hide();
+		frappe.new_doc("Party Specific Item", {
+			party_type: "Supplier",
+			restrict_based_on: "Item",
+			based_on_value: item_code,
+		});
 	});
 
 	dialog.show();

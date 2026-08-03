@@ -59,6 +59,9 @@ def create_and_submit_material_request(work_order_name):
 	mr.schedule_date = nowdate()
 	mr.set_warehouse = work_order.source_warehouse
 	mr.work_order = work_order.name
+	# frappe.session.user is always the login id (email), never the display name --
+	# keep it that way so "Requested by user" stays a valid User link, not free text.
+	mr.custom_requested_by_user = frappe.session.user
 
 	for row in short_rows:
 		mr.append(
