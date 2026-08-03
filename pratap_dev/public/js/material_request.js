@@ -45,9 +45,6 @@ frappe.ui.form.on("Material Request", {
 			$(wo_btn).css({ "background-color": "black", color: "white" });
 		}
 
-		// Drop the whole "Create" dropdown (Purchase Order / Pick List / Work Order / etc. added by ERPNext core).
-		setTimeout(() => frm.page.get_inner_group_button(__("Create")).remove(), 300);
-
 		// Keep the warehouse stock columns filled on drafts too, so they are
 		// visible before the Material Request is ever saved.
 		populate_rm_stock_all(frm);
