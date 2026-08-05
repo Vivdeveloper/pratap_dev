@@ -263,7 +263,10 @@ override_whitelisted_methods = {
 
 doctype_js = {
     "Opportunity": "public/js/opportunity_override.js",
-    "Work Order": "public/js/work_order_override.js",
+    "Work Order": [
+        "public/js/work_order_override.js",
+        "public/js/work_order_bom_item.js",
+    ],
     "Purchase Order": "public/js/purchase_order_grn.js",
     "Supplier Quotation": "public/js/supplier_quotation.js",
     "Purchase Receipt": [
@@ -319,6 +322,7 @@ doc_events = {
         "validate": "pratap_dev.batch_hooks.set_batch_no_of_unit",
     },
     "Work Order": {
+        "before_validate": "pratap_dev.work_order_bom_item.set_bom_item",
         "validate": "pratap_dev.work_order_instruction.set_operation_instructions",
     },
     "Custom Field": {
