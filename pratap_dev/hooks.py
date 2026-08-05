@@ -266,6 +266,7 @@ doctype_js = {
     "Work Order": [
         "public/js/work_order_override.js",
         "public/js/work_order_bom_item.js",
+        "public/js/work_order_alternate_repack.js",
     ],
     "Purchase Order": "public/js/purchase_order_grn.js",
     "Supplier Quotation": "public/js/supplier_quotation.js",
