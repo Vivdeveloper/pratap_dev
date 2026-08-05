@@ -2,7 +2,7 @@
 # License: MIT
 
 import frappe
-from frappe.utils import flt
+from frappe.utils import flt 
 
 
 @frappe.whitelist()
