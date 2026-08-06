@@ -146,7 +146,8 @@ def create_alternate_repack(work_order, picks):
 		batch = target_batch_name(main_item, [p["alternate_item"] for p in grp])
 
 		se = frappe.new_doc("Stock Entry")
-		se.stock_entry_type = "Repack"
+		# "Material Club" is a custom Stock Entry Type (purpose = Repack) defined on the site.
+		se.stock_entry_type = "Material Club"
 		se.purpose = "Repack"
 		se.company = wo.company
 		# ERPNext clears the standard work_order field for Repack, so link via a custom field
