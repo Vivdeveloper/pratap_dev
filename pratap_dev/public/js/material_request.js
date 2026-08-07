@@ -803,7 +803,7 @@ function show_sales_forecast_dialog(frm, data, stock_map) {
 
 function open_work_order_dialog(frm) {
 	frappe.call({
-		method: "create_work_order",
+		method: "pratap_dev.material_request_work_order.get_work_orders_for_material_request",
 		freeze: true,
 		freeze_message: __("Loading Work Orders..."),
 		callback(r) {
@@ -838,6 +838,8 @@ function show_work_order_dialog(frm, data) {
 .wo-table th { background: #f7f7f7; padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
 .wo-table td { padding: 8px; border-bottom: 1px solid #eee; }
 .wo-qty-badge { background: #f1f3f5; padding: 3px 8px; border-radius: 6px; font-weight: 500; }
+.wo-plant { font-size: 11px; font-weight: 600; color: #1d6fc0; background: #e8f1fc; padding: 3px 10px; border-radius: 10px; margin-left: auto; }
+.wo-status { font-size: 11px; font-weight: 600; color: #6c757d; margin-left: 10px; }
 .wo-select-all { display: flex; align-items: center; gap: 8px; padding: 8px 4px; margin-bottom: 8px; font-weight: 600; font-size: 13px; }
 </style>
 <label class="wo-select-all"><input type="checkbox" class="wo-select-all-box"> ${__("Select All")}</label>
@@ -852,6 +854,8 @@ function show_work_order_dialog(frm, data) {
 					d.work_order
 				)}" ${isSelected ? "checked disabled" : ""}>
 				<span class="wo-title">${frappe.utils.escape_html(d.work_order)}</span>
+				${d.plant ? `<span class="wo-plant">${frappe.utils.escape_html(d.plant)}</span>` : `<span class="wo-plant" style="background:#f1f3f5;color:#6c757d;">${__("No Plant")}</span>`}
+				${d.forecast_type ? `<span class="wo-status">${frappe.utils.escape_html(d.forecast_type)}</span>` : ""}
 			</div>
 			<table class="wo-table">
 				<thead>
