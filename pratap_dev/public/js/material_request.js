@@ -663,6 +663,7 @@ function show_sales_forecast_dialog(frm, data, stock_map) {
 				)}" ${isSelected ? "checked disabled" : ""}>
 				<span class="sf-title">${frappe.utils.escape_html(d.forecast_club)}</span>
 				${d.plant ? `<span class="sf-plant">${frappe.utils.escape_html(d.plant)}</span>` : `<span class="sf-plant" style="background:#f1f3f5;color:#6c757d;">${__("No Plant")}</span>`}
+				${d.forecast_type ? `<span class="sf-status">${frappe.utils.escape_html(d.forecast_type)}</span>` : ""}
 				${d.status ? `<span class="sf-status">${frappe.utils.escape_html(d.status)}</span>` : ""}
 			</div>
 			<table class="sf-table">
@@ -900,6 +901,10 @@ function show_work_order_dialog(frm, data) {
 				frappe.msgprint(__("Select at least one Work Order"));
 				return;
 			}
+
+			// Work Order items are for internal movement -> Material Transfer.
+			// (Sales Forecast picker leaves the purpose unchanged / Purchase.)
+			frm.set_value("material_request_type", "Material Transfer");
 
 			const item_qty_map = {};
 			const item_wo_map = {};

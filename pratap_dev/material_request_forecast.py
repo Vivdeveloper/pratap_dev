@@ -21,7 +21,7 @@ def get_forecast_clubs_for_material_request():
     clubs = frappe.get_all(
         "Forecast Club",
         filters={"docstatus": ["<", 2], "status": ["!=", "Material Requested"]},
-        fields=["name", "status", "plant"],
+        fields=["name", "status", "plant", "forecast_type"],
         order_by="modified desc",
     )
     if not clubs:
@@ -48,6 +48,7 @@ def get_forecast_clubs_for_material_request():
             "forecast_club": club.name,
             "status": club.status,
             "plant": club.plant,
+            "forecast_type": club.forecast_type,
             "items": [],
         }
         for club in clubs
