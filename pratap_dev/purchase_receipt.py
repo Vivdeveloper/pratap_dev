@@ -9,6 +9,26 @@ from erpnext.stock.doctype.purchase_receipt.purchase_receipt import PurchaseRece
 
 from pratap_dev.purchase_receipt_batch import _set_batch_from_insert_batch_number
 
+
+def set_item_fields(doc, method=None):
+	"""Mirror the FIRST item's code and name from the Items child table into header
+	fields (custom_item_code / custom_item_name), so they can be shown as columns in the
+	Purchase Receipt (GRN) list view.
+
+	Only the first item row is used; if there are no items, the fields stay blank.
+	"""
+	items = doc.get("items") or []
+	first = items[0] if items else None
+
+	if first and first.item_code:
+		doc.custom_item_code = first.item_code
+		doc.custom_item_name = first.item_name or frappe.db.get_value(
+			"Item", first.item_code, "item_name"
+		)
+	else:
+		doc.custom_item_code = None
+		doc.custom_item_name = None
+
 # GRN QC outcomes that let the GRN proceed (fully accepted, or partial across batches).
 QC_GRN_OK_STATUSES = {"Accepted", "Partially Accepted", "Partially Rejected"}
 

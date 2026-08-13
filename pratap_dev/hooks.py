@@ -329,4 +329,10 @@ doc_events = {
     "Custom Field": {
         "on_update": "pratap_dev.fixture_export.export_custom_field_on_save",
     },
+    "Request for Quotation": {
+        "validate": "pratap_dev.rfq_supplier_fields.set_supplier_fields",
+    },
+    "Purchase Receipt": {
+        "validate": "pratap_dev.purchase_receipt.set_item_fields",
+    },
 }

@@ -119,6 +119,46 @@ def _get_already_created_pairs(material_request):
     return already_created
 
 
+def _resolve_supplier_variant(item_code, supplier):
+    """Return the supplier-specific variant item for (item_code, supplier), or None to
+    keep the item unchanged.
+
+      - If the item is itself a supplier-item (custom_supplier_item_of set) -> None
+        (Case B: already a variant, leave as-is).
+      - Else if it is a base item with supplier items (custom_has_supplier_item) -> the
+        custom_supplier_item from its Item Supplier row for this supplier, if mapped
+        (Case A). If no variant is mapped for this exact supplier -> None (keep base).
+      - Else -> None (Case C: plain item, keep own code).
+    """
+    info = frappe.db.get_value(
+        "Item", item_code, ["custom_has_supplier_item", "custom_supplier_item_of"], as_dict=True
+    )
+    if not info:
+        return None
+    if info.custom_supplier_item_of:
+        return None  # Case B
+    if not info.custom_has_supplier_item:
+        return None  # Case C
+    return frappe.db.get_value(
+        "Item Supplier",
+        {"parent": item_code, "parenttype": "Item", "supplier": supplier},
+        "custom_supplier_item",
+    ) or None
+
+
+def _apply_supplier_variant(row, supplier):
+    """Swap an RFQ item row to the supplier-specific variant item (code, name,
+    description) when one is mapped for this supplier. Qty/UOM/required date are kept."""
+    variant = _resolve_supplier_variant(row.item_code, supplier)
+    if not variant or variant == row.item_code:
+        return
+    detail = frappe.db.get_value("Item", variant, ["item_name", "description"], as_dict=True) or {}
+    row.item_code = variant
+    row.item_name = detail.get("item_name") or variant
+    if detail.get("description"):
+        row.description = detail.get("description")
+
+
 @frappe.whitelist()
 def create_request_for_quotation(material_request, supplier_items):
     """Create one Request for Quotation per supplier, each carrying only the
@@ -143,6 +183,8 @@ def create_request_for_quotation(material_request, supplier_items):
         doc.items = [row for row in doc.items if row.item_code in item_codes]
         for idx, row in enumerate(doc.items):
             row.idx = idx + 1
+            # Show the supplier-specific item code (X -> X-A) for this supplier, if any.
+            _apply_supplier_variant(row, supplier)
 
         if not doc.items:
             continue

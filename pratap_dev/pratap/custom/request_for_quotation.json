@@ -1,0 +1,43 @@
+{
+ "custom_fields": [
+  {
+   "dt": "Request for Quotation",
+   "fieldname": "custom_supplier_code",
+   "fieldtype": "Data",
+   "label": "Supplier Code",
+   "insert_after": "billing_address",
+   "read_only": 1,
+   "in_standard_filter": 1,
+   "in_list_view": 0,
+   "no_copy": 0,
+   "print_hide": 0,
+   "translatable": 0,
+   "description": "First supplier's code from the Suppliers table (auto-filled). Exposed for the RFQ list view.",
+   "module": "Pratap",
+   "name": "Request for Quotation-custom_supplier_code",
+   "owner": "Administrator"
+  },
+  {
+   "dt": "Request for Quotation",
+   "fieldname": "custom_supplier_name",
+   "fieldtype": "Data",
+   "label": "Supplier Name",
+   "insert_after": "custom_supplier_code",
+   "read_only": 1,
+   "in_standard_filter": 1,
+   "in_list_view": 0,
+   "no_copy": 0,
+   "print_hide": 0,
+   "translatable": 0,
+   "description": "First supplier's name from the Suppliers table (auto-filled). Exposed for the RFQ list view.",
+   "module": "Pratap",
+   "name": "Request for Quotation-custom_supplier_name",
+   "owner": "Administrator"
+  }
+ ],
+ "custom_perms": [],
+ "doctype": "Request for Quotation",
+ "links": [],
+ "property_setters": [],
+ "sync_on_migrate": 1
+}
