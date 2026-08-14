@@ -1407,6 +1407,19 @@
    "translatable": 0,
    "unique": 0,
    "width": null
+  },
+  {
+   "dt": "Purchase Receipt Item",
+   "fieldname": "custom_batch_packages_json",
+   "fieldtype": "Small Text",
+   "label": "Batch Packages JSON",
+   "insert_after": "custom_total_qty",
+   "hidden": 1,
+   "read_only": 1,
+   "no_copy": 1,
+   "print_hide": 1,
+   "name": "Purchase Receipt Item-custom_batch_packages_json",
+   "module": null
   }
  ],
  "custom_perms": [],

@@ -279,6 +279,8 @@ doctype_js = {
     "Sales Invoice": "public/js/pratap_quality_inspection_reference_override.js",
     "Material Request": "public/js/material_request.js",
     "BOM": "public/js/bom.js",
+    "Batch": "public/js/batch.js",
+    "Stock Entry": "public/js/stock_entry_batch_entry.js",
 }
 
 doctype_list_js = {
@@ -314,7 +316,9 @@ doc_events = {
         "before_save": "pratap_dev.calculation.tsa_table_cal_by_weight"
     },
     "Stock Entry": {
-        "before_submit": "pratap_dev.stock_entry_validation.validate_manufacture_batch_with_work_order"
+        "before_submit": "pratap_dev.stock_entry_validation.validate_manufacture_batch_with_work_order",
+        "on_submit": "pratap_dev.batch_package_hooks.stock_entry_on_submit",
+        "on_cancel": "pratap_dev.batch_package_hooks.stock_entry_on_cancel",
     },
     "Pratap Quality Inspection": {
         "on_update": "pratap_dev.purchase_receipt.link_pratap_qc_to_grn_item",
@@ -334,5 +338,7 @@ doc_events = {
     },
     "Purchase Receipt": {
         "validate": "pratap_dev.purchase_receipt.set_item_fields",
+        "on_submit": "pratap_dev.batch_package_hooks.purchase_receipt_on_submit",
+        "on_cancel": "pratap_dev.batch_package_hooks.purchase_receipt_on_cancel",
     },
 }

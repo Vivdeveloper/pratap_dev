@@ -238,6 +238,7 @@ def add_batches_to_grn_item(purchase_receipt, purchase_receipt_item, batches):
 
 	batch_map = {}
 	batch_pkg_map = {}
+	package_rows = []
 	total_no_of_unit = 0
 	standard_pkg_qty = default_pkg_qty
 
@@ -255,6 +256,16 @@ def add_batches_to_grn_item(purchase_receipt, purchase_receipt_item, batches):
 		batch_no = _get_or_create_grn_batch(row["batch_no"], item_row.item_code, grn)
 		batch_map[batch_no] = batch_map.get(batch_no, 0) + row["total_qty"]
 		batch_pkg_map[batch_no] = row["standard_pkg_qty"]
+		# Keep each pack-config row (uncollapsed) so the Batch Package Ledger can
+		# record the real breakdown on GRN submit.
+		package_rows.append(
+			{
+				"batch_no": batch_no,
+				"standard_pkg_qty": row["standard_pkg_qty"],
+				"no_of_unit": row["no_of_unit"],
+				"total_qty": row["total_qty"],
+			}
+		)
 		total_no_of_unit += row["no_of_unit"]
 		standard_pkg_qty = row["standard_pkg_qty"]
 
@@ -280,6 +291,9 @@ def add_batches_to_grn_item(purchase_receipt, purchase_receipt_item, batches):
 	item_row.stock_qty = total_qty * flt(item_row.conversion_factor or 1)
 	item_row.custom_packing_qty = standard_pkg_qty
 	item_row.use_serial_batch_fields = 0
+	# Persist the pack breakdown so on_submit can post it to the Batch Package Ledger.
+	if item_row.meta.has_field("custom_batch_packages_json"):
+		item_row.custom_batch_packages_json = json.dumps(package_rows)
 
 	grn.save()
 

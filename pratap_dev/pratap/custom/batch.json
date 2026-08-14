@@ -81,6 +81,25 @@
    "insert_after": "custom_standard_pkg_qty",
    "name": "Batch-custom_no_of_unit",
    "module": null
+  },
+  {
+   "dt": "Batch",
+   "fieldname": "custom_package_ledger_section",
+   "fieldtype": "Section Break",
+   "label": "Package Ledger",
+   "insert_after": "expiry_date",
+   "name": "Batch-custom_package_ledger_section",
+   "module": null
+  },
+  {
+   "dt": "Batch",
+   "fieldname": "custom_package_ledger",
+   "fieldtype": "Table",
+   "label": "Package Ledger",
+   "options": "Batch Package Ledger",
+   "insert_after": "custom_package_ledger_section",
+   "name": "Batch-custom_package_ledger",
+   "module": null
   }
  ],
  "custom_perms": [],
