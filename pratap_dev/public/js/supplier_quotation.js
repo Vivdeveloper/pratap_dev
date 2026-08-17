@@ -139,6 +139,20 @@ function render_create_purchase_order_dialog(frm, data) {
 		size: "extra-large",
 		fields: [
 			{
+				fieldname: "select_all",
+				fieldtype: "Check",
+				label: __("Select All"),
+				onchange() {
+					const val = dialog.get_value("select_all") ? 1 : 0;
+					const grid = dialog.fields_dict.selected_items.grid;
+					(grid.data || []).forEach((r) => {
+						// never tick locked (fully-ordered) rows
+						if (!r._locked) r.select = val;
+					});
+					grid.refresh();
+				},
+			},
+			{
 				fieldname: "selected_items",
 				fieldtype: "Table",
 				label: __("Items"),
