@@ -10,6 +10,7 @@
   "standard_pkg_qty",
   "no_of_unit",
   "total_qty",
+  "available_units_after",
   "entry_type",
   "posting_date",
   "reference_doctype",
@@ -44,6 +45,14 @@
    "fieldtype": "Float",
    "in_list_view": 1,
    "label": "Total Qty"
+  },
+  {
+   "columns": 1,
+   "fieldname": "available_units_after",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Available Units After",
+   "read_only": 1
   },
   {
    "columns": 1,
