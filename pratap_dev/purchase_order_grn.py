@@ -304,6 +304,7 @@ def _make_purchase_receipt_for_rows(
 	group_id=None,
 	sales_invoice_number=None,
 	sales_invoice_date=None,
+	gate_pass=None,
 ):
 	"""Create and save one Purchase Receipt containing the given PO item rows.
 
@@ -383,13 +384,17 @@ def _make_purchase_receipt_for_rows(
 	if sales_invoice_date and doc.meta.has_field("custom_supplier_invoice_date"):
 		doc.custom_supplier_invoice_date = sales_invoice_date
 
+	# Link the Gate Pass chosen in the dialog (auto-matched from this PO).
+	if gate_pass and doc.meta.has_field("custom_gate_pass"):
+		doc.custom_gate_pass = gate_pass
+
 	doc.save()
 	return doc
 
 
 @frappe.whitelist()
 def make_purchase_receipts_from_po(
-	purchase_order, items=None, sales_invoice_number=None, sales_invoice_date=None
+	purchase_order, items=None, sales_invoice_number=None, sales_invoice_date=None, gate_pass=None
 ):
 	"""Create and auto-save one Purchase Receipt per PO item row.
 
@@ -439,6 +444,7 @@ def make_purchase_receipts_from_po(
 				group_id=group_id,
 				sales_invoice_number=sales_invoice_number,
 				sales_invoice_date=sales_invoice_date,
+				gate_pass=gate_pass,
 			)
 		)
 

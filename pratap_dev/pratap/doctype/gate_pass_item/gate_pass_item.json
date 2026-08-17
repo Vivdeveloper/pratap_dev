@@ -1,0 +1,104 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-08-17 00:00:00",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "item_code",
+  "item_name",
+  "uom",
+  "standard_pkg_qty",
+  "no_of_unit",
+  "no_of_unit_received",
+  "total_to_be_received",
+  "actual_received_qty",
+  "po_item"
+ ],
+ "fields": [
+  {
+   "columns": 2,
+   "fieldname": "item_code",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Item Code",
+   "options": "Item",
+   "read_only": 1
+  },
+  {
+   "columns": 2,
+   "fieldname": "item_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Item Name",
+   "read_only": 1
+  },
+  {
+   "columns": 1,
+   "fieldname": "uom",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "UOM",
+   "read_only": 1
+  },
+  {
+   "columns": 1,
+   "fieldname": "standard_pkg_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Standard Packaging Unit",
+   "read_only": 1
+  },
+  {
+   "columns": 1,
+   "fieldname": "no_of_unit",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "No of Unit",
+   "read_only": 1
+  },
+  {
+   "columns": 1,
+   "fieldname": "no_of_unit_received",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "No of Unit Received"
+  },
+  {
+   "columns": 1,
+   "fieldname": "total_to_be_received",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Total to be Received",
+   "read_only": 1
+  },
+  {
+   "columns": 1,
+   "fieldname": "actual_received_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Actual Received Qty",
+   "read_only": 1
+  },
+  {
+   "fieldname": "po_item",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "PO Item",
+   "read_only": 1
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-17 00:00:00",
+ "modified_by": "Administrator",
+ "module": "pratap",
+ "name": "Gate Pass Item",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

@@ -170,6 +170,37 @@ def get_batch_package_options(batch_no, warehouse):
 	return get_available_rows(batch_no, warehouse)
 
 
+@frappe.whitelist()
+def get_item_package_options(item_code, warehouse):
+	"""Every (batch, pack size) with a positive package balance for `item_code` in
+	`warehouse`, in FIFO order (oldest batch first) — like the standard batch
+	selector, but at pack-size granularity. Used to auto-fill the SE dialog.
+	"""
+	if not item_code or not warehouse:
+		return []
+
+	# FIFO: oldest manufacturing date first, then creation.
+	batches = frappe.get_all(
+		"Batch",
+		filters={"item": item_code, "disabled": 0},
+		fields=["name"],
+		order_by="manufacturing_date asc, creation asc",
+	)
+
+	options = []
+	for b in batches:
+		for bal in get_available_rows(b.name, warehouse):
+			options.append(
+				{
+					"batch_no": b.name,
+					"standard_pkg_qty": bal["standard_pkg_qty"],
+					"no_of_unit": bal["no_of_unit"],
+					"total_qty": bal["total_qty"],
+				}
+			)
+	return options
+
+
 def stock_entry_on_submit(doc, method=None):
 	"""Post ledger movement from each item's pack allocation:
 	  - reduce the source warehouse (Transfer Out, or Consumed if no target)

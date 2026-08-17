@@ -41,6 +41,7 @@ def get_template_parameters(template):
 
 class PratapQualityInspection(Document):
 	def before_submit(self):
+		self._validate_required_before_submit()
 		self._ensure_density_for_submit()
 		self._validate_custom_density()
 		self._validate_inspected_qty()
@@ -48,6 +49,20 @@ class PratapQualityInspection(Document):
 		self._validate_readings_status_mandatory()
 		self._validate_status_for_submit()
 		self._freeze_batch_qc_json()
+
+	def _validate_required_before_submit(self):
+		"""Inspector and Sample Issued By must be set before the QC can be submitted
+		(they stay optional on the draft)."""
+		missing = []
+		if not self.get("inspector"):
+			missing.append(_("Inspector"))
+		if not self.get("sample_issued_by"):
+			missing.append(_("Sample Issued By"))
+		if missing:
+			frappe.throw(
+				_("Please set {0} before submitting.").format(", ".join(missing)),
+				title=_("Missing Mandatory Fields"),
+			)
 
 	def _validate_all_batches_qc_done(self):
 		"""GRN: block submit until every batch has an Accept/Reject decision (batch-wise readings)."""

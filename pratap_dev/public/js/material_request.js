@@ -1062,6 +1062,14 @@ function show_rfq_matrix_dialog(frm, data) {
 .rfq-unmapped-title { font-size: 14px; font-weight: 600; color: #b02a37; }
 .rfq-unmapped-hint { font-size: 12px; color: #6c757d; margin-top: 4px; }
 .rfq-unmapped-card .rfq-table th { background: #fdeced; }
+.rfq-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+.rfq-badge { font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 12px; background: #eef1f5; color: #444; white-space: nowrap; }
+.rfq-badge b { font-weight: 700; }
+.rfq-badge-pending { background: #fff3cd; color: #7a5b00; }
+.rfq-badge-done { background: #d4edda; color: #1c6b2e; }
+.rfq-badge-warn { background: #f8d7da; color: #b02a37; }
+.rfq-fully-ordered { color: #1c6b2e; font-size: 11px; font-weight: 600; }
+.rfq-card-locked { opacity: 0.75; }
 </style>
 <label class="rfq-select-all"><input type="checkbox" class="rfq-select-all-box"> ${__("Select All")}</label>
 <div class="rfq-cards-wrapper">`;
@@ -1078,14 +1086,29 @@ function show_rfq_matrix_dialog(frm, data) {
 			? `${frappe.utils.escape_html(i.item_code)} — ${frappe.utils.escape_html(i.item_name)}`
 			: frappe.utils.escape_html(i.item_code);
 
+		// Qty progress: MR Qty, how much already has a PO, and how much is pending.
+		// While pending > 0 the item stays selectable; once 100% ordered it locks.
+		const uom = i.uom ? ` ${frappe.utils.escape_html(i.uom)}` : "";
+		const fully_ordered = flt(i.pending_qty) <= 0.0001 && !i.over_ordered;
+		const badges = `
+			<span class="rfq-badges">
+				<span class="rfq-badge">${__("MR Qty")}: <b>${format_number(flt(i.mr_qty))}${uom}</b></span>
+				<span class="rfq-badge">${__("PO Made")}: <b>${format_number(flt(i.ordered_qty))}${uom}</b></span>
+				<span class="rfq-badge ${fully_ordered ? "rfq-badge-done" : "rfq-badge-pending"}">${__(
+					"Pending PO"
+				)}: <b>${format_number(flt(i.pending_qty))}${uom}</b></span>
+				${i.over_ordered ? `<span class="rfq-badge rfq-badge-warn">${__("Over-ordered")}</span>` : ""}
+			</span>`;
+
 		html += `
-		<div class="rfq-card">
+		<div class="rfq-card ${fully_ordered ? "rfq-card-locked" : ""}">
 			<div class="rfq-header">
-				<input type="checkbox" class="rfq-row-checkbox" data-item="${frappe.utils.escape_html(
-					i.item_code
-				)}">
+				<input type="checkbox" class="rfq-row-checkbox" ${fully_ordered ? "disabled" : ""}
+					data-item="${frappe.utils.escape_html(i.item_code)}">
 				<span class="rfq-title">${item_label}</span>
+				${badges}
 			</div>
+			${fully_ordered ? `<div class="rfq-fully-ordered">${__("Fully Ordered — no quotation needed")}</div>` : ""}
 			<table class="rfq-table">
 				<thead>
 					<tr>
@@ -1099,10 +1122,14 @@ function show_rfq_matrix_dialog(frm, data) {
 
 		mapped_suppliers.forEach((s) => {
 			const done = already_created.has(`${i.item_code}::${s.supplier}`);
+			// Disable if an RFQ already exists for this pair, or the item is fully ordered.
+			const disabled = done || fully_ordered;
 			html += `
 					<tr>
 						<td>
-							<input type="checkbox" class="rfq-cell-checkbox" ${done ? "disabled checked" : ""}
+							<input type="checkbox" class="rfq-cell-checkbox" ${disabled ? "disabled" : ""} ${
+				done ? "checked" : ""
+			}
 								data-item="${frappe.utils.escape_html(i.item_code)}"
 								data-supplier="${frappe.utils.escape_html(s.supplier)}">
 						</td>

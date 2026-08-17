@@ -38,6 +38,7 @@
   "batch_qc_json",
   "section_break_2",
   "inspected_qty",
+  "sample_issued_by",
   "column_break_1",
   "inspector",
   "remarks",
@@ -130,7 +131,8 @@
    "fieldtype": "Link",
    "in_standard_filter": 1,
    "label": "Inspector",
-   "options": "User"
+   "options": "User",
+   "reqd": 0
   },
   {
    "fieldname": "remarks",
@@ -343,6 +345,13 @@
   {
    "fieldname": "section_break_ipcj",
    "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "sample_issued_by",
+   "fieldtype": "Link",
+   "options": "User",
+   "label": "Sample Issued By",
+   "reqd": 0
   }
  ],
  "grid_page_length": 50,

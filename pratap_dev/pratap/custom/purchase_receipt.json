@@ -1569,6 +1569,16 @@
    "module": "Pratap",
    "name": "Purchase Receipt-custom_item_name",
    "owner": "Administrator"
+  },
+  {
+   "dt": "Purchase Receipt",
+   "fieldname": "custom_gate_pass",
+   "fieldtype": "Link",
+   "label": "Gate Pass",
+   "options": "Gate Pass",
+   "insert_after": "custom_supplier_invoice_date",
+   "name": "Purchase Receipt-custom_gate_pass",
+   "module": null
   }
  ],
  "custom_perms": [],

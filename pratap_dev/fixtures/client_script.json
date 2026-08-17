@@ -1,0 +1,13 @@
+[
+ {
+  "docstatus": 0,
+  "doctype": "Client Script",
+  "dt": "BOM",
+  "enabled": 1,
+  "modified": "2026-08-16 21:51:58.588267",
+  "module": null,
+  "name": "English to Marathi in BOM",
+  "script": "frappe.ui.form.on('BOM Item', {\n    custom_operation_instruction: function(frm, cdt, cdn) {\n        let row = locals[cdt][cdn];\n\n        if (!row.custom_operation_instruction) {\n            frappe.model.set_value(cdt, cdn, 'custom_operation_instruction_marathi', '');\n            return;\n        }\n\n        let url = \"https://api.mymemory.translated.net/get?q=\"\n            + encodeURIComponent(row.custom_operation_instruction)\n            + \"&langpair=en|mr\";\n\n        fetch(url)\n            .then(response => response.json())\n            .then(data => {\n                let translated = data.responseData.translatedText || '';\n                frappe.model.set_value(cdt, cdn, 'custom_operation_instruction_marathi', translated)\n                    .then(() => {\n                        // Show the translation immediately, without the user having to\n                        // click into the Marathi cell to force a re-render.\n                        let grid = frm.fields_dict.items && frm.fields_dict.items.grid;\n                        if (!grid) return;\n                        let grid_row = grid.grid_rows_by_docname && grid.grid_rows_by_docname[cdn];\n                        if (grid_row && grid_row.refresh_field) {\n                            grid_row.refresh_field('custom_operation_instruction_marathi');\n                        } else {\n                            grid.refresh();\n                        }\n                    });\n            })\n            .catch(err => {\n                console.error(\"Translation error:\", err);\n            });\n    }\n});\n",
+  "view": "Form"
+ }
+]

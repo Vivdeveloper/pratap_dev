@@ -132,6 +132,8 @@ app_include_js = ["/assets/pratap_dev/js/last_buying_rates.js"]
 
 override_doctype_class = {
 	"Purchase Receipt": "pratap_dev.purchase_receipt.PratapPurchaseReceipt",
+	# Allow supplier-variant items (RFQ rename) to satisfy the MR item link on POs.
+	"Purchase Order": "pratap_dev.purchase_order_variant.PratapPurchaseOrder",
 }
 
 # Document Events
@@ -248,6 +250,12 @@ fixtures = [
 		"dt": "Custom Field",
 		"filters": [["module", "=", "pratap"]],
 	},
+	# Ship the BOM English->Marathi translation Client Script with the app so the
+	# fix deploys everywhere (Client Scripts are otherwise per-site DB records).
+	{
+		"dt": "Client Script",
+		"filters": [["name", "=", "English to Marathi in BOM"]],
+	},
 ]
 
 before_migrate = ["pratap_dev.fixture_export.setup_fixture_import"]
@@ -329,6 +337,9 @@ doc_events = {
     "Work Order": {
         "before_validate": "pratap_dev.work_order_bom_item.set_bom_item",
         "validate": "pratap_dev.work_order_instruction.set_operation_instructions",
+    },
+    "BOM": {
+        "validate": "pratap_dev.bom_custom.validate_bom_total_qty",
     },
     "Custom Field": {
         "on_update": "pratap_dev.fixture_export.export_custom_field_on_save",

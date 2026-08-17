@@ -5,6 +5,7 @@ import json
 
 import frappe
 from frappe import _
+from frappe.utils import flt
 
 
 @frappe.whitelist()
@@ -20,13 +21,43 @@ def get_rfq_matrix_data(material_request):
     mr = frappe.get_doc("Material Request", material_request)
     mr.check_permission("read")
 
+    # Aggregate MR qty per item across all MR rows so each item card can show:
+    # MR Qty, how much already has a PO, and how much is pending.
     items = []
     seen_items = set()
+    agg = {}
+    row_names_by_item = {}
     for row in mr.items:
-        if not row.item_code or row.item_code in seen_items:
+        if not row.item_code:
             continue
-        seen_items.add(row.item_code)
-        items.append({"item_code": row.item_code, "item_name": row.item_name})
+        if row.item_code not in agg:
+            agg[row.item_code] = {
+                "item_code": row.item_code,
+                "item_name": row.item_name,
+                "uom": row.get("uom") or row.get("stock_uom") or "",
+                "mr_qty": 0.0,
+                "ordered_qty": 0.0,
+            }
+            items.append(agg[row.item_code])  # preserve first-seen order
+            seen_items.add(row.item_code)
+            row_names_by_item[row.item_code] = []
+        agg[row.item_code]["mr_qty"] += flt(row.qty)
+        row_names_by_item[row.item_code].append(row.name)
+
+    # "PO Made" per item = qty of every SUBMITTED Purchase Order Item that links
+    # back to this MR row (material_request_item). This counts supplier-variant POs
+    # too (e.g. RM02498-J against a base RM02498 MR row), since the variant PO still
+    # carries the base MR row's material_request_item — so the count stays correct
+    # even though the RFQ renamed the item to its supplier variant.
+    all_row_names = [n for names in row_names_by_item.values() for n in names]
+    ordered_by_row = get_ordered_qty_by_mr_row(all_row_names)
+
+    for it in items:
+        it["ordered_qty"] = sum(
+            ordered_by_row.get(n, 0.0) for n in row_names_by_item[it["item_code"]]
+        )
+        it["pending_qty"] = max(it["mr_qty"] - it["ordered_qty"], 0.0)
+        it["over_ordered"] = it["ordered_qty"] > it["mr_qty"] + 0.0001
 
     item_codes = list(seen_items)
     if not item_codes:
@@ -197,3 +228,30 @@ def create_request_for_quotation(material_request, supplier_items):
         frappe.throw(_("Selected items were not found on this Material Request."))
 
     return rfq_names
+
+
+def get_ordered_qty_by_mr_row(row_names):
+    """Submitted Purchase Order qty per Material Request Item row name.
+
+    Variant-aware: a supplier-variant PO (e.g. RM02498-J) still carries the base
+    MR row's material_request_item, so it is counted against that row here. Shared
+    by the RFQ picker (PO progress) and the Supplier Quotation partial-PO cap.
+    """
+    row_names = [n for n in (row_names or []) if n]
+    result = {}
+    if not row_names:
+        return result
+    po_rows = frappe.db.sql(
+        """
+        SELECT poi.material_request_item AS mri, SUM(poi.qty) AS qty
+        FROM `tabPurchase Order Item` poi
+        INNER JOIN `tabPurchase Order` po ON po.name = poi.parent
+        WHERE po.docstatus = 1 AND poi.material_request_item IN %(names)s
+        GROUP BY poi.material_request_item
+        """,
+        {"names": row_names},
+        as_dict=True,
+    )
+    for r in po_rows:
+        result[r.mri] = flt(r.qty)
+    return result

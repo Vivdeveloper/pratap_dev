@@ -1,9 +1,13 @@
 // Stock Entry — Batch Packages allocation dialog.
 // Real stock (batch + qty) is still set via ERPNext's standard "Add Batch Nos",
 // so nothing about stock/valuation changes. This dialog captures HOW the moved qty
-// splits across the batch's pack sizes, so the Batch Package Ledger can reduce the
-// source-warehouse rows and add a new Transfer In row (e.g. to WIP) on submit.
-// The allocation is stored (hidden) on the item row.
+// splits across each batch's pack sizes, so the Batch Package Ledger can reduce the
+// source-warehouse rows and add new Transfer In rows (e.g. to WIP) on submit.
+//
+// Behaviour mirrors the standard batch selector: it auto-lists ONLY the batches
+// with package balance in the source warehouse, in FIFO order (oldest first), and
+// pre-fills the "take" amounts up to the item row's qty. Batch is a column in the
+// table (no separate picker). The allocation is stored (hidden) on the item row.
 
 frappe.ui.form.on("Stock Entry", {
 	refresh(frm) {
@@ -12,9 +16,6 @@ frappe.ui.form.on("Stock Entry", {
 	},
 });
 
-// Module-level state so the in-field onchange handlers (whose `this` is not the
-// dialog) can reach the live dialog + source warehouse. Mirrors the pattern used
-// by purchase_receipt_batch_entry.js.
 const se_pkg_state = { cdn: null, dialog: null, source_wh: null };
 
 function bind_se_row_selection(frm) {
@@ -53,9 +54,8 @@ function get_selected_se_row(frm) {
 	return with_item.length === 1 ? with_item[0] : null;
 }
 
-// Recompute the allocation grid in place: Total = Pack x Units. If a row has a
-// Total but no Units (user typed Total directly), derive Units = Total / Pack
-// (float). Reads the live dialog from module state so it works from any onchange.
+// Total = Pack x Units. If a row has a Total but no Units (user typed Total), derive
+// Units = Total / Pack (float). Reads the live dialog from module state.
 function recompute_se_alloc() {
 	const d = se_pkg_state.dialog;
 	if (!d || !d.fields_dict.alloc) return;
@@ -72,35 +72,24 @@ function recompute_se_alloc() {
 	grid.refresh();
 }
 
-// Load the batch's available pack balances (from the ledger) into the grid.
-function load_se_package_options() {
-	const d = se_pkg_state.dialog;
-	if (!d) return;
-	const batch_no = d.get_value("batch_no");
-	const warehouse = se_pkg_state.source_wh;
-	if (!batch_no || !warehouse) return;
-
-	frappe.call({
-		method: "pratap_dev.batch_package_hooks.get_batch_package_options",
-		args: { batch_no, warehouse },
-		callback: (r) => {
-			const opts = (r && r.message) || [];
-			if (!opts.length) {
-				frappe.show_alert({
-					message: __("No package balance for {0} in {1}.", [batch_no, warehouse]),
-					indicator: "orange",
-				});
-			}
-			const data = opts.map((o) => ({
-				standard_pkg_qty: flt(o.standard_pkg_qty),
-				available: flt(o.total_qty),
-				no_of_unit: 0,
-				total_qty: 0,
-			}));
-			d.fields_dict.alloc.df.data = data;
-			d.fields_dict.alloc.grid.refresh();
-		},
+// FIFO pre-fill: walk the (already FIFO-ordered) rows and take from each up to its
+// available balance until the item row's qty is met.
+function fifo_prefill(rows, target_qty) {
+	let remaining = flt(target_qty);
+	rows.forEach((r) => {
+		const pkg = flt(r.standard_pkg_qty);
+		const avail = flt(r.available);
+		if (remaining <= 0.0001 || !pkg || avail <= 0) {
+			r.no_of_unit = 0;
+			r.total_qty = 0;
+			return;
+		}
+		const take = Math.min(avail, remaining);
+		r.total_qty = take;
+		r.no_of_unit = take / pkg;
+		remaining -= take;
 	});
+	return rows;
 }
 
 function open_se_package_dialog(frm, row) {
@@ -115,7 +104,7 @@ function open_se_package_dialog(frm, row) {
 		return;
 	}
 
-	// pre-load any saved allocation
+	// restore a previously-saved allocation, if any
 	let saved = [];
 	try {
 		saved = JSON.parse(row.custom_batch_packages_json || "[]");
@@ -135,44 +124,28 @@ function open_se_package_dialog(frm, row) {
 					${__("Source")}: <b>${frappe.utils.escape_html(source_wh)}</b>
 					${target_wh ? ` &nbsp;→&nbsp; ${__("Target")}: <b>${frappe.utils.escape_html(target_wh)}</b>` : ` &nbsp;(${__("consumption")})`}
 					&nbsp;·&nbsp; ${__("Row Qty")}: <b>${format_number(flt(row.qty))}</b>
+					&nbsp;·&nbsp; <span class="text-muted">${__("Batches shown FIFO from this warehouse")}</span>
 				</div>`,
-			},
-			{
-				fieldname: "batch_no",
-				fieldtype: "Link",
-				options: "Batch",
-				label: __("Batch"),
-				reqd: 1,
-				default: saved.length ? saved[0].batch_no : row.batch_no || "",
-				get_query() {
-					return { filters: { item: row.item_code } };
-				},
-				onchange() {
-					load_se_package_options();
-				},
 			},
 			{
 				fieldname: "alloc",
 				fieldtype: "Table",
-				label: __("Take from these packages"),
-				cannot_add_rows: false,
+				label: __("Take from these batch packages (FIFO)"),
+				cannot_add_rows: true,
 				cannot_delete_rows: false,
 				in_place_edit: false,
-				data: saved.map((r) => ({
-					standard_pkg_qty: flt(r.standard_pkg_qty),
-					available: flt(r.available),
-					no_of_unit: flt(r.no_of_unit),
-					total_qty: flt(r.total_qty),
-				})),
+				data: [],
 				fields: [
-					{ fieldname: "standard_pkg_qty", fieldtype: "Float", label: __("Pack Qty"), in_list_view: 1, columns: 2 },
-					{ fieldname: "available", fieldtype: "Float", label: __("Available Qty"), in_list_view: 1, read_only: 1, columns: 3 },
+					{ fieldname: "batch_no", fieldtype: "Data", label: __("Batch"), in_list_view: 1, read_only: 1, columns: 2 },
+					{ fieldname: "standard_pkg_qty", fieldtype: "Float", label: __("Pack Qty"), in_list_view: 1, read_only: 1, columns: 1 },
+					{ fieldname: "available_units", fieldtype: "Float", label: __("Available Units"), in_list_view: 1, read_only: 1, columns: 2 },
+					{ fieldname: "available", fieldtype: "Float", label: __("Available Qty"), in_list_view: 1, read_only: 1, columns: 2 },
 					{
 						fieldname: "no_of_unit",
 						fieldtype: "Float",
 						label: __("Take No of Unit"),
 						in_list_view: 1,
-						columns: 3,
+						columns: 2,
 						onchange() {
 							setTimeout(recompute_se_alloc, 0);
 						},
@@ -182,7 +155,7 @@ function open_se_package_dialog(frm, row) {
 						fieldtype: "Float",
 						label: __("Take Total Qty"),
 						in_list_view: 1,
-						columns: 3,
+						columns: 2,
 						onchange() {
 							setTimeout(recompute_se_alloc, 0);
 						},
@@ -198,22 +171,52 @@ function open_se_package_dialog(frm, row) {
 
 	se_pkg_state.dialog = d;
 	se_pkg_state.source_wh = source_wh;
-
 	d.show();
 
-	// Auto-load pack rows for the pre-filled batch (unless we restored a saved set).
-	if (d.get_value("batch_no") && !saved.length) {
-		load_se_package_options();
-	}
+	// Load FIFO options for the item in the source warehouse.
+	frappe.call({
+		method: "pratap_dev.batch_package_hooks.get_item_package_options",
+		args: { item_code: row.item_code, warehouse: source_wh },
+		callback: (r) => {
+			const opts = (r && r.message) || [];
+			if (!opts.length) {
+				frappe.show_alert({
+					message: __("No package balance for {0} in {1}.", [row.item_code, source_wh]),
+					indicator: "orange",
+				});
+			}
+			let data = opts.map((o) => ({
+				batch_no: o.batch_no,
+				standard_pkg_qty: flt(o.standard_pkg_qty),
+				available_units: flt(o.no_of_unit),
+				available: flt(o.total_qty),
+				no_of_unit: 0,
+				total_qty: 0,
+			}));
+
+			// If we had a saved allocation, restore those take amounts onto matching
+			// (batch, pack) rows; otherwise FIFO-prefill up to the item row qty.
+			if (saved.length) {
+				data.forEach((r2) => {
+					const s = saved.find(
+						(x) => x.batch_no === r2.batch_no && flt(x.standard_pkg_qty) === flt(r2.standard_pkg_qty)
+					);
+					if (s) {
+						r2.no_of_unit = flt(s.no_of_unit);
+						r2.total_qty = flt(s.total_qty);
+					}
+				});
+			} else {
+				data = fifo_prefill(data, flt(row.qty));
+			}
+
+			d.fields_dict.alloc.df.data = data;
+			d.fields_dict.alloc.grid.refresh();
+		},
+	});
 }
 
 function save_se_allocation(frm, row, d) {
-	const batch_no = d.get_value("batch_no");
-	if (!batch_no) {
-		frappe.msgprint(__("Select a Batch."));
-		return;
-	}
-	// make sure derived values are current before reading
 	recompute_se_alloc();
 
 	const rows = (d.fields_dict.alloc.grid.data || [])
@@ -221,19 +224,32 @@ function save_se_allocation(frm, row, d) {
 			const pkg = flt(r.standard_pkg_qty);
 			const units = flt(r.no_of_unit);
 			const total = flt(r.total_qty) || pkg * units;
-			return { batch_no, standard_pkg_qty: pkg, no_of_unit: units, total_qty: total, available: flt(r.available) };
+			return {
+				batch_no: (r.batch_no || "").trim(),
+				standard_pkg_qty: pkg,
+				no_of_unit: units,
+				total_qty: total,
+				available: flt(r.available),
+			};
 		})
-		.filter((r) => r.total_qty > 0 || r.no_of_unit > 0);
+		.filter((r) => r.batch_no && (r.total_qty > 0 || r.no_of_unit > 0));
 
 	if (!rows.length) {
-		frappe.msgprint(__("Enter how many units/qty to take from at least one package."));
+		frappe.msgprint(__("Enter how many units/qty to take from at least one batch package."));
 		return;
 	}
 
-	// soft check: don't take more than available
+	// soft check: don't take more than available on any row
 	for (const r of rows) {
 		if (r.available && r.total_qty > r.available + 0.0001) {
-			frappe.msgprint(__("Pack Qty {0}: taking {1} exceeds available {2}.", [r.standard_pkg_qty, r.total_qty, r.available]));
+			frappe.msgprint(
+				__("Batch {0} (Pack {1}): taking {2} exceeds available {3}.", [
+					r.batch_no,
+					r.standard_pkg_qty,
+					r.total_qty,
+					r.available,
+				])
+			);
 			return;
 		}
 	}
@@ -242,7 +258,7 @@ function save_se_allocation(frm, row, d) {
 	se_pkg_state.dialog = null;
 	d.hide();
 	frappe.show_alert({
-		message: __("Package allocation saved for {0}. It posts to the batch ledger on submit.", [batch_no]),
+		message: __("Package allocation saved. It posts to the batch ledger on submit."),
 		indicator: "green",
 	});
 }
