@@ -48,6 +48,8 @@ def parse_batch_qc_json(value):
 		rows.append(
 			{
 				"batch_no": row.get("batch_no"),
+				# owning GRN row: keeps the same batch on two GRN rows independent
+				"purchase_receipt_item": row.get("purchase_receipt_item"),
 				"batch_qty": batch_qty,
 				"standard_pkg_qty": standard_pkg_qty,
 				"no_of_unit": no_of_unit,

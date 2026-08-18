@@ -327,6 +327,7 @@ async function save_multi_batch_entry(frm, dialog, sections) {
 						standard_pkg_qty: flt(entry.custom_packing_qty) || p.default_pkg_qty,
 						no_of_unit: flt(entry.custom_total_qty),
 						total_qty: flt(entry.qty),
+						expiry_date: entry.expiry_date || null,
 					})),
 				},
 			});
@@ -591,7 +592,7 @@ function get_batch_entry_table_fields(default_pkg_qty, is_read_only = false, ite
 			in_list_view: 1,
 			reqd: 1,
 			read_only: is_read_only,
-			columns: 4,
+			columns: 3,
 			get_query() {
 				return {
 					filters: {
@@ -612,7 +613,7 @@ function get_batch_entry_table_fields(default_pkg_qty, is_read_only = false, ite
 			in_list_view: 1,
 			default: default_pkg_qty,
 			read_only: 1,
-			columns: 3,
+			columns: 2,
 			onchange() {
 				console.log("[BatchEntry] custom_packing_qty onchange");
 				setTimeout(recompute_all_batch_qty, 0);
@@ -636,7 +637,15 @@ function get_batch_entry_table_fields(default_pkg_qty, is_read_only = false, ite
 			label: __("Total Qty"),
 			read_only: 1,
 			in_list_view: 1,
-			columns: 3,
+			columns: 2,
+		},
+		{
+			fieldname: "expiry_date",
+			fieldtype: "Date",
+			label: __("Expiry Date"),
+			in_list_view: 1,
+			read_only: is_read_only,
+			columns: 2,
 		},
 	];
 }
@@ -721,6 +730,7 @@ function save_batch_entry_dialog(frm, row, dialog) {
 				standard_pkg_qty: flt(entry.custom_packing_qty) || default_pkg_qty,
 				no_of_unit: flt(entry.custom_total_qty),
 				total_qty: flt(entry.qty),
+				expiry_date: entry.expiry_date || null,
 			})),
 		},
 		freeze: true,
@@ -755,6 +765,7 @@ function prepare_batch_entry_row(row, default_pkg_qty) {
 		custom_packing_qty: flt(row.standard_pkg_qty ?? row.custom_packing_qty) || default_pkg_qty,
 		custom_total_qty: flt(row.no_of_unit ?? row.custom_total_qty),
 		qty: flt(row.total_qty ?? row.qty),
+		expiry_date: row.expiry_date || null,
 	};
 	recalculate_batch_entry_row(prepared, default_pkg_qty);
 	return prepared;

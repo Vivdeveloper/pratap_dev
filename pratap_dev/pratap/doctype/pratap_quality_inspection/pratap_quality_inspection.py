@@ -619,6 +619,7 @@ class PratapQualityInspection(Document):
 				rows.append(
 					{
 						"batch_no": batch.get("batch_no"),
+						"purchase_receipt_item": batch.get("purchase_receipt_item"),
 						"batch_qty": batch_qty,
 						"standard_pkg_qty": standard_pkg_qty,
 						"no_of_unit": no_of_unit,
@@ -652,10 +653,16 @@ class PratapQualityInspection(Document):
 
 		if batch_rows:
 			# Route each batch's accept/reject decision to the GRN row that owns it.
+			# Prefer the exact owning row (purchase_receipt_item) so the SAME batch on
+			# two GRN rows (e.g. pack 500 and pack 250) is written back to each row
+			# independently. Fall back to a batch_no map for legacy rows.
+			item_rows_by_name = {r.name: r for r in item_rows}
 			rows_by_batch = _map_grn_batches_to_rows(item_rows)
 			grouped = {}
 			for batch_row in batch_rows:
-				owner = rows_by_batch.get(batch_row.get("batch_no")) or item_rows[0]
+				owner = item_rows_by_name.get(batch_row.get("purchase_receipt_item"))
+				if not owner:
+					owner = rows_by_batch.get(batch_row.get("batch_no")) or item_rows[0]
 				grouped.setdefault(owner.name, (owner, []))[1].append(batch_row)
 
 			for owner, owner_batch_rows in grouped.values():
@@ -867,6 +874,28 @@ def _batches_for_grn_item_row(item_row):
 	purchase_receipt_item = item_row.name
 	row_density = frappe.utils.flt(item_row.get("custom_density"))
 
+	# True No of Unit per batch from the GRN row's pack breakdown (handles a batch
+	# received in multiple pack sizes, where qty / single pkg would be wrong).
+	units_by_batch = {}
+	raw_pkgs = item_row.get("custom_batch_packages_json")
+	if raw_pkgs:
+		import json as _json
+
+		try:
+			for pr in _json.loads(raw_pkgs) or []:
+				bn = (pr.get("batch_no") or "").strip()
+				if bn:
+					units_by_batch[bn] = units_by_batch.get(bn, 0.0) + frappe.utils.flt(
+						pr.get("no_of_unit")
+					)
+		except (ValueError, TypeError):
+			units_by_batch = {}
+
+	def _units_for(batch_no, qty):
+		if batch_no in units_by_batch:
+			return units_by_batch[batch_no]
+		return qty / standard_pkg_qty if standard_pkg_qty else 0
+
 	batches = []
 
 	if item_row.get("serial_and_batch_bundle"):
@@ -893,7 +922,7 @@ def _batches_for_grn_item_row(item_row):
 					"batch_no": batch_no,
 					"batch_qty": qty,
 					"standard_pkg_qty": standard_pkg_qty,
-					"no_of_unit": qty / standard_pkg_qty if standard_pkg_qty else 0,
+					"no_of_unit": _units_for(batch_no, qty),
 					"purchase_receipt_item": purchase_receipt_item,
 					"density": row_density,
 				}
@@ -906,7 +935,7 @@ def _batches_for_grn_item_row(item_row):
 				"batch_no": item_row.batch_no,
 				"batch_qty": batch_qty,
 				"standard_pkg_qty": standard_pkg_qty,
-				"no_of_unit": batch_qty / standard_pkg_qty if standard_pkg_qty else 0,
+				"no_of_unit": _units_for(item_row.batch_no, batch_qty),
 				"purchase_receipt_item": purchase_receipt_item,
 				"density": row_density,
 			}

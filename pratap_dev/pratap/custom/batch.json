@@ -100,6 +100,55 @@
    "insert_after": "custom_package_ledger_section",
    "name": "Batch-custom_package_ledger",
    "module": null
+  },
+  {
+   "dt": "Batch",
+   "fieldname": "custom_grn_details_section",
+   "fieldtype": "Section Break",
+   "label": "GRN Details",
+   "insert_after": "manufacturing_date",
+   "name": "Batch-custom_grn_details_section",
+   "module": null
+  },
+  {
+   "dt": "Batch",
+   "fieldname": "custom_supplier_id",
+   "fieldtype": "Data",
+   "label": "Supplier Id",
+   "insert_after": "custom_grn_details_section",
+   "name": "Batch-custom_supplier_id",
+   "module": null,
+   "read_only": 1
+  },
+  {
+   "dt": "Batch",
+   "fieldname": "custom_supplier_name",
+   "fieldtype": "Data",
+   "label": "Supplier Name",
+   "insert_after": "custom_supplier_id",
+   "name": "Batch-custom_supplier_name",
+   "module": null,
+   "read_only": 1
+  },
+  {
+   "dt": "Batch",
+   "fieldname": "custom_grn_number",
+   "fieldtype": "Data",
+   "label": "GRN Number",
+   "insert_after": "custom_supplier_name",
+   "name": "Batch-custom_grn_number",
+   "module": null,
+   "read_only": 1
+  },
+  {
+   "dt": "Batch",
+   "fieldname": "custom_grn_group_id",
+   "fieldtype": "Data",
+   "label": "GRN Group Id",
+   "insert_after": "custom_grn_number",
+   "name": "Batch-custom_grn_group_id",
+   "module": null,
+   "read_only": 1
   }
  ],
  "custom_perms": [],

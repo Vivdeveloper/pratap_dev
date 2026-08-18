@@ -47,16 +47,14 @@
    "fieldname": "standard_pkg_qty",
    "fieldtype": "Float",
    "in_list_view": 1,
-   "label": "Standard Packaging Unit",
-   "read_only": 1
+   "label": "Standard Packaging Unit"
   },
   {
    "columns": 1,
    "fieldname": "no_of_unit",
    "fieldtype": "Float",
    "in_list_view": 1,
-   "label": "No of Unit",
-   "read_only": 1
+   "label": "No of Unit"
   },
   {
    "columns": 1,
@@ -78,8 +76,7 @@
    "fieldname": "actual_received_qty",
    "fieldtype": "Float",
    "in_list_view": 1,
-   "label": "Actual Received Qty",
-   "read_only": 1
+   "label": "Actual Received Qty"
   },
   {
    "fieldname": "po_item",

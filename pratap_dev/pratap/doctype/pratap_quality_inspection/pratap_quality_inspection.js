@@ -525,13 +525,19 @@ function clear_grn_batch_html(frm) {
 	}
 }
 
+// A QC line is identified by (GRN row + batch), NOT batch_no alone, so the SAME
+// batch received on two GRN rows (e.g. pack 500 and pack 250) stays independent.
+function qc_row_key(row) {
+	return `${row.purchase_receipt_item || ""}::${row.batch_no || ""}`;
+}
+
 function parse_batch_qc_json(value) {
 	if (!value) {
 		return {};
 	}
 	try {
 		const parsed = JSON.parse(value);
-		return Array.isArray(parsed) ? Object.fromEntries(parsed.map((row) => [row.batch_no, row])) : {};
+		return Array.isArray(parsed) ? Object.fromEntries(parsed.map((row) => [qc_row_key(row), row])) : {};
 	} catch {
 		return {};
 	}
@@ -556,6 +562,8 @@ function serialize_batch_qc_rows(rows) {
 			const density = flt(normalized.density);
 			return {
 				batch_no: normalized.batch_no,
+				// keep the owning GRN row so the same batch on two rows stays separate
+				purchase_receipt_item: normalized.purchase_receipt_item,
 				batch_qty: normalized.batch_qty,
 				standard_pkg_qty: normalized.standard_pkg_qty,
 				no_of_unit: normalized.no_of_unit,
@@ -629,6 +637,7 @@ function normalize_grn_batch_row(row, saved = {}) {
 
 	const normalized = {
 		batch_no: row.batch_no,
+		purchase_receipt_item: row.purchase_receipt_item ?? saved.purchase_receipt_item,
 		batch_qty,
 		standard_pkg_qty,
 		no_of_unit,
@@ -700,7 +709,7 @@ function load_grn_batch_details(frm) {
 			const saved_rows = parse_batch_qc_json(frm.doc.batch_qc_json);
 			const batches = response.message || [];
 
-			frm._grn_batch_rows = batches.map((row) => normalize_grn_batch_row(row, saved_rows[row.batch_no] || {}));
+			frm._grn_batch_rows = batches.map((row) => normalize_grn_batch_row(row, saved_rows[qc_row_key(row)] || {}));
 
 			render_grn_batch_html(frm);
 		});

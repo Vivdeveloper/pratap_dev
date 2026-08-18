@@ -21,6 +21,19 @@ frappe.ui.form.on("Gate Pass Item", {
 		recompute_row(frm, cdt, cdn);
 		recompute_totals(frm);
 	},
+	// Pack Qty / No of Unit are now editable: recompute the derived columns.
+	standard_pkg_qty(frm, cdt, cdn) {
+		recompute_row(frm, cdt, cdn);
+		recompute_totals(frm);
+	},
+	no_of_unit(frm, cdt, cdn) {
+		recompute_row(frm, cdt, cdn);
+		recompute_totals(frm);
+	},
+	// Actual Received Qty can be overridden directly — just roll up the totals.
+	actual_received_qty(frm) {
+		recompute_totals(frm);
+	},
 	items_remove(frm) {
 		recompute_totals(frm);
 	},
@@ -60,12 +73,10 @@ function load_po_items(frm) {
 
 function recompute_row(frm, cdt, cdn) {
 	const row = locals[cdt][cdn];
-	frappe.model.set_value(
-		cdt,
-		cdn,
-		"actual_received_qty",
-		flt(row.no_of_unit_received) * flt(row.standard_pkg_qty)
-	);
+	const pkg = flt(row.standard_pkg_qty);
+	// Total to be Received = No of Unit x Pack Qty; Actual = Units Received x Pack Qty.
+	frappe.model.set_value(cdt, cdn, "total_to_be_received", flt(row.no_of_unit) * pkg);
+	frappe.model.set_value(cdt, cdn, "actual_received_qty", flt(row.no_of_unit_received) * pkg);
 }
 
 function recompute_totals(frm) {

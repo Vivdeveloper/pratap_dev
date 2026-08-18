@@ -42,6 +42,7 @@ def _normalize_batch_row(batch_row, default_pkg_qty):
 		"standard_pkg_qty": standard_pkg_qty,
 		"no_of_unit": no_of_unit,
 		"total_qty": total_qty,
+		"expiry_date": batch_row.get("expiry_date") or None,
 	}
 
 
@@ -176,6 +177,10 @@ def get_grn_batch_entry_context(purchase_receipt, purchase_receipt_item=None):
 					or selected_item["custom_packing_qty"],
 					"no_of_unit": flt(batch.get("no_of_unit")),
 					"total_qty": flt(batch.get("batch_qty")),
+					# show existing expiry so re-opening the dialog isn't blank
+					"expiry_date": frappe.db.get_value("Batch", batch.get("batch_no"), "expiry_date")
+					if batch.get("batch_no")
+					else None,
 				}
 			)
 
@@ -253,7 +258,9 @@ def add_batches_to_grn_item(purchase_receipt, purchase_receipt_item, batches):
 		if row["total_qty"] <= 0:
 			frappe.throw(_("Row {0}: Total Qty must be greater than 0.").format(idx))
 
-		batch_no = _get_or_create_grn_batch(row["batch_no"], item_row.item_code, grn)
+		batch_no = _get_or_create_grn_batch(
+			row["batch_no"], item_row.item_code, grn, expiry_date=row.get("expiry_date")
+		)
 		batch_map[batch_no] = batch_map.get(batch_no, 0) + row["total_qty"]
 		batch_pkg_map[batch_no] = row["standard_pkg_qty"]
 		# Keep each pack-config row (uncollapsed) so the Batch Package Ledger can
