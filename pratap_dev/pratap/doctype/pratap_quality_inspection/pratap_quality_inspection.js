@@ -1203,11 +1203,28 @@ function ensure_grn_batch_styles() {
 
 const BATCH_READINGS_MAX = 10; // reading_1 .. reading_10
 
+// Batch-wise readings identify each line by a COMPOSITE key (GRN row + batch),
+// NOT batch_no alone — so the same batch received on two rows with different pack
+// sizes (e.g. 885 pack 500 and 885 pack 250) stays independent: accepting one no
+// longer closes the other.
 function get_batch_readings_columns(frm) {
 	return (frm._grn_batch_rows || [])
-		.map((row) => row.batch_no)
-		.filter(Boolean)
-		.slice(0, BATCH_READINGS_MAX);
+		.filter((row) => row.batch_no)
+		.slice(0, BATCH_READINGS_MAX)
+		.map((row) => qc_row_key(row));
+}
+
+// Row (from _grn_batch_rows) for a given composite key.
+function bread_row_for_key(frm, key) {
+	return (frm._grn_batch_rows || []).find((r) => qc_row_key(r) === key);
+}
+
+// Human label for a composite key: "885 (500)" — batch no + pack size.
+function bread_label(frm, key) {
+	const row = bread_row_for_key(frm, key);
+	if (!row) return key;
+	const pkg = flt(row.standard_pkg_qty);
+	return pkg ? `${row.batch_no} (${format_batch_display(pkg)})` : `${row.batch_no}`;
 }
 
 function parse_batch_readings_rows(value) {
@@ -1223,8 +1240,10 @@ function parse_batch_readings_rows(value) {
 }
 
 function parse_batch_readings_map(value) {
+	// Key by the row's composite key when present; fall back to batch_no for rows
+	// saved before the composite-key change.
 	return Object.fromEntries(
-		parse_batch_readings_rows(value).map((row) => [row.batch_no, row])
+		parse_batch_readings_rows(value).map((row) => [row.key || row.batch_no, row])
 	);
 }
 
@@ -1301,12 +1320,17 @@ function bread_get_rows(frm) {
 	return parse_batch_readings_rows(frm.doc.batch_readings_json);
 }
 
-// Merge a patch for one batch into batch_readings_json, keeping batch order.
-function bread_upsert(frm, batch_no, patch) {
+// Merge a patch for one batch line (composite key) into batch_readings_json,
+// keeping line order. Each row carries { key, batch_no, status, added, values }.
+function bread_upsert(frm, key, patch) {
 	const batches = get_batch_readings_columns(frm);
 	const map = parse_batch_readings_map(frm.doc.batch_readings_json);
-	map[batch_no] = Object.assign({ batch_no: batch_no, status: "", added: false, values: {} }, map[batch_no] || {}, patch);
-	const rows = batches.map((b) => map[b] || { batch_no: b, status: "", added: false, values: {} });
+	const row_for = (k) => {
+		const r = bread_row_for_key(frm, k);
+		return { key: k, batch_no: r ? r.batch_no : k, status: "", added: false, values: {} };
+	};
+	map[key] = Object.assign(row_for(key), map[key] || {}, patch, { key: key });
+	const rows = batches.map((k) => map[k] || row_for(k));
 	frm.set_value("batch_readings_json", JSON.stringify(rows));
 }
 
@@ -1371,7 +1395,7 @@ function warn_incomplete_batch_readings(frm) {
 			message: __("Readings not added for {0} of {1} batch(es): {2}. Please add readings for every batch.", [
 				pending.length,
 				batches.length,
-				pending.join(", "),
+				pending.map((k) => bread_label(frm, k)).join(", "),
 			]),
 		});
 	}
@@ -1405,10 +1429,10 @@ function render_batch_readings_matrix(frm) {
 	const map = parse_batch_readings_map(frm.doc.batch_readings_json);
 	const is_read_only = frm.doc.docstatus === 1;
 
-	// Batch quantity from Batch QC Details rows (batch_no -> batch_qty).
+	// Batch quantity from Batch QC Details rows (composite key -> batch_qty).
 	const batch_qty_map = {};
 	(frm._grn_batch_rows || []).forEach((r) => {
-		batch_qty_map[r.batch_no] = flt(r.batch_qty);
+		batch_qty_map[qc_row_key(r)] = flt(r.batch_qty);
 	});
 
 	// Default selected batch -> first batch that has not been added yet.
@@ -1427,8 +1451,8 @@ function render_batch_readings_matrix(frm) {
 				tag = entry.status === "Rejected" ? "  ✗ Rejected" : entry.status === "Accepted" ? "  ✓ Accepted" : "  • Pending";
 			}
 			return `<option value="${frappe.utils.escape_html(b)}"${b === selected ? " selected" : ""}>${frappe.utils.escape_html(
-				b
-			)} (${format_batch_display(batch_qty_map[b])})${tag}</option>`;
+				bread_label(frm, b)
+			)}${tag}</option>`;
 		})
 		.join("");
 
@@ -1469,7 +1493,7 @@ function render_batch_readings_matrix(frm) {
 		<div class="bread-entry-card">
 			<div class="bread-entry-head">
 				<span class="bread-card-batch-label">${__("Readings for Batch")}</span>
-				<span class="grn-batch-badge">${frappe.utils.escape_html(selected)}</span>
+				<span class="grn-batch-badge">${frappe.utils.escape_html(bread_label(frm, selected))}</span>
 			</div>
 			<table class="bread-entry-table">
 				<thead><tr>
@@ -1494,7 +1518,7 @@ function render_batch_readings_matrix(frm) {
 				   ${added ? `<button class="btn btn-xs btn-default bread-remove-btn" data-batch="${frappe.utils.escape_html(b)}">${__("Clear")}</button>` : ""}`;
 			return `<tr class="${added ? "" : "bread-row-pending"}">
 				<td class="grn-batch-col-index">${i + 1}</td>
-				<td><span class="grn-batch-badge">${frappe.utils.escape_html(b)}</span></td>
+				<td><span class="grn-batch-badge">${frappe.utils.escape_html(bread_label(frm, b))}</span></td>
 				<td class="grn-batch-col-qty">${format_batch_display(batch_qty_map[b])}</td>
 				<td>${status_cell}</td>
 				<td class="bread-summary-actions">${actions}</td>
@@ -1606,14 +1630,16 @@ function set_batch_reading_value(frm, rIdx, value) {
 	frappe.model.set_value(reading.doctype, reading.name, `reading_${col + 1}`, value);
 }
 
-// When a batch's reading status is decided, auto-fill the Batch QC Details units/qty:
-// Accepted -> all units accepted (rejected 0); Rejected -> all units rejected (accepted 0).
-function sync_batch_qc_from_status(frm, batch_no, status) {
+// When a batch line's reading status is decided, auto-fill THAT line's Batch QC
+// Details units/qty. Keyed by the composite line key, so the same batch on two
+// rows (different pack sizes) is updated independently — no more closing the other.
+// Accepted -> all units accepted (rejected 0); Rejected -> all units rejected.
+function sync_batch_qc_from_status(frm, key, status) {
 	if (status !== "Accepted" && status !== "Rejected") {
 		return;
 	}
 	const rows = frm._grn_batch_rows || [];
-	const idx = rows.findIndex((r) => r.batch_no === batch_no);
+	const idx = rows.findIndex((r) => qc_row_key(r) === key);
 	if (idx < 0) {
 		return;
 	}
@@ -1650,7 +1676,7 @@ function add_or_update_batch(frm) {
 
 	render_batch_readings_matrix(frm);
 	frappe.show_alert({
-		message: __("Batch {0} saved ({1})", [selected, status]),
+		message: __("Batch {0} saved ({1})", [bread_label(frm, selected), status]),
 		indicator: status === "Rejected" ? "red" : status === "Accepted" ? "green" : "orange",
 	});
 }

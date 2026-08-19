@@ -82,14 +82,25 @@ class PratapQualityInspection(Document):
 		if not batch_rows:
 			return
 
-		status_by_batch = {
-			row.get("batch_no"): (row.get("status") or "").strip()
-			for row in _parse(self.batch_readings_json)
-		}
+		# Key each line by (purchase_receipt_item + batch_no) so the same batch on two
+		# GRN rows (different pack sizes) is validated independently. Fall back to
+		# batch_no alone for readings rows saved before the composite-key change.
+		def _key(row):
+			pri = row.get("purchase_receipt_item") or ""
+			return "%s::%s" % (pri, row.get("batch_no"))
+
+		status_by_batch = {}
+		for row in _parse(self.batch_readings_json):
+			k = row.get("key") or _key(row)
+			status_by_batch[k] = (row.get("status") or "").strip()
+			# also index by batch_no for back-compat with pre-change readings
+			status_by_batch.setdefault(row.get("batch_no"), (row.get("status") or "").strip())
+
 		pending = [
 			str(row.get("batch_no"))
 			for row in batch_rows
-			if status_by_batch.get(row.get("batch_no")) not in ("Accepted", "Rejected")
+			if status_by_batch.get(_key(row)) not in ("Accepted", "Rejected")
+			and status_by_batch.get(row.get("batch_no")) not in ("Accepted", "Rejected")
 		]
 		if pending:
 			frappe.throw(

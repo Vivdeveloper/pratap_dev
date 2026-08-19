@@ -12,9 +12,33 @@ frappe.ui.form.on("Gate Pass", {
 		load_po_items(frm);
 	},
 	refresh(frm) {
-		recompute_totals(frm);
+		// NOTE: do NOT mutate fields (set_value) here — doing so on refresh dirties
+		// the form on open and can leave the Save button unresponsive. Totals are
+		// recomputed only on real edits (PO load + item-row changes) below.
+		restrict_invoice_date_to_today(frm);
+	},
+	onload(frm) {
+		restrict_invoice_date_to_today(frm);
 	},
 });
+
+// Grey out future dates in the Supplier Invoice Date picker (max = today).
+// air-datepicker's maxDate needs a REAL Date object (a string throws and breaks the
+// whole form render), so we pass `new Date()`. Wrapped in try/catch so a picker quirk
+// can never blank the form. Backed by the server-side "no future date" validation.
+function restrict_invoice_date_to_today(frm) {
+	const field = frm.fields_dict.supplier_invoice_date;
+	if (!field) return;
+	try {
+		const today = new Date();
+		field.df.max_date = today;
+		if (field.datepicker && typeof field.datepicker.update === "function") {
+			field.datepicker.update({ maxDate: today });
+		}
+	} catch (e) {
+		console.warn("Gate Pass: could not restrict invoice date", e);
+	}
+}
 
 frappe.ui.form.on("Gate Pass Item", {
 	no_of_unit_received(frm, cdt, cdn) {

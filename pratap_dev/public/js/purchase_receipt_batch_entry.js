@@ -605,6 +605,22 @@ function get_batch_entry_table_fields(default_pkg_qty, is_read_only = false, ite
 					item: item_code,
 				};
 			},
+			onchange() {
+				// If the chosen batch already has an expiry, backfill + show it;
+				// otherwise leave the cell empty for the user to input (that input
+				// then flows to the batch on save).
+				const row = this.doc;
+				if (!row || !row.batch_no) {
+					return;
+				}
+				frappe.db.get_value("Batch", row.batch_no, "expiry_date").then((r) => {
+					const exp = r && r.message ? r.message.expiry_date : null;
+					if (exp) {
+						row.expiry_date = exp;
+						setTimeout(recompute_all_batch_qty, 0); // re-render the grid cell
+					}
+				});
+			},
 		},
 		{
 			fieldname: "custom_packing_qty",
