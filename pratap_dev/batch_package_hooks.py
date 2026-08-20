@@ -301,25 +301,31 @@ def apply_stock_entry_batches(stock_entry, se_item, allocation):
 
 	entries = [{"batch_no": bn, "qty": q, "warehouse": warehouse} for bn, q in batch_qty_map.items()]
 
-	# Standard create-or-update. child_row must carry the fields the API reads.
-	child_row = {
-		"doctype": row.doctype,
-		"name": row.name,
-		"item_code": row.item_code,
-		"warehouse": warehouse,
-		"s_warehouse": row.get("s_warehouse"),
-		"t_warehouse": row.get("t_warehouse"),
-		"parenttype": "Stock Entry",
-		"is_rejected": 0,
-		"serial_and_batch_bundle": row.get("serial_and_batch_bundle"),
-	}
-	parent_doc = {
-		"doctype": "Stock Entry",
-		"name": se.name,
-		"company": se.company,
-		"posting_date": se.posting_date,
-		"posting_time": se.posting_time,
-	}
+	# Standard create-or-update. add_serial_batch_ledgers uses ATTRIBUTE access on
+	# child_row (e.g. child_row.serial_and_batch_bundle), so these must be frappe._dict
+	# (plain dicts raise AttributeError).
+	child_row = frappe._dict(
+		{
+			"doctype": row.doctype,
+			"name": row.name,
+			"item_code": row.item_code,
+			"warehouse": warehouse,
+			"s_warehouse": row.get("s_warehouse"),
+			"t_warehouse": row.get("t_warehouse"),
+			"parenttype": "Stock Entry",
+			"is_rejected": 0,
+			"serial_and_batch_bundle": row.get("serial_and_batch_bundle"),
+		}
+	)
+	parent_doc = frappe._dict(
+		{
+			"doctype": "Stock Entry",
+			"name": se.name,
+			"company": se.company,
+			"posting_date": se.posting_date,
+			"posting_time": se.posting_time,
+		}
+	)
 
 	sb_doc = add_serial_batch_ledgers(entries, child_row, parent_doc, warehouse)
 
