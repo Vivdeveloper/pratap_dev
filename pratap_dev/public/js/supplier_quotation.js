@@ -84,7 +84,7 @@ function show_create_purchase_order_dialog(frm) {
 			const std_pkg = flt(c.std_pkg) || 1;
 			const has_cap = c.pending !== null && c.pending !== undefined;
 			const pending = has_cap ? flt(c.pending) : null;
-			const max_units = has_cap ? pending / std_pkg : 0;
+			const max_units = has_cap ? flt(pending / std_pkg, 3) : 0;
 			const already = po_by_row[d.name] ? 1 : 0;
 			// Locked when fully ordered (MR pending <= 0) or, for non-MR items, when a
 			// PO already exists for this SQ row.
@@ -93,7 +93,7 @@ function show_create_purchase_order_dialog(frm) {
 			let default_units;
 			if (locked) default_units = 0;
 			else if (has_cap) default_units = max_units;
-			else default_units = flt(c.no_of_unit) || (std_pkg ? flt(d.qty) / std_pkg : 0);
+			else default_units = flt(c.no_of_unit) || (std_pkg ? flt(flt(d.qty) / std_pkg, 3) : 0);
 
 			return {
 				docname: d.name,
@@ -101,9 +101,9 @@ function show_create_purchase_order_dialog(frm) {
 				item_name: d.item_name,
 				std_pkg: std_pkg,
 				sq_units: flt(c.no_of_unit),
-				pending: has_cap ? pending : "",
+				pending: has_cap ? String(flt(pending, 3)) : "",
 				units_to_order: default_units,
-				qty_to_order: default_units * std_pkg,
+				qty_to_order: flt(default_units * std_pkg, 3),
 				select: locked ? 0 : 1,
 				_has_cap: has_cap ? 1 : 0,
 				_max_units: max_units,
@@ -117,18 +117,22 @@ function show_create_purchase_order_dialog(frm) {
 	});
 }
 
-// Live recompute: Qty to Order = Units x Std Pkg, clamped to the pending cap.
-function recompute_sq_po() {
+// Two-way recompute (like the Stock Entry dialog), directional so it never fights
+// the user, values capped at 3 decimals:
+//   from_field "qty"  -> user typed Qty to Order, derive Units = Qty / Pack
+//   otherwise (units) -> Qty to Order = Units x Pack
+// NO client-side clamp here (that was zeroing the value on type); the pending cap
+// is still enforced server-side in make_partial_purchase_order.
+function recompute_sq_po(from_field) {
 	if (!_sq_po_dialog) return;
 	const grid = _sq_po_dialog.fields_dict.selected_items.grid;
 	(grid.data || []).forEach((r) => {
 		const pkg = flt(r.std_pkg) || 1;
-		let units = flt(r.units_to_order);
-		if (r._has_cap && units > flt(r._max_units)) {
-			units = flt(r._max_units);
-			r.units_to_order = units;
+		if (from_field === "qty") {
+			r.units_to_order = flt(flt(r.qty_to_order) / pkg, 3);
+		} else {
+			r.qty_to_order = flt(flt(r.units_to_order) * pkg, 3);
 		}
-		r.qty_to_order = units * pkg;
 	});
 	grid.refresh();
 }
@@ -139,27 +143,17 @@ function render_create_purchase_order_dialog(frm, data) {
 		size: "extra-large",
 		fields: [
 			{
-				fieldname: "select_all",
-				fieldtype: "Check",
-				label: __("Select All"),
-				onchange() {
-					const val = dialog.get_value("select_all") ? 1 : 0;
-					const grid = dialog.fields_dict.selected_items.grid;
-					(grid.data || []).forEach((r) => {
-						// never tick locked (fully-ordered) rows
-						if (!r._locked) r.select = val;
-					});
-					grid.refresh();
-				},
-			},
-			{
 				fieldname: "selected_items",
 				fieldtype: "Table",
-				label: __("Items"),
+				// Same layout pattern as the (working) Stock Entry "Batch Packages"
+				// dialog: native row checkboxes + header select-all, editable cells,
+				// data populated AFTER show. Column widths sum to <= 10 so header and
+				// body line up (the double-checkbox + overflow was the misalignment).
+				label: __("Tick rows to order, set Units to Order"),
 				cannot_add_rows: true,
+				cannot_delete_rows: false,
 				in_place_edit: false,
-				data: data,
-				get_data: () => data,
+				data: [],
 				fields: [
 					{ fieldtype: "Data", fieldname: "docname", hidden: 1 },
 					{ fieldtype: "Data", fieldname: "item_name", hidden: 1 },
@@ -168,14 +162,6 @@ function render_create_purchase_order_dialog(frm, data) {
 					{ fieldtype: "Check", fieldname: "_has_cap", hidden: 1 },
 					{ fieldtype: "Float", fieldname: "_max_units", hidden: 1 },
 					{ fieldtype: "Check", fieldname: "_locked", hidden: 1 },
-					{
-						fieldtype: "Check",
-						fieldname: "select",
-						label: __("Select"),
-						in_list_view: 1,
-						columns: 1,
-						read_only_depends_on: "eval:doc._locked",
-					},
 					{
 						fieldtype: "Data",
 						fieldname: "item_code",
@@ -214,9 +200,8 @@ function render_create_purchase_order_dialog(frm, data) {
 						label: __("Units to Order"),
 						in_list_view: 1,
 						columns: 2,
-						read_only_depends_on: "eval:doc._locked",
 						onchange() {
-							setTimeout(recompute_sq_po, 0);
+							setTimeout(() => recompute_sq_po("units"), 0);
 						},
 					},
 					{
@@ -224,8 +209,10 @@ function render_create_purchase_order_dialog(frm, data) {
 						fieldname: "qty_to_order",
 						label: __("Qty to Order"),
 						in_list_view: 1,
-						read_only: 1,
 						columns: 2,
+						onchange() {
+							setTimeout(() => recompute_sq_po("qty"), 0);
+						},
 					},
 				],
 			},
@@ -234,12 +221,27 @@ function render_create_purchase_order_dialog(frm, data) {
 		primary_action() {
 			recompute_sq_po();
 			const grid = dialog.fields_dict.selected_items.grid;
-			const rows = (grid.data || [])
-				.filter((r) => r.select && !r._locked && flt(r.units_to_order) > 0)
+			const selected = grid.get_selected_children() || [];
+			if (!selected.length) {
+				frappe.msgprint(__("Tick at least one row to order."));
+				return;
+			}
+			const locked_ticked = selected.filter((r) => r._locked);
+			const rows = selected
+				.filter((r) => !r._locked && flt(r.units_to_order) > 0)
 				.map((r) => ({ sq_item: r.docname, units: flt(r.units_to_order) }));
 
 			if (!rows.length) {
-				frappe.msgprint(__("Select at least one item and enter Units to Order."));
+				if (locked_ticked.length) {
+					frappe.msgprint(
+						__(
+							"These item(s) are already fully ordered (nothing pending), so no PO can be raised: {0}",
+							[locked_ticked.map((r) => r.item_code).join(", ")]
+						)
+					);
+				} else {
+					frappe.msgprint(__("Enter Units to Order (> 0) on the ticked rows."));
+				}
 				return;
 			}
 
@@ -262,7 +264,9 @@ function render_create_purchase_order_dialog(frm, data) {
 	_sq_po_dialog = dialog;
 	dialog.show();
 
-	// Hide the grid's native row-select checkbox column -- we already have our own
-	// explicit "Select" field, so showing both would be confusing and redundant.
-	dialog.$wrapper.find(".row-check").hide();
+	// Populate rows AFTER show so the grid binds data + renders editable cells and
+	// native checkboxes correctly (matches the Stock Entry dialog).
+	const gf = dialog.fields_dict.selected_items;
+	gf.df.data = data;
+	gf.grid.refresh();
 }

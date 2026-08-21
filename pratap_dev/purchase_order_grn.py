@@ -166,7 +166,7 @@ def get_packing_and_units(po_item_row):
 	po_no_of_unit = flt(po_item_row.get("custom_total_qty"))
 
 	if not po_no_of_unit and packing_qty:
-		po_no_of_unit = po_qty / packing_qty
+		po_no_of_unit = flt(po_qty / packing_qty, 3)
 
 	return packing_qty, po_no_of_unit, po_qty
 
@@ -181,8 +181,8 @@ def get_balance_units_and_qty(po_item_row, grn_stats=None):
 		item_stats = grn_stats.get(po_item_row.name) or {}
 		draft_grn_qty = flt(item_stats.get("draft_grn_qty"))
 
-	received_units = received_qty / packing_qty if packing_qty else 0
-	draft_units = draft_grn_qty / packing_qty if packing_qty else 0
+	received_units = flt(received_qty / packing_qty, 3) if packing_qty else 0
+	draft_units = flt(draft_grn_qty / packing_qty, 3) if packing_qty else 0
 	balance_units = max(po_no_of_unit - received_units - draft_units, 0)
 	balance_qty = balance_units * packing_qty
 

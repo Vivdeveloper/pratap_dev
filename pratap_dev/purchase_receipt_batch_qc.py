@@ -35,15 +35,15 @@ def parse_batch_qc_json(value):
 		standard_pkg_qty = flt(row.get("standard_pkg_qty")) or 1
 		no_of_unit = flt(row.get("no_of_unit"))
 		if not no_of_unit and standard_pkg_qty:
-			no_of_unit = batch_qty / standard_pkg_qty
+			no_of_unit = flt(batch_qty / standard_pkg_qty, 3)
 
 		accepted_unit = flt(row.get("accepted_unit"))
 		if not accepted_unit and standard_pkg_qty:
-			accepted_unit = accepted_qty / standard_pkg_qty
+			accepted_unit = flt(accepted_qty / standard_pkg_qty, 3)
 
 		rejected_unit = flt(row.get("rejected_unit"))
 		if not rejected_unit and no_of_unit:
-			rejected_unit = no_of_unit - accepted_unit
+			rejected_unit = flt(no_of_unit - accepted_unit, 3)
 
 		rows.append(
 			{

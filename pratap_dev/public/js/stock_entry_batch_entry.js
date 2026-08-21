@@ -74,9 +74,9 @@ function recompute_all_se_alloc(from_field) {
 			const pkg = flt(r.standard_pkg_qty);
 			if (!pkg) return;
 			if (from_field === "total_qty") {
-				r.no_of_unit = flt(r.total_qty) / pkg;
+				r.no_of_unit = flt(flt(r.total_qty) / pkg, 3);
 			} else {
-				r.total_qty = pkg * flt(r.no_of_unit);
+				r.total_qty = flt(pkg * flt(r.no_of_unit), 3);
 			}
 		});
 		grid.refresh();
@@ -97,7 +97,7 @@ function fifo_prefill(rows, target_qty) {
 		}
 		const take = Math.min(avail, remaining);
 		r.total_qty = take;
-		r.no_of_unit = take / pkg;
+		r.no_of_unit = flt(take / pkg, 3);
 		remaining -= take;
 	});
 	return rows;
@@ -252,7 +252,7 @@ async function save_se_multi_allocation(frm, sections, d) {
 			.map((r) => {
 				const pkg = flt(r.standard_pkg_qty);
 				const units = flt(r.no_of_unit);
-				const total = flt(r.total_qty) || pkg * units;
+				const total = flt(r.total_qty) || flt(pkg * units, 3);
 				return {
 					batch_no: (r.batch_no || "").trim(),
 					standard_pkg_qty: pkg,

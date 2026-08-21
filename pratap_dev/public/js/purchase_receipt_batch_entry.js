@@ -294,7 +294,12 @@ async function save_multi_batch_entry(frm, dialog, sections) {
 				recalculate_batch_entry_row(entry, s.default_pkg_qty);
 				return entry;
 			})
-			.filter((entry) => (entry.batch_no || "").trim() || flt(entry.custom_total_qty) > 0);
+			.filter(
+				(entry) =>
+					(entry.supplier_batch || "").trim() ||
+					(entry.batch_no || "").trim() ||
+					flt(entry.custom_total_qty) > 0
+			);
 
 		if (!rows.length) {
 			continue; // section left empty — skip it
@@ -324,6 +329,7 @@ async function save_multi_batch_entry(frm, dialog, sections) {
 					purchase_receipt_item: p.row.name,
 					batches: p.rows.map((entry) => ({
 						batch_no: (entry.batch_no || "").trim(),
+						supplier_batch: (entry.supplier_batch || "").trim(),
 						standard_pkg_qty: flt(entry.custom_packing_qty) || p.default_pkg_qty,
 						no_of_unit: flt(entry.custom_total_qty),
 						total_qty: flt(entry.qty),
@@ -585,14 +591,22 @@ function get_used_batch_nos(current_row) {
 function get_batch_entry_table_fields(default_pkg_qty, is_read_only = false, item_code = "") {
 	return [
 		{
+			fieldname: "supplier_batch",
+			fieldtype: "Data",
+			label: __("Supplier Batch"),
+			in_list_view: 1,
+			read_only: is_read_only,
+			columns: 2,
+			description: __("Supplier's batch reference — a Batch No is auto-generated from it"),
+		},
+		{
 			fieldname: "batch_no",
 			fieldtype: "Link",
 			options: "Batch",
-			label: __("Batch No"),
+			label: __("Batch No (auto)"),
 			in_list_view: 1,
-			reqd: 1,
-			read_only: is_read_only,
-			columns: 3,
+			read_only: 1,
+			columns: 2,
 			get_query() {
 				return {
 					filters: {
@@ -629,7 +643,7 @@ function get_batch_entry_table_fields(default_pkg_qty, is_read_only = false, ite
 			in_list_view: 1,
 			default: default_pkg_qty,
 			read_only: 1,
-			columns: 2,
+			columns: 1,
 			onchange() {
 				console.log("[BatchEntry] custom_packing_qty onchange");
 				setTimeout(recompute_all_batch_qty, 0);
@@ -653,7 +667,7 @@ function get_batch_entry_table_fields(default_pkg_qty, is_read_only = false, ite
 			label: __("Total Qty"),
 			read_only: 1,
 			in_list_view: 1,
-			columns: 2,
+			columns: 1,
 		},
 		{
 			fieldname: "expiry_date",
@@ -697,12 +711,12 @@ function validate_batch_entry_rows(rows, required_no_of_unit) {
 	// sizes). Only the total No of Unit has to match the item row; duplicates are
 	// allowed and summed.
 	for (const entry of rows) {
-		const batch_no = (entry.batch_no || "").trim();
-		if (!batch_no) {
-			frappe.throw(__("Batch No is required for all rows."));
+		const identifier = (entry.supplier_batch || "").trim() || (entry.batch_no || "").trim();
+		if (!identifier) {
+			frappe.throw(__("Supplier Batch is required for all rows."));
 		}
 		if (flt(entry.custom_total_qty) <= 0) {
-			frappe.throw(__("No of Unit must be greater than 0 for batch {0}.", [batch_no]));
+			frappe.throw(__("No of Unit must be greater than 0 for batch {0}.", [identifier]));
 		}
 		total_no_of_unit += flt(entry.custom_total_qty);
 	}
@@ -743,6 +757,7 @@ function save_batch_entry_dialog(frm, row, dialog) {
 			purchase_receipt_item: row.name,
 			batches: rows.map((entry) => ({
 				batch_no: (entry.batch_no || "").trim(),
+				supplier_batch: (entry.supplier_batch || "").trim(),
 				standard_pkg_qty: flt(entry.custom_packing_qty) || default_pkg_qty,
 				no_of_unit: flt(entry.custom_total_qty),
 				total_qty: flt(entry.qty),
@@ -778,6 +793,7 @@ function save_batch_entry_dialog(frm, row, dialog) {
 function prepare_batch_entry_row(row, default_pkg_qty) {
 	const prepared = {
 		batch_no: row.batch_no || "",
+		supplier_batch: row.supplier_batch || "",
 		custom_packing_qty: flt(row.standard_pkg_qty ?? row.custom_packing_qty) || default_pkg_qty,
 		custom_total_qty: flt(row.no_of_unit ?? row.custom_total_qty),
 		qty: flt(row.total_qty ?? row.qty),

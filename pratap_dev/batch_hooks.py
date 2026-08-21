@@ -17,7 +17,7 @@ def set_batch_no_of_unit(doc, method=None):
 
 	pkg = flt(doc.get("custom_standard_pkg_qty"))
 	batch_qty = flt(doc.get("batch_qty"))
-	doc.custom_no_of_unit = (batch_qty / pkg) if pkg else 0
+	doc.custom_no_of_unit = flt(batch_qty / pkg, 3) if pkg else 0
 
 
 @frappe.whitelist()
@@ -37,7 +37,7 @@ def backfill_batch_no_of_unit():
 			"Batch",
 			b.name,
 			"custom_no_of_unit",
-			flt(b.batch_qty) / pkg,
+			flt(flt(b.batch_qty) / pkg, 3),
 			update_modified=False,
 		)
 		updated += 1

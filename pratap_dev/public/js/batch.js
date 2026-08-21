@@ -57,7 +57,7 @@ function recalc_total_from_units(cdt, cdn) {
 	const units = flt(row.no_of_unit);
 	if (!pkg) return;
 	_rtm_pkg_lock = true;
-	frappe.model.set_value(cdt, cdn, "total_qty", pkg * units).always(() => {
+	frappe.model.set_value(cdt, cdn, "total_qty", flt(pkg * units, 3)).always(() => {
 		_rtm_pkg_lock = false;
 	});
 }
@@ -69,7 +69,7 @@ function recalc_units_from_total(cdt, cdn) {
 	const total = flt(row.total_qty);
 	if (!pkg) return;
 	_rtm_pkg_lock = true;
-	frappe.model.set_value(cdt, cdn, "no_of_unit", total / pkg).always(() => {
+	frappe.model.set_value(cdt, cdn, "no_of_unit", flt(total / pkg, 3)).always(() => {
 		_rtm_pkg_lock = false;
 	});
 }

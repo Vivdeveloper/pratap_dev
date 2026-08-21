@@ -626,7 +626,7 @@ class PratapQualityInspection(Document):
 				standard_pkg_qty = frappe.utils.flt(batch.get("standard_pkg_qty")) or 1
 				no_of_unit = frappe.utils.flt(batch.get("no_of_unit"))
 				if not no_of_unit and standard_pkg_qty:
-					no_of_unit = batch_qty / standard_pkg_qty
+					no_of_unit = frappe.utils.flt(batch_qty / standard_pkg_qty, 3)
 				rows.append(
 					{
 						"batch_no": batch.get("batch_no"),
@@ -905,7 +905,7 @@ def _batches_for_grn_item_row(item_row):
 	def _units_for(batch_no, qty):
 		if batch_no in units_by_batch:
 			return units_by_batch[batch_no]
-		return qty / standard_pkg_qty if standard_pkg_qty else 0
+		return frappe.utils.flt(qty / standard_pkg_qty, 3) if standard_pkg_qty else 0
 
 	batches = []
 

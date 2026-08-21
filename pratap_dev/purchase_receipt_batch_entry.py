@@ -39,6 +39,7 @@ def _normalize_batch_row(batch_row, default_pkg_qty):
 
 	return {
 		"batch_no": cstr(batch_row.get("batch_no")).strip(),
+		"supplier_batch": cstr(batch_row.get("supplier_batch")).strip(),
 		"standard_pkg_qty": standard_pkg_qty,
 		"no_of_unit": no_of_unit,
 		"total_qty": total_qty,
@@ -170,17 +171,25 @@ def get_grn_batch_entry_context(purchase_receipt, purchase_receipt_item=None):
 			None,
 			selected_item["name"],
 		):
+			batch_no = batch.get("batch_no")
+			batch_extra = (
+				frappe.db.get_value(
+					"Batch", batch_no, ["expiry_date", "custom_supplier_batch"], as_dict=True
+				)
+				if batch_no
+				else None
+			) or {}
 			batch_rows.append(
 				{
-					"batch_no": batch.get("batch_no"),
+					"batch_no": batch_no,
+					# the supplier's own batch reference stored on the Batch
+					"supplier_batch": batch_extra.get("custom_supplier_batch"),
 					"standard_pkg_qty": flt(batch.get("standard_pkg_qty"))
 					or selected_item["custom_packing_qty"],
 					"no_of_unit": flt(batch.get("no_of_unit")),
 					"total_qty": flt(batch.get("batch_qty")),
 					# show existing expiry so re-opening the dialog isn't blank
-					"expiry_date": frappe.db.get_value("Batch", batch.get("batch_no"), "expiry_date")
-					if batch.get("batch_no")
-					else None,
+					"expiry_date": batch_extra.get("expiry_date"),
 				}
 			)
 
@@ -203,7 +212,7 @@ def _update_batch_packaging_fields(batch_no, standard_pkg_qty, batch_qty):
 	if meta.has_field("custom_standard_pkg_qty"):
 		values["custom_standard_pkg_qty"] = pkg
 	if meta.has_field("custom_no_of_unit"):
-		values["custom_no_of_unit"] = (flt(batch_qty) / pkg) if pkg else 0
+		values["custom_no_of_unit"] = flt(flt(batch_qty) / pkg, 3) if pkg else 0
 
 	if values:
 		frappe.db.set_value("Batch", batch_no, values, update_modified=False)
@@ -249,8 +258,11 @@ def add_batches_to_grn_item(purchase_receipt, purchase_receipt_item, batches):
 
 	for idx, raw_row in enumerate(batch_rows, start=1):
 		row = _normalize_batch_row(raw_row, default_pkg_qty)
-		if not row["batch_no"]:
-			frappe.throw(_("Row {0}: Batch No is required.").format(idx))
+		# Prefer the typed Supplier Batch (which drives the nomenclature); fall back to
+		# an existing Batch picked in the Batch No column.
+		identifier = row["supplier_batch"] or row["batch_no"]
+		if not identifier:
+			frappe.throw(_("Row {0}: Supplier Batch (or Batch No) is required.").format(idx))
 
 		if row["no_of_unit"] <= 0:
 			frappe.throw(_("Row {0}: No of Unit must be greater than 0.").format(idx))
@@ -259,7 +271,7 @@ def add_batches_to_grn_item(purchase_receipt, purchase_receipt_item, batches):
 			frappe.throw(_("Row {0}: Total Qty must be greater than 0.").format(idx))
 
 		batch_no = _get_or_create_grn_batch(
-			row["batch_no"], item_row.item_code, grn, expiry_date=row.get("expiry_date")
+			identifier, item_row.item_code, grn, expiry_date=row.get("expiry_date")
 		)
 		batch_map[batch_no] = batch_map.get(batch_no, 0) + row["total_qty"]
 		batch_pkg_map[batch_no] = row["standard_pkg_qty"]

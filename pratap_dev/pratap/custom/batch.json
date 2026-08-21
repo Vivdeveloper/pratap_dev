@@ -149,6 +149,16 @@
    "name": "Batch-custom_grn_group_id",
    "module": null,
    "read_only": 1
+  },
+  {
+   "dt": "Batch",
+   "fieldname": "custom_supplier_batch",
+   "fieldtype": "Data",
+   "label": "Supplier Batch",
+   "insert_after": "custom_supplier_name",
+   "name": "Batch-custom_supplier_batch",
+   "module": null,
+   "read_only": 1
   }
  ],
  "custom_perms": [],
