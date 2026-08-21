@@ -45,9 +45,13 @@ def get_sq_po_context(supplier_quotation):
 	out = {}
 	for it in sq.items:
 		mri = mri_by_item.get(it.name)
+		std_pkg = flt(it.get("custom_packing_qty")) or 1.0
+		# No of Unit flows from the row when set; otherwise derive it from qty so the
+		# popup isn't blank (same qty = std pkg x no of unit invariant as the MR).
+		no_of_unit = flt(it.get("custom_total_qty")) or (flt(it.qty) / std_pkg if std_pkg else 0.0)
 		out[it.name] = {
-			"std_pkg": flt(it.get("custom_packing_qty")) or 1.0,
-			"no_of_unit": flt(it.get("custom_total_qty")),
+			"std_pkg": std_pkg,
+			"no_of_unit": flt(no_of_unit, 3),
 			"sq_qty": flt(it.qty),
 			"material_request_item": mri,
 			"pending": pending_by_mri.get(mri) if mri else None,  # None => no cap
