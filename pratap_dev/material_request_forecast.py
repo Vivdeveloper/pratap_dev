@@ -4,7 +4,7 @@
 import frappe
 from frappe.utils import flt 
 
-
+ 
 @frappe.whitelist()
 def get_forecast_clubs_for_material_request():
     """Return Forecast Clubs (Sales Forecast) grouped with their material request items.
