@@ -275,6 +275,7 @@ doctype_js = {
         "public/js/work_order_override.js",
         "public/js/work_order_bom_item.js",
         "public/js/work_order_alternate_repack.js",
+        "public/js/work_order_batch_sheet.js",
     ],
     "Purchase Order": "public/js/purchase_order_grn.js",
     "Supplier Quotation": "public/js/supplier_quotation.js",
@@ -286,7 +287,10 @@ doctype_js = {
     "Delivery Note": "public/js/pratap_quality_inspection_reference_override.js",
     "Sales Invoice": "public/js/pratap_quality_inspection_reference_override.js",
     "Material Request": "public/js/material_request.js",
-    "BOM": "public/js/bom.js",
+    "BOM": [
+        "public/js/bom.js",
+        "public/js/bom_batch_sheet.js",
+    ],
     "Batch": "public/js/batch.js",
     "Stock Entry": "public/js/stock_entry_batch_entry.js",
 }
@@ -324,7 +328,10 @@ doc_events = {
         "before_save": "pratap_dev.calculation.tsa_table_cal_by_weight"
     },
     "Stock Entry": {
-        "before_submit": "pratap_dev.stock_entry_validation.validate_manufacture_batch_with_work_order",
+        "before_submit": [
+            "pratap_dev.stock_entry_validation.validate_manufacture_batch_with_work_order",
+            "pratap_dev.stock_entry_validation.prevent_over_transfer_for_manufacture",
+        ],
         "on_submit": "pratap_dev.batch_package_hooks.stock_entry_on_submit",
         "on_cancel": "pratap_dev.batch_package_hooks.stock_entry_on_cancel",
     },
@@ -336,10 +343,16 @@ doc_events = {
     },
     "Work Order": {
         "before_validate": "pratap_dev.work_order_bom_item.set_bom_item",
-        "validate": "pratap_dev.work_order_instruction.set_operation_instructions",
+        "validate": [
+            "pratap_dev.work_order_instruction.set_operation_instructions",
+            "pratap_dev.bom_batch_sheet.sync_work_order_batch_sheet",
+        ],
     },
     "BOM": {
-        "validate": "pratap_dev.bom_custom.validate_bom_total_qty",
+        "validate": [
+            "pratap_dev.bom_custom.validate_bom_total_qty",
+            "pratap_dev.bom_batch_sheet.validate_bom_effective_date",
+        ],
     },
     "Custom Field": {
         "on_update": "pratap_dev.fixture_export.export_custom_field_on_save",

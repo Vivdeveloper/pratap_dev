@@ -1,5 +1,52 @@
 import frappe
 from frappe import _
+from frappe.utils import flt
+
+
+def prevent_over_transfer_for_manufacture(doc, method=None):
+	"""Hard-block a "Material Transfer for Manufacture" that would push a Work Order
+	past 100% of its required quantity.
+
+	A double-click / duplicate transfer used to move raw materials twice (transferred
+	qty = 2x required, e.g. 10,000 against a 5,000 Work Order). ERPNext only prevents
+	this when the "allow over-transfer" setting is off; this guard enforces it
+	regardless. Runs on ``before_submit`` — at that point the Work Order's
+	``material_transferred_for_manufacturing`` reflects only the already-submitted
+	transfers (not this one), so we add this entry's FG qty and compare to the target.
+	"""
+	if doc.purpose != "Material Transfer for Manufacture" or not doc.work_order:
+		return
+
+	wo = frappe.db.get_value(
+		"Work Order",
+		doc.work_order,
+		["qty", "material_transferred_for_manufacturing"],
+		as_dict=True,
+	)
+	if not wo:
+		return
+
+	already_transferred = flt(wo.material_transferred_for_manufacturing)
+	this_transfer = flt(doc.fg_completed_qty)
+	target_qty = flt(wo.qty)
+
+	# Tiny epsilon so floating-point noise doesn't false-trigger at exactly 100%.
+	if already_transferred + this_transfer > target_qty + 1e-6:
+		remaining = max(target_qty - already_transferred, 0)
+		frappe.throw(
+			_(
+				"Work Order {0} already has {1} of {2} transferred for manufacture. "
+				"This transfer of {3} would exceed the required quantity — only {4} is "
+				"left to transfer. Over-transfer is not allowed."
+			).format(
+				doc.work_order,
+				already_transferred,
+				target_qty,
+				this_transfer,
+				remaining,
+			),
+			title=_("Over-Transfer Blocked"),
+		)
 
 
 def validate_manufacture_batch_with_work_order(doc, method=None):
