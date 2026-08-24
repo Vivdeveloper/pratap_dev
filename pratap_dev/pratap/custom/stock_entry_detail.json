@@ -12,6 +12,19 @@
    "print_hide": 1,
    "name": "Stock Entry Detail-custom_batch_packages_json",
    "module": null
+  },
+  {
+   "dt": "Stock Entry Detail",
+   "fieldname": "custom_bundle_batches_html",
+   "fieldtype": "HTML",
+   "label": "Bundle Batches",
+   "insert_after": "serial_and_batch_bundle",
+   "hidden": 0,
+   "read_only": 1,
+   "no_copy": 1,
+   "print_hide": 1,
+   "name": "Stock Entry Detail-custom_bundle_batches_html",
+   "module": null
   }
  ],
  "custom_perms": [],

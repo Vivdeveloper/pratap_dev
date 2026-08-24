@@ -295,7 +295,10 @@ doctype_js = {
         "public/js/bom_batch_sheet.js",
     ],
     "Batch": "public/js/batch.js",
-    "Stock Entry": "public/js/stock_entry_batch_entry.js",
+    "Stock Entry": [
+        "public/js/stock_entry_batch_entry.js",
+        "public/js/stock_entry_bundle_details.js",
+    ],
 }
 
 doctype_list_js = {
