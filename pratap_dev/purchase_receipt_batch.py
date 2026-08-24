@@ -95,10 +95,9 @@ def _get_or_create_grn_batch(supplier_batch, item_code, purchase_receipt, expiry
 
 def _generate_grn_batch_name(item_code, purchase_receipt):
 	"""Build the batch nomenclature:
-	<ITEM NAME>-<YY><MM>/<ITEM-GRN-SEQ-OF-MONTH:03d>-<BATCH-COUNT-IN-GRN>.
+	<ITEM CODE>-<YY><MM>/<ITEM-GRN-SEQ-OF-MONTH:03d>-<BATCH-COUNT-IN-GRN>.
 	Falls back to a simple hash-free id only if the GRN has no name (shouldn't happen).
 	"""
-	item_name = frappe.db.get_value("Item", item_code, "item_name") or item_code
 	posting = getdate(purchase_receipt.get("posting_date") or today())
 	yymm = "%02d%02d" % (posting.year % 100, posting.month)
 	grn_name = purchase_receipt.get("name")
@@ -133,7 +132,7 @@ def _generate_grn_batch_name(item_code, purchase_receipt):
 		)
 		batch_count = existing + 1
 
-	return "%s-%s/%03d-%d" % (item_name, yymm, grn_seq, batch_count)
+	return "%s-%s/%03d-%d" % (item_code, yymm, grn_seq, batch_count)
 
 
 def _set_grn_batch_fields(batch, purchase_receipt):
