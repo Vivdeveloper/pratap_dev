@@ -26,24 +26,24 @@ frappe.ui.form.on("Work Order", {
 
         add_material_request_button(frm);
 
-        // Populate the Plant 1 / Plant 2 WIP RM (and Main Store RM) stock columns for
-        // every required item on a draft Work Order.
-        populate_wo_stock_all(frm);
+        // Stock columns (Plant 1 / Plant 2 WIP RM + Main Store RM) are NO LONGER
+        // auto-fetched on open. They update only when the user clicks "Refresh Stock
+        // Count" (draft only), and the fetched snapshot then persists (once saved)
+        // until the next click.
+        add_refresh_stock_button(frm);
         populate_wo_instructions(frm);
         },
 
     // When the item / BOM / qty changes, ERPNext re-fetches Required Items from the BOM
-    // asynchronously. Re-scan the rows after a short delay so the stock columns fill in.
+    // asynchronously. Re-scan the rows after a short delay so the instruction columns
+    // fill in. (Stock counts are intentionally NOT auto-fetched here — button-only.)
     item_to_manufacture(frm) {
-        populate_wo_stock_all(frm, 1000);
         populate_wo_instructions(frm, 1000);
     },
     bom_no(frm) {
-        populate_wo_stock_all(frm, 1000);
         populate_wo_instructions(frm, 1000);
     },
     qty(frm) {
-        populate_wo_stock_all(frm, 1000);
         populate_wo_instructions(frm, 1000);
     },
 });
@@ -90,29 +90,6 @@ const WO_INSTRUCTION_FIELDS = [
     "custom_operation_instruction_marathi",
 ];
 
-frappe.ui.form.on("Work Order Item", {
-    item_code(frm, cdt, cdn) {
-        set_wo_warehouse_stock(frm, cdt, cdn);
-    },
-});
-
-// Scan every Required Items row and fill its warehouse stock columns. Optional `delay`
-// (ms) waits for BOM-driven row population to finish before scanning.
-function populate_wo_stock_all(frm, delay) {
-    if (frm.doc.docstatus !== 0) {
-        return;
-    }
-    const run = () =>
-        (frm.doc.required_items || []).forEach((row) =>
-            set_wo_warehouse_stock(frm, row.doctype, row.name)
-        );
-    if (delay) {
-        setTimeout(run, delay);
-    } else {
-        run();
-    }
-}
-
 // Warehouses to show per required-item row: [warehouse_name prefix, target field].
 const WO_STOCK_WAREHOUSES = [
     ["Plant 1 WIP RM", "custom_plant_1_wip_rm"],
@@ -120,22 +97,58 @@ const WO_STOCK_WAREHOUSES = [
     ["Main Store RM", "custom_main_store_rm"],
 ];
 
-// Fetch each required item's on-hand stock in the Plant 1 / Plant 2 WIP RM (and Main
-// Store RM) warehouses and write it into the read-only columns on the row.
-function set_wo_warehouse_stock(frm, cdt, cdn) {
+// "Refresh Stock Count" button — draft only ("state is not saved"). Once the Work
+// Order is submitted, the counts are frozen and the button is hidden.
+function add_refresh_stock_button(frm) {
     if (frm.doc.docstatus !== 0) {
         return;
     }
-    const row = locals[cdt][cdn];
-    if (!row || !row.item_code || !frm.doc.company) {
-        WO_STOCK_WAREHOUSES.forEach(([, fieldname]) => set_wo_qty_field(cdt, cdn, fieldname, 0));
+    frm.add_custom_button(__("Refresh Stock Count"), () => refresh_wo_stock_counts(frm));
+}
+
+// Fetch the latest on-hand counts for EVERY required item, once, on button click.
+// Values are written with the dirty flag on so the snapshot persists after Save and
+// does not change again until the button is clicked next.
+function refresh_wo_stock_counts(frm) {
+    const rows = frm.doc.required_items || [];
+    if (!rows.length) {
+        frappe.msgprint(__("No required items to refresh."));
         return;
     }
-    WO_STOCK_WAREHOUSES.forEach(([warehouse_name, fieldname]) => {
-        get_wo_warehouse_stock(row.item_code, warehouse_name, frm.doc.company).then((qty) => {
-            set_wo_qty_field(cdt, cdn, fieldname, qty);
+    if (!frm.doc.company) {
+        frappe.msgprint(__("Set Company before refreshing stock counts."));
+        return;
+    }
+
+    frappe.dom.freeze(__("Fetching latest stock counts..."));
+    Promise.all(rows.map((row) => fetch_row_stock(frm, row)))
+        .catch(() => {})
+        .then(() => {
+            frappe.dom.unfreeze();
+            frm.refresh_field("required_items");
+            frappe.show_alert(
+                { message: __("Stock counts refreshed — Save to persist."), indicator: "green" },
+                5
+            );
         });
-    });
+}
+
+// Fetch one required-item row's on-hand stock across the tracked warehouses and write
+// it into the read-only columns. Returns a promise that resolves when the row is done.
+function fetch_row_stock(frm, row) {
+    if (!row || !row.item_code) {
+        WO_STOCK_WAREHOUSES.forEach(([, fieldname]) =>
+            set_wo_qty_field(row.doctype, row.name, fieldname, 0)
+        );
+        return Promise.resolve();
+    }
+    return Promise.all(
+        WO_STOCK_WAREHOUSES.map(([warehouse_name, fieldname]) =>
+            get_wo_warehouse_stock(row.item_code, warehouse_name, frm.doc.company).then((qty) =>
+                set_wo_qty_field(row.doctype, row.name, fieldname, qty)
+            )
+        )
+    );
 }
 
 // Warehouse names may carry a trailing space (e.g. "Plant 1 WIP RM "), so match by prefix.
@@ -160,14 +173,15 @@ function get_wo_warehouse_stock(item_code, warehouse_name, company) {
 
 function set_wo_qty_field(cdt, cdn, fieldname, value) {
     const row = locals[cdt][cdn];
+    if (!row) {
+        return;
+    }
     // Round to a fixed precision so repeated live-stock lookups settle on the same
     // stored value instead of drifting on floating-point noise (these are Data fields
     // with no precision of their own, so nothing normalizes this for us otherwise).
     const next_value = flt(value, 3);
-    // Always write a number so "no stock" shows 0, not blank. Skip only when the row
-    // already holds a value within tolerance of it (an unset/null field must still be
-    // set to 0). A strict === here false-triggers on float noise between two live
-    // queries of the same on-hand qty, marking the form dirty with no real change.
+    // Skip when the row already holds a value within tolerance (an unset/null field
+    // must still be set to 0). A strict === here false-triggers on float noise.
     const current = row[fieldname];
     if (
         current !== undefined &&
@@ -177,7 +191,9 @@ function set_wo_qty_field(cdt, cdn, fieldname, value) {
     ) {
         return;
     }
-    frappe.model.set_value(cdt, cdn, fieldname, next_value, null, true);
+    // Mark the form dirty (no skip flag) so the refreshed snapshot can be saved and
+    // persists until the user clicks "Refresh Stock Count" again.
+    frappe.model.set_value(cdt, cdn, fieldname, next_value);
 }
 
 
