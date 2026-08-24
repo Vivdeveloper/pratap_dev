@@ -1,0 +1,43 @@
+{% from "templates/includes/rfq/rfq_macros.html" import item_name_and_description %}
+
+{% for d in doc.items %}
+<div class="rfq-item">
+	<div class="row align-items-start">
+		<div class="col-sm-5 col-12" style="margin-bottom: 10px;margin-top: 5px;">
+			{{ item_name_and_description(d, doc) }}
+		</div>
+
+		<!-- Qty column: Std Pkg Qty and No of Unit drive Qty (= pkg x units, read-only). -->
+		<div class="col-sm-2 col-4 text-right">
+			<div style="margin-top: 5px;">
+				<label class="text-muted small" style="display:block;margin-bottom:2px;">{{ _("Std Pkg Qty") }}</label>
+				<input type="text" class="form-control text-right rfq-pkg"
+					value="{{ d.custom_packing_qty or '' }}" data-idx="{{ d.idx }}">
+
+				<label class="text-muted small" style="display:block;margin:8px 0 2px;">{{ _("No of Unit") }}</label>
+				<input type="text" class="form-control text-right rfq-units"
+					value="{{ d.custom_total_qty or '' }}" data-idx="{{ d.idx }}">
+
+				<label class="text-muted small" style="display:block;margin:8px 0 2px;">{{ _("Qty") }}</label>
+				<input type="text" class="form-control text-right rfq-qty" readonly
+					style="background-color: var(--gray-100);"
+					value="{{ d.get_formatted('qty') }}" data-idx="{{ d.idx }}">
+
+				<p class="text-muted small" style="margin-top: 6px;">{{ _("UOM") + ": " + d.uom }}</p>
+			</div>
+		</div>
+
+		<!-- Rate column: hidden label keeps the input aligned with Std Pkg Qty above. -->
+		<div class="col-sm-2 col-4 text-right">
+			<label class="text-muted small" style="display:block;margin-bottom:2px;visibility:hidden;">{{ _("Rate") }}</label>
+			<input type="text" class="form-control text-right rfq-rate" value="0.00" data-idx="{{ d.idx }}">
+		</div>
+
+		<div class="col-sm-3 col-4 text-right">
+			<label class="text-muted small" style="display:block;margin-bottom:2px;visibility:hidden;">{{ _("Amount") }}</label>
+			<div style="padding-top: 7px;">{{ doc.currency_symbol }} <span class="rfq-amount" data-idx="{{ d.idx }}">0.00</span></div>
+		</div>
+	</div>
+	<hr style="margin: 8px 0;">
+</div>
+{% endfor %}

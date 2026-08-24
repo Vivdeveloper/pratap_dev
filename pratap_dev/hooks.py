@@ -267,6 +267,8 @@ after_migrate = ["pratap_dev.purchase_order_grn.disable_purchase_after_save_mess
 
 override_whitelisted_methods = {
 	"get_last_buying_rate": "pratap_dev.purchase_order_grn.get_last_buying_rate",
+	# RFQ supplier portal: persist Std Pkg Qty / No of Unit onto the created SQ.
+	"erpnext.buying.doctype.request_for_quotation.request_for_quotation.create_supplier_quotation": "pratap_dev.supplier_quotation_portal.create_supplier_quotation",
 }
 
 doctype_js = {
