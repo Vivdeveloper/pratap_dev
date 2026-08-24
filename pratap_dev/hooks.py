@@ -371,4 +371,7 @@ doc_events = {
         "on_submit": "pratap_dev.batch_package_hooks.purchase_receipt_on_submit",
         "on_cancel": "pratap_dev.batch_package_hooks.purchase_receipt_on_cancel",
     },
+    "Purchase Invoice": {
+        "validate": "pratap_dev.purchase_invoice.set_grn_group_id_from_receipt",
+    },
 }
