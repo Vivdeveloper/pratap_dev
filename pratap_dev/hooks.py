@@ -284,6 +284,7 @@ doctype_js = {
     "Purchase Receipt": [
         "public/js/pratap_quality_inspection_reference_override.js",
         "public/js/purchase_receipt_batch_entry.js",
+        "public/js/purchase_receipt_dates.js",
     ],
     "Purchase Invoice": "public/js/pratap_quality_inspection_reference_override.js",
     "Delivery Note": "public/js/pratap_quality_inspection_reference_override.js",
@@ -363,7 +364,10 @@ doc_events = {
         "validate": "pratap_dev.rfq_supplier_fields.set_supplier_fields",
     },
     "Purchase Receipt": {
-        "validate": "pratap_dev.purchase_receipt.set_item_fields",
+        "validate": [
+            "pratap_dev.purchase_receipt.set_item_fields",
+            "pratap_dev.purchase_receipt.validate_supplier_invoice_date",
+        ],
         "on_submit": "pratap_dev.batch_package_hooks.purchase_receipt_on_submit",
         "on_cancel": "pratap_dev.batch_package_hooks.purchase_receipt_on_cancel",
     },

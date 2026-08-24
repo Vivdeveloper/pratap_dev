@@ -3,7 +3,7 @@
 
 import frappe
 from frappe import _
-from frappe.utils import flt, getdate
+from frappe.utils import flt, getdate, today
 
 from erpnext.stock.doctype.purchase_receipt.purchase_receipt import PurchaseReceipt
 
@@ -28,6 +28,17 @@ def set_item_fields(doc, method=None):
 	else:
 		doc.custom_item_code = None
 		doc.custom_item_name = None
+
+def validate_supplier_invoice_date(doc, method=None):
+	"""Supplier Invoice Date on the GRN can be today or in the past, never the future.
+
+	Mirrors the Gate Pass rule. Backs the client-side datepicker restriction (which
+	greys out future dates) so a future date can't slip through via import/API.
+	"""
+	invoice_date = doc.get("custom_supplier_invoice_date")
+	if invoice_date and getdate(invoice_date) > getdate(today()):
+		frappe.throw(_("Supplier Invoice Date cannot be a future date."))
+
 
 # GRN QC outcomes that let the GRN proceed (fully accepted, or partial across batches).
 QC_GRN_OK_STATUSES = {"Accepted", "Partially Accepted", "Partially Rejected"}
