@@ -35,6 +35,9 @@ def get_forecast_clubs_for_material_request():
         order_by="idx asc",
     )
 
+    # (forecast club, item) pairs already procured -> hide them from the picker.
+    procured = _get_procured_forecast_items(club_names)
+
     item_codes = list({row.item_code for row in rows if row.item_code})
     name_map = {}
     if item_codes:
@@ -57,6 +60,10 @@ def get_forecast_clubs_for_material_request():
     for row in rows:
         if not row.item_code or flt(row.qty) <= 0:
             continue
+        # Skip items already procured (a Purchase Order was raised for this forecast
+        # club + item), so they don't reappear in the picker.
+        if (row.parent, row.item_code) in procured:
+            continue
         grouped[row.parent]["items"].append(
             {
                 "item_code": row.item_code,
@@ -67,3 +74,30 @@ def get_forecast_clubs_for_material_request():
         )
 
     return [group for group in grouped.values() if group["items"]]
+
+
+def _get_procured_forecast_items(club_names):
+    """Return a set of (forecast_club, item_code) pairs that already have a Purchase
+    Order raised against them.
+
+    Chain: Forecast Club item -> Material Request Item (custom_forecast_club = club) ->
+    Purchase Order Item (material_request_item). A non-cancelled PO (docstatus < 2) on
+    any quantity is enough to hide the item from the Sales Forecast picker.
+    """
+    if not club_names:
+        return set()
+
+    rows = frappe.db.sql(
+        """
+        SELECT DISTINCT mri.custom_forecast_club AS club, mri.item_code AS item_code
+        FROM `tabPurchase Order Item` poi
+        INNER JOIN `tabMaterial Request Item` mri ON mri.name = poi.material_request_item
+        INNER JOIN `tabPurchase Order` po ON po.name = poi.parent
+        WHERE po.docstatus < 2
+          AND mri.custom_forecast_club IN %(clubs)s
+          AND IFNULL(mri.item_code, '') != ''
+        """,
+        {"clubs": tuple(club_names)},
+        as_dict=True,
+    )
+    return {(r.club, r.item_code) for r in rows}
