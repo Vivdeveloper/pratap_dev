@@ -79,3 +79,64 @@ def get_bom_batch_sheet(bom_no):
 	"""Notes for a BOM — used by the Work Order client script to populate the grid
 	immediately when the BOM is selected/changed (before save)."""
 	return {"notes": _get_bom_notes(bom_no)}
+
+
+# Scalar batch-sheet fields that mirror BOM -> Work Order.
+_BATCH_SHEET_SCALARS = [
+	"custom_remarks",
+	"custom_shelf_life",
+	"custom_sample_qty_prepared",
+	"custom_total_percentage",
+	"custom_min_batch_quantity",
+	"custom_effective_date",
+]
+
+
+@frappe.whitelist()
+def refresh_batch_details_from_bom(work_order):
+	"""Pull the batch-sheet fields + Notes table from the BOM onto an existing Work
+	Order — including SUBMITTED ones.
+
+	fetch_from only populates these at creation; a Work Order made before the BOM was
+	filled stays blank. This lets the user re-sync on demand. Writes go through
+	frappe.db.set_value / direct child rows so they apply regardless of docstatus
+	(these are descriptive fields with no stock/ledger impact).
+	"""
+	wo = frappe.get_doc("Work Order", work_order)
+	wo.check_permission("read")
+	if not wo.bom_no:
+		frappe.throw(_("This Work Order has no BOM to fetch batch details from."))
+
+	bom_meta = frappe.get_meta("BOM")
+	wo_meta = frappe.get_meta("Work Order")
+
+	# Scalars: copy each field the BOM and Work Order both have.
+	values = {}
+	for fieldname in _BATCH_SHEET_SCALARS:
+		if bom_meta.has_field(fieldname) and wo_meta.has_field(fieldname):
+			values[fieldname] = frappe.db.get_value("BOM", wo.bom_no, fieldname)
+	if values:
+		frappe.db.set_value("Work Order", work_order, values, update_modified=False)
+
+	# Notes table: replace the Work Order's rows with the BOM's.
+	notes = []
+	if wo_meta.has_field("custom_notes"):
+		frappe.db.delete(
+			"Pratap BOM Note",
+			{"parent": work_order, "parenttype": "Work Order", "parentfield": "custom_notes"},
+		)
+		notes = _get_bom_notes(wo.bom_no)
+		for idx, note in enumerate(notes, start=1):
+			frappe.get_doc(
+				{
+					"doctype": "Pratap BOM Note",
+					"parent": work_order,
+					"parenttype": "Work Order",
+					"parentfield": "custom_notes",
+					"idx": idx,
+					"note": note,
+				}
+			).insert(ignore_permissions=True)
+
+	frappe.db.commit()
+	return {"scalars": len(values), "notes": len(notes)}
