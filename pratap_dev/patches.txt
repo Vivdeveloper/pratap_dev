@@ -6,3 +6,4 @@
 # Patches added in this section will be executed after doctypes are migrated
 pratap_dev.patches.disable_work_order_material_request_scripts
 pratap_dev.patches.backfill_grn_qc_status
+pratap_dev.patches.add_grn_qc_status_list_column
