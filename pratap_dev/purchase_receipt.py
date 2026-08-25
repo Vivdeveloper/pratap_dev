@@ -66,11 +66,20 @@ class PratapPurchaseReceipt(PurchaseReceipt):
 
     def on_submit(self):
         super().on_submit()
+        # GRN QC lifecycle: Draft -> QC Pending -> Submitted.
+        if self.meta.has_field("custom_qc_status"):
+            self.db_set("custom_qc_status", "Submitted", update_modified=False)
         if self.is_return:
             # Return PRs (purchase returns / debit-note source) must not spawn a grouped PI.
             return
         create_grouped_purchase_invoice_if_ready(self)
         create_rejection_documents_if_any(self)
+
+    def on_cancel(self):
+        super().on_cancel()
+        # Back to Draft so a re-amended GRN starts the QC lifecycle fresh.
+        if self.meta.has_field("custom_qc_status"):
+            self.db_set("custom_qc_status", "Draft", update_modified=False)
 
     def on_update(self):
         if self.items:
@@ -829,6 +838,94 @@ def get_grn_qc_submit_status(purchase_receipt):
         "pending_items": pending_items,
         "message": "<br>".join(errors),
     }
+
+
+@frappe.whitelist()
+def send_grn_for_qc(purchase_receipt):
+    """One-click "Send for QC": auto-create + save a draft Pratap QC for each
+    QC-required GRN item (one per item, matching the picker's de-dup), link each to
+    its GRN line, and move the GRN to the "QC Pending" state.
+
+    The QCs then appear in the Pratap Quality Inspection list; filling and submitting
+    a QC still auto-submits the GRN (existing logic), which flips it to "Submitted".
+    """
+    if not frappe.db.exists("Purchase Receipt", purchase_receipt):
+        frappe.throw(_("Purchase Receipt {0} does not exist.").format(purchase_receipt))
+
+    grn = frappe.get_doc("Purchase Receipt", purchase_receipt)
+    if grn.docstatus != 0:
+        frappe.throw(_("Send for QC is only available on a draft GRN."))
+
+    status = get_pratap_qc_status_for_grn(purchase_receipt)
+    if status.get("skip"):
+        frappe.throw(_("Quality Inspection is disabled for this GRN."))
+
+    items_need_create = status.get("items_need_create") or []
+    existing_open = [qc["name"] for qc in status.get("open_qcs", [])]
+
+    if not items_need_create and not existing_open:
+        frappe.throw(_("No items on this GRN require Quality Inspection."))
+
+    created = []
+    for entry in items_need_create:
+        created.append(_create_grn_pratap_qc(grn, entry))
+
+    # Mark the GRN as QC Pending (stays a draft until the QC is submitted).
+    if grn.meta.has_field("custom_qc_status"):
+        frappe.db.set_value(
+            "Purchase Receipt", purchase_receipt, "custom_qc_status", "QC Pending",
+            update_modified=False,
+        )
+
+    frappe.db.commit()
+
+    all_qcs = created + [name for name in existing_open if name not in created]
+    return {"qcs": all_qcs, "created": created}
+
+
+def _create_grn_pratap_qc(grn, entry):
+    """Create + insert a draft Pratap QC for one GRN item and link it to the row."""
+    item_code = entry.get("item_code")
+    qc = frappe.new_doc("Pratap Quality Inspection")
+    meta = qc.meta
+
+    def _set(fieldname, value):
+        if meta.has_field(fieldname):
+            qc.set(fieldname, value)
+
+    sales_uom = entry.get("uom") or entry.get("stock_uom") or ""
+    purchase_uom = frappe.db.get_value("Item", item_code, "purchase_uom") if item_code else None
+    reference_qty = flt(entry.get("received_qty")) or flt(entry.get("qty"))
+
+    _set("inspection_type", "Incoming")
+    _set("reference_type", "GRN")
+    _set("reference_doctype", "Purchase Receipt")
+    _set("reference_name", grn.name)
+    _set("work_order", entry.get("work_order") or "")
+    _set("company", grn.company)
+    _set("purchase_receipt_item", entry.get("name") or "")
+    _set("production_item", item_code or "")
+    _set("item_name", entry.get("item_name") or "")
+    _set("reference_qty", reference_qty)
+    # Default the inspected qty to the received qty so the draft QC saves; the
+    # inspector adjusts the actual readings while filling it.
+    _set("inspected_qty", reference_qty)
+    _set("sales_uom", sales_uom)
+    _set("purchase_uom", purchase_uom or "")
+    _set("status", "Pending")
+    if purchase_uom and sales_uom and purchase_uom.lower() == sales_uom.lower():
+        _set("custom_density", 1)
+
+    qc.insert(ignore_permissions=True)
+
+    # Link the created QC back to its GRN line (draft GRN -> direct row update).
+    if entry.get("name"):
+        frappe.db.set_value(
+            "Purchase Receipt Item", entry["name"],
+            "custom_pratap_quality_inspection", qc.name,
+            update_modified=False,
+        )
+    return qc.name
 
 
 @frappe.whitelist()
