@@ -97,12 +97,11 @@ const WO_STOCK_WAREHOUSES = [
     ["Main Store RM", "custom_main_store_rm"],
 ];
 
-// "Refresh Stock Count" button — draft only ("state is not saved"). Once the Work
-// Order is submitted, the counts are frozen and the button is hidden.
+// "Refresh Stock Count" button — available on draft AND submitted Work Orders. On a
+// submitted WO the fetched counts can't be saved (the doc is frozen), so they're just
+// an in-session view; the user re-clicks to see fresh numbers. (Cancelled WOs are
+// already excluded by the refresh handler's docstatus guard.)
 function add_refresh_stock_button(frm) {
-    if (frm.doc.docstatus !== 0) {
-        return;
-    }
     frm.add_custom_button(__("Refresh Stock Count"), () => refresh_wo_stock_counts(frm));
 }
 
