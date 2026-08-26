@@ -31,6 +31,7 @@ frappe.ui.form.on("Work Order", {
         // Count" (draft only), and the fetched snapshot then persists (once saved)
         // until the next click.
         add_refresh_stock_button(frm);
+        gate_start_button_on_stock(frm);
         populate_wo_instructions(frm);
         },
 
@@ -96,6 +97,37 @@ const WO_STOCK_WAREHOUSES = [
     ["Plant 2 WIP RM", "custom_plant_2_wip_rm"],
     ["Main Store RM", "custom_main_store_rm"],
 ];
+
+// Gate the standard "Start" button: it may only be used once EVERY required item has
+// enough stock at its source warehouse (Available Qty at Source Warehouse >= Required
+// Qty). Otherwise the Start button is removed and a warning headline is shown. ERPNext
+// adds "Start" in its own refresh; ours runs after, so we remove it here (plus a short
+// retry in case it's re-added asynchronously).
+function gate_start_button_on_stock(frm) {
+    const enforce = () => {
+        const short = (frm.doc.required_items || []).filter(
+            (row) => flt(row.available_qty_at_source_warehouse) + 1e-9 < flt(row.required_qty)
+        );
+        if (!short.length) {
+            return; // all items have enough -> leave Start enabled
+        }
+        frm.remove_custom_button(__("Start"));
+        const items = short.map((r) => r.item_code).join(", ");
+        // Clear first so the immediate + retry calls (and repeat refreshes) never
+        // stack duplicate banners — always exactly one.
+        frm.dashboard.clear_headline();
+        frm.dashboard.set_headline_alert(
+            __(
+                "Start disabled: Available Qty at Source Warehouse is less than Required Qty for: {0}",
+                [items]
+            ),
+            "orange"
+        );
+    };
+    enforce();
+    // ERPNext may add the Start button slightly after its refresh — re-enforce once.
+    setTimeout(enforce, 400);
+}
 
 // "Refresh Stock Count" button — available on draft AND submitted Work Orders. On a
 // submitted WO the fetched counts can't be saved (the doc is frozen), so they're just
