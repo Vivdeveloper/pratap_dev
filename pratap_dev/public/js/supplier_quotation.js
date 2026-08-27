@@ -55,28 +55,20 @@ function show_create_purchase_order_dialog(frm) {
 		return;
 	}
 
-	// Two lookups: (1) which SQ rows already have a submitted PO, and (2) per-item
-	// standard pkg qty, no-of-unit and pending qty (MR row qty - already ordered).
-	Promise.all([
-		frappe.db.get_list("Purchase Order Item", {
-			filters: { supplier_quotation: frm.doc.name, docstatus: 1 },
-			fields: ["supplier_quotation_item", "parent"],
-			limit: 0,
-		}),
-		new Promise((resolve) => {
-			frappe.call({
-				method: "pratap_dev.supplier_quotation_po.get_sq_po_context",
-				args: { supplier_quotation: frm.doc.name },
-				callback: (r) => resolve(r.message || {}),
-			});
-		}),
-	]).then(([po_rows, ctx]) => {
+	// Per-item context: standard pkg qty, no-of-unit, pending qty (MR row qty - already
+	// ordered), and which submitted POs already exist for the row. All computed
+	// server-side so restricted Buying users (no Purchase Order read access) don't hit
+	// "No permission for Purchase Order Item" from a client-side child-table query.
+	new Promise((resolve) => {
+		frappe.call({
+			method: "pratap_dev.supplier_quotation_po.get_sq_po_context",
+			args: { supplier_quotation: frm.doc.name },
+			callback: (r) => resolve(r.message || {}),
+		});
+	}).then((ctx) => {
 		const po_by_row = {};
-		(po_rows || []).forEach((row) => {
-			po_by_row[row.supplier_quotation_item] = po_by_row[row.supplier_quotation_item] || [];
-			if (!po_by_row[row.supplier_quotation_item].includes(row.parent)) {
-				po_by_row[row.supplier_quotation_item].push(row.parent);
-			}
+		Object.keys(ctx || {}).forEach((sq_item) => {
+			po_by_row[sq_item] = (ctx[sq_item] && ctx[sq_item].purchase_orders) || [];
 		});
 
 		const data = (frm.doc.items || []).map((d) => {
@@ -85,7 +77,7 @@ function show_create_purchase_order_dialog(frm) {
 			const has_cap = c.pending !== null && c.pending !== undefined;
 			const pending = has_cap ? flt(c.pending) : null;
 			const max_units = has_cap ? flt(pending / std_pkg, 3) : 0;
-			const already = po_by_row[d.name] ? 1 : 0;
+			const already = (po_by_row[d.name] || []).length ? 1 : 0;
 			// Locked when fully ordered (MR pending <= 0) or, for non-MR items, when a
 			// PO already exists for this SQ row.
 			const locked = (has_cap && pending <= 0.0001) || (!has_cap && already);

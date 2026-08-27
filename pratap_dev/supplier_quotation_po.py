@@ -42,6 +42,11 @@ def get_sq_po_context(supplier_quotation):
 	}
 	pending_by_mri = _pending_by_mri(list(mri_by_item.values()))
 
+	# Which SQ rows already have a submitted Purchase Order. Done server-side (raw SQL,
+	# no Purchase Order Item permission check) so restricted Buying users who lack
+	# Purchase Order read access don't hit "No permission for Purchase Order Item".
+	po_by_row = _po_by_sq_item(supplier_quotation)
+
 	out = {}
 	for it in sq.items:
 		mri = mri_by_item.get(it.name)
@@ -55,7 +60,30 @@ def get_sq_po_context(supplier_quotation):
 			"sq_qty": flt(it.qty),
 			"material_request_item": mri,
 			"pending": pending_by_mri.get(mri) if mri else None,  # None => no cap
+			"purchase_orders": po_by_row.get(it.name, []),
 		}
+	return out
+
+
+def _po_by_sq_item(supplier_quotation):
+	"""Map each SQ item -> list of submitted Purchase Orders raised from it."""
+	rows = frappe.db.sql(
+		"""
+		SELECT poi.supplier_quotation_item AS sq_item, poi.parent AS po
+		FROM `tabPurchase Order Item` poi
+		INNER JOIN `tabPurchase Order` po ON po.name = poi.parent
+		WHERE poi.supplier_quotation = %(sq)s AND po.docstatus = 1
+		""",
+		{"sq": supplier_quotation},
+		as_dict=True,
+	)
+	out = {}
+	for r in rows:
+		if not r.sq_item:
+			continue
+		out.setdefault(r.sq_item, [])
+		if r.po not in out[r.sq_item]:
+			out[r.sq_item].append(r.po)
 	return out
 
 
