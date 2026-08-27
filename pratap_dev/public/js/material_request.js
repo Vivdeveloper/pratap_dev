@@ -51,6 +51,7 @@ frappe.ui.form.on("Material Request", {
 
 		setup_reject_button(frm);
 		clear_stale_from_warehouse(frm);
+		render_pr_bifurcation(frm);
 	},
 
 	company(frm) {
@@ -61,6 +62,72 @@ frappe.ui.form.on("Material Request", {
 		clear_stale_from_warehouse(frm);
 	},
 });
+
+// Split the Purchase MR items into two reference tables: "Required for PR"
+// (unfulfilled -> can proceed to PO) and "Already Fulfilled — No PO" (warehouse
+// stock >= expected qty -> excluded from the RFQ/PO picker, kept for visibility).
+// Rendered from the stored per-row values so it shows in every state.
+function render_pr_bifurcation(frm) {
+	const field = frm.fields_dict.custom_pr_bifurcation_html;
+	if (!field) {
+		return;
+	}
+	if (frm.doc.material_request_type !== "Purchase") {
+		field.$wrapper.html("");
+		return;
+	}
+
+	const required = [];
+	const fulfilled = [];
+	(frm.doc.items || []).forEach((row) => {
+		if (!row.item_code) {
+			return;
+		}
+		const expected = flt(row.custom_expected_qty);
+		const stock = flt(row.custom_total_stock_qty);
+		const is_fulfilled = expected > 0 && stock + 1e-9 >= expected;
+		(is_fulfilled ? fulfilled : required).push(row);
+	});
+
+	const cell = "padding:6px 10px;border-top:1px solid var(--border-color,#d1d8dd);";
+	const rows_html = (rows) =>
+		rows.length
+			? rows
+					.map(
+						(r) =>
+							`<tr>
+								<td style="${cell}">${frappe.utils.escape_html(r.item_code || "")}</td>
+								<td style="${cell}">${frappe.utils.escape_html(r.item_name || "")}</td>
+								<td style="${cell}text-align:right;">${format_number(flt(r.custom_expected_qty))}</td>
+								<td style="${cell}text-align:right;">${format_number(flt(r.custom_total_stock_qty))}</td>
+								<td style="${cell}text-align:right;">${format_number(flt(r.custom_required_qty_for_pr))}</td>
+							</tr>`
+					)
+					.join("")
+			: `<tr><td style="${cell}" colspan="5" class="text-muted">${__("No items")}</td></tr>`;
+
+	const table = (title, color, rows) => `
+		<div style="flex:1;min-width:320px;border:1px solid var(--border-color,#d1d8dd);border-radius:8px;overflow:hidden;">
+			<div style="padding:8px 10px;background:${color};font-weight:600;">${title} (${rows.length})</div>
+			<table style="width:100%;border-collapse:collapse;font-size:13px;">
+				<thead><tr>
+					<th style="padding:6px 10px;text-align:left;">${__("Item Code")}</th>
+					<th style="padding:6px 10px;text-align:left;">${__("Item Name")}</th>
+					<th style="padding:6px 10px;text-align:right;">${__("Expected Qty")}</th>
+					<th style="padding:6px 10px;text-align:right;">${__("Total Stock")}</th>
+					<th style="padding:6px 10px;text-align:right;">${__("Required for PR")}</th>
+				</tr></thead>
+				<tbody>${rows_html(rows)}</tbody>
+			</table>
+		</div>`;
+
+	field.$wrapper.html(
+		`<div style="display:flex;gap:16px;flex-wrap:wrap;">
+			${table(__("Required for PR"), "var(--subtle-fg,#f7fafc)", required)}
+			${table(__("Already Fulfilled — No PO"), "#e6f4ea", fulfilled)}
+		</div>`
+	);
+}
 
 // "Source Warehouse" (from_warehouse) only applies when material_request_type is
 // "Material Transfer" — its depends_on hides it for every other type. But hidden
@@ -474,6 +541,8 @@ function set_rm_warehouse_qty(frm, cdt, cdn) {
 		const total_stock_qty = quantities.reduce((sum, qty) => sum + flt(qty), 0);
 		set_rm_qty_field(cdt, cdn, "custom_total_stock_qty", total_stock_qty);
 		recompute_required_qty_for_pr(cdt, cdn);
+		// Refresh the bifurcation view once fresh stock lands (drafts fill async).
+		render_pr_bifurcation(frm);
 	});
 
 	set_material_pipeline_status(frm, cdt, cdn);

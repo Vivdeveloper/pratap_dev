@@ -37,12 +37,28 @@ def get_rfq_matrix_data(material_request):
                 "uom": row.get("uom") or row.get("stock_uom") or "",
                 "mr_qty": 0.0,
                 "ordered_qty": 0.0,
+                "expected_qty": 0.0,
+                "total_stock": 0.0,
             }
             items.append(agg[row.item_code])  # preserve first-seen order
             seen_items.add(row.item_code)
             row_names_by_item[row.item_code] = []
         agg[row.item_code]["mr_qty"] += flt(row.qty)
+        agg[row.item_code]["expected_qty"] += flt(row.get("custom_expected_qty"))
+        # Warehouse stock is item-level (same across rows of an item), so take the max.
+        agg[row.item_code]["total_stock"] = max(
+            agg[row.item_code]["total_stock"], flt(row.get("custom_total_stock_qty"))
+        )
         row_names_by_item[row.item_code].append(row.name)
+
+    # Fulfilled = warehouse stock already covers expected qty -> exclude from the RFQ
+    # picker (no PO to be raised). Kept visible on the MR via the bifurcation view.
+    items = [
+        it
+        for it in items
+        if not (flt(it["expected_qty"]) > 0 and flt(it["total_stock"]) + 1e-9 >= flt(it["expected_qty"]))
+    ]
+    seen_items = {it["item_code"] for it in items}
 
     # "PO Made" per item = qty of every SUBMITTED Purchase Order Item that links
     # back to this MR row (material_request_item). This counts supplier-variant POs
