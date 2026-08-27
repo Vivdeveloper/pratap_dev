@@ -35,10 +35,17 @@ def get_forecast_clubs_for_material_request():
         order_by="idx asc",
     )
 
-    # (forecast club, item) pairs already procured -> hide them from the picker.
+    # (forecast club, item) pairs already procured via the forecast->MR->PO link.
     procured = _get_procured_forecast_items(club_names)
 
     item_codes = list({row.item_code for row in rows if row.item_code})
+
+    # Broad rule (item code + qty): also hide a forecast item once submitted Purchase
+    # Orders for that item_code have ordered at least the forecast qty — even when the
+    # PO has no forecast link. This catches historic purchases made outside the
+    # forecast flow. Exact item_code match (supplier-variant POs are still covered by
+    # the linked rule above).
+    ordered_by_item = _submitted_po_qty_by_item(item_codes)
     name_map = {}
     if item_codes:
         for item in frappe.get_all(
@@ -60,9 +67,12 @@ def get_forecast_clubs_for_material_request():
     for row in rows:
         if not row.item_code or flt(row.qty) <= 0:
             continue
-        # Skip items already procured (a Purchase Order was raised for this forecast
-        # club + item), so they don't reappear in the picker.
+        # Skip items already procured via the forecast link (club + item).
         if (row.parent, row.item_code) in procured:
+            continue
+        # Skip items whose submitted POs already cover the forecast qty (item code +
+        # qty rule), so historic purchases without a forecast link also drop off.
+        if flt(ordered_by_item.get(row.item_code, 0.0)) + 1e-9 >= flt(row.qty):
             continue
         grouped[row.parent]["items"].append(
             {
@@ -74,6 +84,30 @@ def get_forecast_clubs_for_material_request():
         )
 
     return [group for group in grouped.values() if group["items"]]
+
+
+def _submitted_po_qty_by_item(item_codes):
+    """Total qty ordered per item_code across all SUBMITTED Purchase Orders.
+
+    Used by the item-code + qty rule: a forecast item is hidden once this total
+    reaches the forecast qty, regardless of any forecast link.
+    """
+    if not item_codes:
+        return {}
+
+    rows = frappe.db.sql(
+        """
+        SELECT poi.item_code AS item_code, SUM(poi.qty) AS qty
+        FROM `tabPurchase Order Item` poi
+        INNER JOIN `tabPurchase Order` po ON po.name = poi.parent
+        WHERE po.docstatus = 1
+          AND poi.item_code IN %(items)s
+        GROUP BY poi.item_code
+        """,
+        {"items": tuple(item_codes)},
+        as_dict=True,
+    )
+    return {r.item_code: flt(r.qty) for r in rows}
 
 
 def _get_procured_forecast_items(club_names):
