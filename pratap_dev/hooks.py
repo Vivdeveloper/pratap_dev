@@ -134,6 +134,9 @@ override_doctype_class = {
 	"Purchase Receipt": "pratap_dev.purchase_receipt.PratapPurchaseReceipt",
 	# Allow supplier-variant items (RFQ rename) to satisfy the MR item link on POs.
 	"Purchase Order": "pratap_dev.purchase_order_variant.PratapPurchaseOrder",
+	# Preserve Required Items row names when qty changes on a submitted WO (editable
+	# qty after submit) so Update doesn't fail with "Work Order Item ... not found".
+	"Work Order": "pratap_dev.work_order_class.PratapWorkOrder",
 }
 
 # Document Events
