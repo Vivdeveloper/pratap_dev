@@ -3,6 +3,14 @@ from frappe import _
 from frappe.utils import flt
 
 
+def disable_inspection_required(doc, method=None):
+	"""Quality Inspection is not used on Stock Entries here — force the flag off before
+	validate so ERPNext's inspection check never triggers, regardless of what the BOM /
+	make_stock_entry set or the checkbox shows (the field is also read-only in the UI)."""
+	if doc.get("inspection_required"):
+		doc.inspection_required = 0
+
+
 def prevent_over_transfer_for_manufacture(doc, method=None):
 	"""Hard-block a "Material Transfer for Manufacture" that would push a Work Order
 	past 100% of its required quantity.
@@ -15,6 +23,12 @@ def prevent_over_transfer_for_manufacture(doc, method=None):
 	transfers (not this one), so we add this entry's FG qty and compare to the target.
 	"""
 	if doc.purpose != "Material Transfer for Manufacture" or not doc.work_order:
+		return
+
+	# Per-item batch transfers (pratap_dev.work_order_transfer) enforce per-item
+	# remaining themselves and set fg_completed_qty to the whole WO qty, so the
+	# fg_completed_qty comparison below doesn't apply — skip it for those.
+	if doc.flags.get("pratap_partial_item_transfer"):
 		return
 
 	wo = frappe.db.get_value(

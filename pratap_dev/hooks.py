@@ -281,6 +281,7 @@ doctype_js = {
         "public/js/work_order_bom_item.js",
         "public/js/work_order_alternate_repack.js",
         "public/js/work_order_batch_sheet.js",
+        "public/js/work_order_transfer.js",
     ],
     "Purchase Order": "public/js/purchase_order_grn.js",
     "Supplier Quotation": "public/js/supplier_quotation.js",
@@ -338,6 +339,7 @@ doc_events = {
         "before_save": "pratap_dev.calculation.tsa_table_cal_by_weight"
     },
     "Stock Entry": {
+        "before_validate": "pratap_dev.stock_entry_validation.disable_inspection_required",
         "before_submit": [
             "pratap_dev.stock_entry_validation.validate_manufacture_batch_with_work_order",
             "pratap_dev.stock_entry_validation.prevent_over_transfer_for_manufacture",
@@ -369,6 +371,9 @@ doc_events = {
     },
     "Request for Quotation": {
         "validate": "pratap_dev.rfq_supplier_fields.set_supplier_fields",
+    },
+    "Supplier Quotation": {
+        "validate": "pratap_dev.supplier_quotation_po.set_required_date_from_rfq",
     },
     "Purchase Receipt": {
         "validate": [

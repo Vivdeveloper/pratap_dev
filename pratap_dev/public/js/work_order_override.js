@@ -31,7 +31,10 @@ frappe.ui.form.on("Work Order", {
         // Count" (draft only), and the fetched snapshot then persists (once saved)
         // until the next click.
         add_refresh_stock_button(frm);
-        gate_start_button_on_stock(frm);
+        // NOTE: gate_start_button_on_stock is superseded by the new batch-wise transfer
+        // popup (work_order_transfer.js), which handles availability per batch. Left
+        // defined but no longer called to avoid a misleading "Start disabled" banner.
+        // gate_start_button_on_stock(frm);
         populate_wo_instructions(frm);
         },
 

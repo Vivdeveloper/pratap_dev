@@ -1,5 +1,7 @@
 frappe.ui.form.on("Supplier Quotation", {
 	refresh(frm) {
+		fill_required_dates_from_rfq(frm);
+
 		if (pratap_dev.last_buying_rates.should_show(frm)) {
 			frm.add_custom_button(
 				__("Last Buying Rate"),
@@ -40,6 +42,39 @@ frappe.ui.form.on("Supplier Quotation Item", {
 		frm.model.set_value(cdt, cdn, "rate", "");
 	},
 });
+// On a freshly-created SQ (from RFQ), the Required Date column is blank until the
+// save-time hook runs. Fill it immediately, client-side, from each item's RFQ link so
+// the user sees the date without having to save first. Runs once per unsaved doc.
+function fill_required_dates_from_rfq(frm) {
+	if (!frm.is_new() || frm._req_dates_filled) return;
+	const need = (frm.doc.items || []).filter(
+		(d) => d.request_for_quotation_item && !d.custom_required_date
+	);
+	if (!need.length) {
+		frm._req_dates_filled = true;
+		return;
+	}
+	frm._req_dates_filled = true;
+	frappe.call({
+		method: "pratap_dev.supplier_quotation_po.get_rfq_required_dates",
+		args: {
+			rfq_item_names: JSON.stringify(need.map((d) => d.request_for_quotation_item)),
+		},
+		callback: (r) => {
+			const map = r.message || {};
+			let changed = false;
+			need.forEach((d) => {
+				const dt = map[d.request_for_quotation_item];
+				if (dt && !d.custom_required_date) {
+					d.custom_required_date = dt;
+					changed = true;
+				}
+			});
+			if (changed) frm.refresh_field("items");
+		},
+	});
+}
+
 function show_last_buying_rates(frm) {
 	return pratap_dev.last_buying_rates.show(frm, {
 		rate_column_label: __("Rate"),
@@ -91,6 +126,7 @@ function show_create_purchase_order_dialog(frm) {
 				docname: d.name,
 				item_code: d.item_code,
 				item_name: d.item_name,
+				required_date: c.required_date || "",
 				std_pkg: std_pkg,
 				sq_units: flt(c.no_of_unit),
 				pending: has_cap ? String(flt(pending, 3)) : "",
@@ -163,6 +199,14 @@ function render_create_purchase_order_dialog(frm, data) {
 						columns: 2,
 					},
 					{
+						fieldtype: "Date",
+						fieldname: "required_date",
+						label: __("Required Date"),
+						in_list_view: 1,
+						read_only: 1,
+						columns: 2,
+					},
+					{
 						fieldtype: "Float",
 						fieldname: "std_pkg",
 						label: __("Std Pkg Qty"),
@@ -191,7 +235,7 @@ function render_create_purchase_order_dialog(frm, data) {
 						fieldname: "units_to_order",
 						label: __("Units to Order"),
 						in_list_view: 1,
-						columns: 2,
+						columns: 1,
 						onchange() {
 							setTimeout(() => recompute_sq_po("units"), 0);
 						},
@@ -201,7 +245,7 @@ function render_create_purchase_order_dialog(frm, data) {
 						fieldname: "qty_to_order",
 						label: __("Qty to Order"),
 						in_list_view: 1,
-						columns: 2,
+						columns: 1,
 						onchange() {
 							setTimeout(() => recompute_sq_po("qty"), 0);
 						},
@@ -237,19 +281,54 @@ function render_create_purchase_order_dialog(frm, data) {
 				return;
 			}
 
-			dialog.hide();
-			frappe.call({
-				method: "pratap_dev.supplier_quotation_po.make_partial_purchase_order",
-				args: { source_name: frm.doc.name, rows: JSON.stringify(rows) },
-				freeze: true,
-				freeze_message: __("Creating Purchase Order..."),
-				callback(r) {
-					if (!r.exc && r.message) {
-						frappe.model.sync(r.message);
-						frappe.set_route("Form", r.message.doctype, r.message.name);
-					}
-				},
-			});
+			// Required Date -> PO. If the rows being ordered carry more than one distinct
+			// date, ask the user which one to use; otherwise use the single date (if any).
+			const order_rows = selected.filter((r) => !r._locked && flt(r.units_to_order) > 0);
+			const dates = [...new Set(order_rows.map((r) => r.required_date).filter(Boolean))];
+
+			const create_po = (required_date) => {
+				dialog.hide();
+				frappe.call({
+					method: "pratap_dev.supplier_quotation_po.make_partial_purchase_order",
+					args: {
+						source_name: frm.doc.name,
+						rows: JSON.stringify(rows),
+						required_date: required_date || null,
+					},
+					freeze: true,
+					freeze_message: __("Creating Purchase Order..."),
+					callback(r) {
+						if (!r.exc && r.message) {
+							frappe.model.sync(r.message);
+							frappe.set_route("Form", r.message.doctype, r.message.name);
+						}
+					},
+				});
+			};
+
+			if (dates.length > 1) {
+				const picker = new frappe.ui.Dialog({
+					title: __("Select Required Date for the Purchase Order"),
+					fields: [
+						{
+							fieldtype: "Select",
+							fieldname: "required_date",
+							label: __("Required Date"),
+							options: dates.join("\n"),
+							default: dates[0],
+							reqd: 1,
+						},
+					],
+					primary_action_label: __("Create Purchase Order"),
+					primary_action(v) {
+						picker.hide();
+						create_po(v.required_date);
+					},
+				});
+				picker.show();
+			} else {
+				create_po(dates[0]);
+			}
 		},
 	});
 

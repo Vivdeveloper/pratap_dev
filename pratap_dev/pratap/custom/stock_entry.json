@@ -1,0 +1,27 @@
+{
+ "custom_fields": [],
+ "custom_perms": [],
+ "doctype": "Stock Entry",
+ "links": [],
+ "property_setters": [
+  {
+   "doc_type": "Stock Entry",
+   "doctype_or_field": "DocField",
+   "field_name": "inspection_required",
+   "property": "read_only",
+   "property_type": "Check",
+   "name": "Stock Entry-inspection_required-read_only",
+   "value": "1"
+  },
+  {
+   "doc_type": "Stock Entry",
+   "doctype_or_field": "DocField",
+   "field_name": "inspection_required",
+   "property": "default",
+   "property_type": "Text",
+   "name": "Stock Entry-inspection_required-default",
+   "value": "0"
+  }
+ ],
+ "sync_on_migrate": 1
+}

@@ -61,7 +61,49 @@ def get_sq_po_context(supplier_quotation):
 			"material_request_item": mri,
 			"pending": pending_by_mri.get(mri) if mri else None,  # None => no cap
 			"purchase_orders": po_by_row.get(it.name, []),
+			# Required Date carried from the RFQ item (shown in the Create-PO popup).
+			"required_date": str(it.get("custom_required_date") or "") or None,
 		}
+	return out
+
+
+def set_required_date_from_rfq(doc, method=None):
+	"""Carry each item's Required Date (RFQ Item.schedule_date) onto the Supplier
+	Quotation item (custom_required_date) — works for desk/portal/any creation path,
+	keyed on request_for_quotation_item."""
+	if not doc.meta.get_field("items"):
+		return
+	item_meta = frappe.get_meta("Supplier Quotation Item")
+	if not item_meta.has_field("custom_required_date"):
+		return
+	for it in doc.items:
+		if it.get("custom_required_date") or not it.get("request_for_quotation_item"):
+			continue
+		rfq_date = frappe.db.get_value(
+			"Request for Quotation Item", it.request_for_quotation_item, "schedule_date"
+		)
+		if rfq_date:
+			it.custom_required_date = rfq_date
+
+
+@frappe.whitelist()
+def get_rfq_required_dates(rfq_item_names):
+	"""Map RFQ Item name -> its Required Date (schedule_date). Used by the SQ form to
+	fill custom_required_date on a freshly-created (unsaved) draft, before the save-time
+	hook runs, so the column isn't blank until first save."""
+	if isinstance(rfq_item_names, str):
+		rfq_item_names = json.loads(rfq_item_names)
+	names = list({n for n in (rfq_item_names or []) if n})
+	if not names:
+		return {}
+	out = {}
+	for r in frappe.get_all(
+		"Request for Quotation Item",
+		filters={"name": ["in", names]},
+		fields=["name", "schedule_date"],
+	):
+		if r.schedule_date:
+			out[r.name] = str(r.schedule_date)
 	return out
 
 
@@ -88,9 +130,12 @@ def _po_by_sq_item(supplier_quotation):
 
 
 @frappe.whitelist()
-def make_partial_purchase_order(source_name, rows):
+def make_partial_purchase_order(source_name, rows, required_date=None):
 	"""Create a PO for only the entered units per item (qty = units x std pkg),
-	capped at each Material Request row's pending qty. Returns the unsaved PO."""
+	capped at each Material Request row's pending qty. Returns the unsaved PO.
+
+	`required_date` (chosen in the popup) flows to the PO's Required By (schedule_date),
+	including each PO item's Required By."""
 	from erpnext.buying.doctype.supplier_quotation.supplier_quotation import make_purchase_order
 
 	if isinstance(rows, str):
@@ -140,4 +185,11 @@ def make_partial_purchase_order(source_name, rows):
 			item.stock_qty = item.qty * flt(item.get("conversion_factor") or 1)
 			if item.meta.has_field("custom_total_qty"):
 				item.custom_total_qty = units_by_item[sqi]
+
+	# Flow the chosen Required Date to the PO's Required By (header + each item).
+	if required_date:
+		po.schedule_date = required_date
+		for item in po.items:
+			if item.meta.has_field("schedule_date"):
+				item.schedule_date = required_date
 	return po
