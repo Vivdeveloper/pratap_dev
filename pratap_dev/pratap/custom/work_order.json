@@ -1407,6 +1407,18 @@
    "translatable": 0,
    "unique": 0,
    "width": null
+  },
+  {
+   "dt": "Work Order",
+   "fieldname": "custom_plan_user_saved",
+   "fieldtype": "Check",
+   "label": "Plan Saved By User",
+   "insert_after": "custom_notes",
+   "hidden": 1,
+   "no_copy": 1,
+   "read_only": 1,
+   "default": "0",
+   "is_system_generated": 0
   }
  ],
  "custom_perms": [],

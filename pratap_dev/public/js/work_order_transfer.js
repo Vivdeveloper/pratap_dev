@@ -69,6 +69,8 @@ function render_wo_transfer_dialog(frm, ctx) {
 	dialog.show();
 	dialog.$wrapper.find(".modal-dialog").css("max-width", "min(1100px, 96vw)");
 	update_set_plan_state(dialog, ctx);
+	// First Start with a complete FIFO prefill -> persist the blueprint automatically.
+	maybe_auto_set_plan(frm, dialog, ctx);
 
 	// Warn before closing (backdrop click / Esc / X) if there are unsaved batch edits,
 	// so the operator doesn't lose them by mistake — nudge them to Save as Draft.
@@ -273,11 +275,17 @@ function wire_item_block(frm, dialog, $body, it) {
 		}
 	};
 
-	// Prefill saved draft rows (resume), else start with one empty row.
+	// Resume a saved draft as-is; otherwise FIFO-prefill the required qty as the default
+	// plan (so the planner can just click "Set Plan"). Empty row only if no batches.
 	if ((it.draft_rows || []).length) {
 		it.draft_rows.forEach((d) => addRow(d));
 	} else {
-		addRow();
+		const prefilled = fifo_prefill_rows(it);
+		if (prefilled.length) {
+			prefilled.forEach((d) => addRow(d));
+		} else {
+			addRow();
+		}
 	}
 
 	$item.on("click", ".wo-tr-addbatch", (e) => {
@@ -366,6 +374,37 @@ function collect_rows($item) {
 	return rows;
 }
 
+// FIFO prefill: fill the item's full required qty from the oldest batches first
+// (it.batches is already FIFO-ordered from the server — oldest Batch.creation first).
+// Each batch contributes up to its available qty; No-of-Units is derived from the
+// batch's Std Pkg. This becomes the default plan the planner can just "Set Plan".
+function fifo_prefill_rows(it) {
+	const rows = [];
+	let need = flt(it.required_qty, 3);
+	(it.batches || []).forEach((b) => {
+		if (need <= 1e-6) return;
+		const pkg = flt(b.std_pkg) || 1;
+		const avail = flt(b.available_qty, 3);
+		if (avail <= 0) return;
+		// Never plan more than a batch actually holds: cap units at floor(avail / pkg).
+		const availUnits = Math.floor((avail / pkg) * 1000) / 1000;
+		if (availUnits <= 0) return;
+		let units;
+		if (avail < need - 1e-9) {
+			units = availUnits; // batch can't finish it — take the whole batch, move on
+		} else {
+			// This batch can finish the requirement: round the closing units UP so the
+			// plan total still meets required despite 3-dp rounding, but not past avail.
+			units = Math.ceil((need / pkg) * 1000) / 1000;
+			if (units > availUnits) units = availUnits;
+		}
+		const qty = flt(pkg * units, 3);
+		rows.push({ batch_no: b.batch_no, std_pkg: pkg, units: units, qty: qty });
+		need = flt(need - qty, 3);
+	});
+	return rows;
+}
+
 function set_log($item, log) {
 	$item
 		.find(".wo-tr-log")
@@ -385,15 +424,11 @@ function log_event(frm, $item, row_name, action) {
 	});
 }
 
-// Enable "Set Plan" only when the user is allowed AND the draft covers every item's
-// required qty (each item either already full, or its rows sum to >= required).
-function update_set_plan_state(dialog, ctx) {
-	const $btn = dialog.$wrapper.find(".wo-set-plan-btn");
-	if (!$btn.length) {
-		return;
-	}
+// The draft covers every item's required qty (each item already full, or its rows sum
+// to >= required) — i.e. the plan is complete enough to save.
+function plan_is_complete(dialog, ctx) {
 	const $body = dialog.fields_dict.body.$wrapper;
-	const complete = ctx.items.every((it) => {
+	return ctx.items.every((it) => {
 		const $item = $body.find(`.wo-tr-item[data-row="${it.row}"]`);
 		if (it.is_full || $item.attr("data-full") === "1") {
 			return true;
@@ -401,15 +436,52 @@ function update_set_plan_state(dialog, ctx) {
 		const sum = collect_rows($item).reduce((a, r) => a + flt(r.qty), 0);
 		return flt(sum, 3) + 1e-6 >= flt(it.required_qty, 3);
 	});
-	$btn.prop("disabled", !(ctx.can_set_plan && complete));
 }
 
-function do_set_plan(frm, dialog, ctx) {
+function build_plan(dialog, ctx) {
 	const plan = {};
 	ctx.items.forEach((it) => {
 		const $item = dialog.fields_dict.body.$wrapper.find(`.wo-tr-item[data-row="${it.row}"]`);
 		plan[it.row] = collect_rows($item);
 	});
+	return plan;
+}
+
+// Enable "Set Plan" only when the user is allowed AND the draft covers every item.
+function update_set_plan_state(dialog, ctx) {
+	const $btn = dialog.$wrapper.find(".wo-set-plan-btn");
+	if (!$btn.length) {
+		return;
+	}
+	$btn.prop("disabled", !(ctx.can_set_plan && plan_is_complete(dialog, ctx)));
+}
+
+// On the first Start (no plan yet), the FIFO-prefilled rows are already a complete plan,
+// so save that blueprint automatically. It does not use up the Manufacturing User's one
+// manual save — they (and the manager) can still edit and re-save afterwards.
+function maybe_auto_set_plan(frm, dialog, ctx) {
+	if (ctx.plan_set || !ctx.can_set_plan || !plan_is_complete(dialog, ctx)) {
+		return;
+	}
+	frappe.call({
+		method: "pratap_dev.work_order_transfer.set_transfer_plan",
+		args: { work_order: frm.doc.name, plan: JSON.stringify(build_plan(dialog, ctx)), auto: 1 },
+		callback: (r) => {
+			if (r.message && r.message.plan_set) {
+				ctx.plan_set = true;
+				ctx.can_set_plan = r.message.can_set_plan;
+				update_set_plan_state(dialog, ctx);
+				frappe.show_alert(
+					{ message: __("Plan saved automatically (FIFO) — you can still edit and re-save."), indicator: "green" },
+					5
+				);
+			}
+		},
+	});
+}
+
+function do_set_plan(frm, dialog, ctx) {
+	const plan = build_plan(dialog, ctx);
 	frappe.confirm(
 		__("Set this as the plan (blueprint) for the whole Work Order?"),
 		() => {

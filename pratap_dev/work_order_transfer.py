@@ -69,40 +69,62 @@ def get_wo_transfer_context(work_order):
 		"wip_warehouse": wo.wip_warehouse,
 		"items": items,
 		"plan_set": plan_set,
-		"can_set_plan": _can_set_plan(plan_set),
+		"can_set_plan": _can_set_plan(bool(wo.get("custom_plan_user_saved"))),
 	}
 
 
 # --- Plan (blueprint) ---------------------------------------------------------
 
-def _can_set_plan(plan_already_set):
+def _can_set_plan(user_already_saved):
 	"""Administrator / Manufacturing Manager / System Manager can set the plan any time.
-	A plain Manufacturing User can set it only ONCE (until it has been set)."""
+	A plain Manufacturing User can MANUALLY save it only ONCE. The automatic FIFO
+	blueprint saved on the first Start does not count against that allowance."""
 	if frappe.session.user == "Administrator":
 		return True
 	roles = set(frappe.get_roles())
 	if roles & {"System Manager", "Manufacturing Manager"}:
 		return True
 	if "Manufacturing User" in roles:
-		return not plan_already_set
+		return not user_already_saved
 	return False
 
 
+def _is_plain_manufacturing_user():
+	if frappe.session.user == "Administrator":
+		return False
+	roles = set(frappe.get_roles())
+	if roles & {"System Manager", "Manufacturing Manager"}:
+		return False
+	return "Manufacturing User" in roles
+
+
 @frappe.whitelist()
-def set_transfer_plan(work_order, plan):
+def set_transfer_plan(work_order, plan, auto=0):
 	"""Save the planned batch blueprint (per item) from the draft, once it covers every
-	item's required qty. Manufacturing User may do this once; Manager/Admin any time.
-	The plan is a suggestion only — the actual transfer can differ."""
+	item's required qty. The plan is a suggestion only — the actual transfer can differ.
+
+	`auto=1` is the automatic FIFO blueprint saved on the first Start click: it only
+	writes when no plan exists yet, never errors (silently no-ops if it can't cover or
+	one already exists), and does NOT consume the Manufacturing User's one manual save.
+	A manual save (auto=0) follows the usual rule: Manufacturing User once, Manager/Admin
+	any time; a successful manual save by a plain Manufacturing User uses up their turn."""
+	auto = int(auto or 0)
 	if isinstance(plan, str):
 		plan = json.loads(plan)
 
 	wo = frappe.get_doc("Work Order", work_order)
 	wo.check_permission("read")
 
+	user_saved = bool(wo.get("custom_plan_user_saved"))
 	plan_already_set = any(r.get("custom_planned_batches") for r in wo.required_items)
-	if not _can_set_plan(plan_already_set):
+
+	if auto:
+		# First-Start auto blueprint: skip if a plan already exists or the caller can't set.
+		if plan_already_set or not _can_set_plan(user_saved):
+			return {"plan_set": plan_already_set, "items": 0, "can_set_plan": _can_set_plan(user_saved), "auto": 1}
+	elif not _can_set_plan(user_saved):
 		frappe.throw(
-			_("The plan is already set. Only a Manufacturing Manager can change it.")
+			_("You have already saved the plan. Only a Manufacturing Manager can change it.")
 		)
 
 	# Build the per-row planned rows; fall back to the actual transfers for items that
@@ -126,10 +148,13 @@ def set_transfer_plan(work_order, plan):
 
 		planned_by_row[row.name] = (row, clean)
 
-	# Completeness: every item's planned qty must cover its required qty.
+	# Completeness: every item's planned qty must cover its required qty. On auto, an
+	# incomplete plan (e.g. not enough stock) is silently skipped, not an error.
 	for row, clean in planned_by_row.values():
 		planned_qty = sum(flt(c["qty"]) for c in clean)
 		if flt(planned_qty, 3) + 1e-6 < flt(row.required_qty, 3):
+			if auto:
+				return {"plan_set": False, "items": 0, "can_set_plan": _can_set_plan(user_saved), "auto": 1}
 			frappe.throw(
 				_("Plan for {0} ({1}) does not cover the required qty ({2}).").format(
 					row.item_code, flt(planned_qty, 3), flt(row.required_qty, 3)
@@ -144,9 +169,14 @@ def set_transfer_plan(work_order, plan):
 			"Work Order Item", row.name, "custom_planned_batches",
 			json.dumps(clean), update_modified=False,
 		)
+
+	# A manual save by a plain Manufacturing User uses up their single allowance.
+	if not auto and _is_plain_manufacturing_user():
+		frappe.db.set_value("Work Order", wo.name, "custom_plan_user_saved", 1, update_modified=False)
+		user_saved = True
+
 	frappe.db.commit()
-	# Recompute: a plain Manufacturing User can no longer change it now.
-	return {"plan_set": True, "items": len(planned_by_row), "can_set_plan": _can_set_plan(True)}
+	return {"plan_set": True, "items": len(planned_by_row), "can_set_plan": _can_set_plan(user_saved), "auto": auto}
 
 
 def _parse_draft(value):
