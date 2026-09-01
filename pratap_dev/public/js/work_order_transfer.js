@@ -560,7 +560,16 @@ function submit_item_transfer(frm, dialog, $item, it) {
 			if (res.is_full) {
 				// Fully transferred -> now the Start/Stop time log becomes available.
 				$item.attr("data-full", "1");
+				// The timer was rendered INLINE on the batch button row, so removing the
+				// batch area drops it. Re-add it as a standalone timer (like a full item
+				// on load) so Start/Stop/Finish stay visible without needing a reopen.
 				$item.find(".wo-tr-batches").remove();
+				if (!$item.find(".wo-tr-timer").length) {
+					$item.find(".wo-tr-taken").after(time_controls_html(it));
+				}
+				if (res.duration_mins != null) {
+					$item.find(".wo-tr-total").text(fmt_dur(res.duration_mins));
+				}
 				$item.css({ background: "var(--gray-100)" });
 				$item
 					.find(".wo-tr-nums")
