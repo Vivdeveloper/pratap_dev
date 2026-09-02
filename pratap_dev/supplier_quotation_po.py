@@ -154,6 +154,7 @@ def make_partial_purchase_order(source_name, rows, required_date=None):
 	sq.check_permission("read")
 
 	pkg_by_item = {it.name: (flt(it.get("custom_packing_qty")) or 1.0) for it in sq.items}
+	date_by_item = {it.name: it.get("custom_required_date") for it in sq.items}
 	mri_by_item = {
 		it.name: it.material_request_item for it in sq.items if it.get("material_request_item")
 	}
@@ -186,10 +187,14 @@ def make_partial_purchase_order(source_name, rows, required_date=None):
 			if item.meta.has_field("custom_total_qty"):
 				item.custom_total_qty = units_by_item[sqi]
 
-	# Flow the chosen Required Date to the PO's Required By (header + each item).
+	# Required By: the chosen date goes on the PO header; each PO item carries ITS OWN
+	# date (from its Supplier Quotation item), falling back to the chosen date.
 	if required_date:
 		po.schedule_date = required_date
-		for item in po.items:
-			if item.meta.has_field("schedule_date"):
-				item.schedule_date = required_date
+	for item in po.items:
+		if not item.meta.has_field("schedule_date"):
+			continue
+		item_date = date_by_item.get(item.get("supplier_quotation_item")) or required_date
+		if item_date:
+			item.schedule_date = item_date
 	return po
