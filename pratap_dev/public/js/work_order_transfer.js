@@ -47,9 +47,27 @@ function render_wo_transfer_dialog(frm, ctx) {
 		},
 	});
 	const $body = dialog.fields_dict.body.$wrapper;
-	$body.html(ctx.items.map((it) => item_block_html(it)).join(""));
+	const hasJC = (ctx.job_cards || []).length > 0;
+	const itemsHtml = ctx.items.map((it) => item_block_html(it)).join("");
+	if (hasJC) {
+		// Two tabs: the batch Material Transfer (existing) and the Job Cards / operations.
+		$body.html(`
+			<div class="wo-tabs" style="display:flex;gap:6px;border-bottom:1px solid var(--border-color,#d1d8dd);margin-bottom:12px;">
+				<button class="btn btn-xs btn-primary wo-tab-btn active" data-tab="transfer">${__("Material Transfer")}</button>
+				<button class="btn btn-xs btn-default wo-tab-btn" data-tab="jobcards">${__("Job Cards")} (${ctx.job_cards.length})</button>
+			</div>
+			<div class="wo-tab-pane" data-pane="transfer">${itemsHtml}</div>
+			<div class="wo-tab-pane" data-pane="jobcards" style="display:none;">${job_cards_html(ctx.job_cards)}</div>
+		`);
+	} else {
+		$body.html(itemsHtml);
+	}
 	dialog._dirty = false;
 	ctx.items.forEach((it) => wire_item_block(frm, dialog, $body, it));
+	if (hasJC) {
+		wire_tabs($body);
+		wire_job_cards(frm, dialog, ctx);
+	}
 
 	// "Set Plan" — saves the blueprint once the draft covers every item fully.
 	// Manufacturing User: once; Manager/Admin: any time (permission from ctx.can_set_plan).
@@ -403,6 +421,203 @@ function fifo_prefill_rows(it) {
 		need = flt(need - qty, 3);
 	});
 	return rows;
+}
+
+// ---- Job Cards tab ---------------------------------------------------------
+
+function wire_tabs($body) {
+	$body.on("click", ".wo-tab-btn", function () {
+		const tab = $(this).attr("data-tab");
+		$body.find(".wo-tab-btn").removeClass("active btn-primary").addClass("btn-default");
+		$(this).addClass("active btn-primary").removeClass("btn-default");
+		$body.find(".wo-tab-pane").hide();
+		$body.find(`.wo-tab-pane[data-pane="${tab}"]`).show();
+	});
+}
+
+function jc_by_name(ctx, name) {
+	return (ctx.job_cards || []).find((j) => j.name === name);
+}
+
+function jc_pill(status) {
+	const map = {
+		Completed: "green",
+		Submitted: "green",
+		"Work In Progress": "blue",
+		"On Hold": "orange",
+		Open: "gray",
+		"Material Transferred": "light-blue",
+		"Partially Transferred": "light-blue",
+		Cancelled: "red",
+	};
+	return map[status] || "gray";
+}
+
+function jc_buttons_html(jc) {
+	switch (jc.ui_state) {
+		case "not_started":
+			return `<button class="btn btn-xs btn-success wo-jc-start">▶ ${__("Start Job")}</button>`;
+		case "running":
+			return `<button class="btn btn-xs btn-warning wo-jc-hold">⏸ ${__("Hold Job")}</button>
+				<button class="btn btn-xs btn-primary wo-jc-finish">✓ ${__("Finish Job")}</button>`;
+		case "on_hold":
+			return `<button class="btn btn-xs btn-success wo-jc-resume">▶ ${__("Resume Job")}</button>`;
+		case "awaiting_submit":
+			return `<span class="text-muted small">${__("Quantity complete — submit the Job Card to finish.")}</span>`;
+		case "needs_material":
+			return `<span class="text-warning small">${__("Transfer this operation's material to WIP first.")}</span>`;
+		case "wo_not_started":
+			return `<span class="text-warning small">${__("Transfer material (start the Work Order) first.")}</span>`;
+		case "completed":
+			return `<span class="text-muted small">${__("Completed.")}</span>`;
+		default:
+			return "";
+	}
+}
+
+function job_card_block_html(jc) {
+	const emp =
+		jc.employees && jc.employees.length
+			? `<div class="text-muted small" style="margin-top:4px;">${__("Employees")}: ${jc.employees
+					.map((e) => frappe.utils.escape_html(e.employee_name || e.employee))
+					.join(", ")}</div>`
+			: "";
+	return `
+	<div class="wo-jc" data-jc="${frappe.utils.escape_html(jc.name)}"
+		style="border:1px solid var(--border-color,#d1d8dd);border-radius:8px;padding:10px 12px;margin-bottom:12px;">
+		<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;">
+			<b>${frappe.utils.escape_html(jc.operation || jc.name)}</b>
+			<span class="text-muted">${frappe.utils.escape_html(jc.workstation || "")}</span>
+			<span class="indicator-pill ${jc_pill(jc.status)}">${frappe.utils.escape_html(jc.status)}</span>
+			<span class="text-muted" style="margin-left:auto;">${__("Done")}: <b>${format_number(
+				jc.total_completed_qty
+			)}</b> / ${format_number(jc.for_quantity)} ${frappe.utils.escape_html(jc.uom || "")}</span>
+			<a href="/app/job-card/${encodeURIComponent(jc.name)}" target="_blank" rel="noopener">${frappe.utils.escape_html(
+				jc.name
+			)} ↗</a>
+		</div>
+		${emp}
+		<div class="wo-jc-controls" style="margin-top:8px;display:flex;gap:8px;align-items:center;">${jc_buttons_html(
+			jc
+		)}</div>
+		<div class="wo-jc-error text-danger small" style="margin-top:6px;"></div>
+	</div>`;
+}
+
+function job_cards_html(cards) {
+	if (!cards || !cards.length) {
+		return `<div class="text-muted">${__("No Job Cards for this Work Order.")}</div>`;
+	}
+	return cards.map(job_card_block_html).join("");
+}
+
+function render_job_cards_pane(dialog, ctx) {
+	const $body = dialog.fields_dict.body.$wrapper;
+	$body.find('.wo-tab-pane[data-pane="jobcards"]').html(job_cards_html(ctx.job_cards || []));
+	$body
+		.find('.wo-tab-btn[data-tab="jobcards"]')
+		.text(`${__("Job Cards")} (${(ctx.job_cards || []).length})`);
+}
+
+function jc_error(dialog, name, msg) {
+	dialog.fields_dict.body.$wrapper
+		.find(`.wo-jc[data-jc="${name}"] .wo-jc-error`)
+		.html("⚠ " + frappe.utils.escape_html(msg));
+}
+
+// One call for every Job Card action; refreshes the section and shows any exception
+// inline (the server returns it as data instead of raising).
+function jc_run(frm, dialog, ctx, name, extra) {
+	frappe.call({
+		method: "pratap_dev.work_order_transfer.run_job_card_action",
+		args: Object.assign({ job_card: name }, extra),
+		freeze: true,
+		freeze_message: __("Updating Job Card…"),
+		callback: (r) => {
+			const res = r.message || {};
+			if (res.job_cards) {
+				ctx.job_cards = res.job_cards;
+				render_job_cards_pane(dialog, ctx);
+			}
+			if (res.ok) {
+				frappe.show_alert({ message: __("Job Card updated."), indicator: "green" }, 4);
+			} else if (res.error) {
+				jc_error(dialog, name, res.error);
+			}
+		},
+	});
+}
+
+function jc_start(frm, dialog, ctx, name, isResume) {
+	const jc = jc_by_name(ctx, name);
+	if (isResume) {
+		jc_run(frm, dialog, ctx, name, {
+			action: "resume",
+			employees: JSON.stringify((jc && jc.employees) || []),
+		});
+		return;
+	}
+	// Start Job: reuse assigned employees if any, else prompt (mirrors the Job Card form).
+	if (jc && jc.has_employees) {
+		jc_run(frm, dialog, ctx, name, { action: "start", employees: JSON.stringify(jc.employees) });
+		return;
+	}
+	// Load the child doctype meta first — a Table MultiSelect throws if the meta for its
+	// options doctype isn't cached, which it isn't when this popup is opened from the
+	// Work Order form (unlike the Job Card form). Then open the employee prompt.
+	frappe.model.with_doctype("Job Card Time Log", () => {
+		frappe.prompt(
+			{
+				fieldtype: "Table MultiSelect",
+				label: __("Select Employees"),
+				options: "Job Card Time Log",
+				fieldname: "employees",
+			},
+			(d) =>
+				jc_run(frm, dialog, ctx, name, {
+					action: "start",
+					employees: JSON.stringify(d.employees || []),
+				}),
+			__("Assign Job to Employee"),
+			__("Start")
+		);
+	});
+}
+
+function jc_finish(frm, dialog, ctx, name) {
+	const jc = jc_by_name(ctx, name);
+	frappe.prompt(
+		{
+			fieldtype: "Float",
+			label: __("Completed Quantity"),
+			fieldname: "qty",
+			default: jc ? jc.remaining_qty : 0,
+		},
+		(d) => jc_run(frm, dialog, ctx, name, { action: "finish", completed_qty: d.qty }),
+		__("Enter Value"),
+		__("Finish")
+	);
+}
+
+function wire_job_cards(frm, dialog, ctx) {
+	const $body = dialog.fields_dict.body.$wrapper;
+	const nameOf = (el) => $(el).closest(".wo-jc").attr("data-jc");
+	$body.on("click", ".wo-jc-start", function (e) {
+		e.preventDefault();
+		jc_start(frm, dialog, ctx, nameOf(this), false);
+	});
+	$body.on("click", ".wo-jc-resume", function (e) {
+		e.preventDefault();
+		jc_start(frm, dialog, ctx, nameOf(this), true);
+	});
+	$body.on("click", ".wo-jc-hold", function (e) {
+		e.preventDefault();
+		jc_run(frm, dialog, ctx, nameOf(this), { action: "hold" });
+	});
+	$body.on("click", ".wo-jc-finish", function (e) {
+		e.preventDefault();
+		jc_finish(frm, dialog, ctx, nameOf(this));
+	});
 }
 
 function set_log($item, log) {

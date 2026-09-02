@@ -70,7 +70,124 @@ def get_wo_transfer_context(work_order):
 		"items": items,
 		"plan_set": plan_set,
 		"can_set_plan": _can_set_plan(bool(wo.get("custom_plan_user_saved"))),
+		"job_cards": _wo_job_cards(wo),
 	}
+
+
+# --- Job Cards (operations run from the popup) --------------------------------
+
+def _wo_job_cards(wo):
+	"""Job Cards for this Work Order with the state the popup needs to show operation
+	controls (Start / Hold / Resume / Finish) mirroring the Job Card form's own gating."""
+	names = frappe.get_all(
+		"Job Card",
+		filters={"work_order": wo.name, "docstatus": ["<", 2]},
+		pluck="name",
+		order_by="sequence_id asc, creation asc",
+	)
+	skip_transfer = bool(wo.get("skip_transfer"))
+	wo_status = wo.status
+	out = []
+	for name in names:
+		jc = frappe.get_doc("Job Card", name)
+		items = jc.get("items") or []
+		material_ok = (not items) or all(flt(i.transferred_qty) >= flt(i.required_qty) for i in items)
+		wo_ok = skip_transfer or wo_status == "In Process" or flt(jc.get("transferred_qty")) > 0 or (not items)
+		for_qty = flt(jc.for_quantity)
+		done_qty = flt(jc.total_completed_qty)
+		qty_met = for_qty > 0 and done_qty >= for_qty
+
+		employees = []
+		for e in (jc.get("employee") or []):
+			employees.append(
+				{"employee": e.employee,
+				 "employee_name": frappe.db.get_value("Employee", e.employee, "employee_name") or e.employee}
+			)
+
+		# "Running" = there is an open time log (a row started but not yet closed). This is
+		# more reliable than started_time/current_time, which ERPNext clears on Resume.
+		has_open_log = any(tl.from_time and not tl.to_time for tl in (jc.get("time_logs") or []))
+
+		if jc.docstatus == 1:
+			ui = "completed"
+		elif qty_met:
+			ui = "awaiting_submit"
+		elif not material_ok:
+			ui = "needs_material"
+		elif not wo_ok:
+			ui = "wo_not_started"
+		elif jc.status == "On Hold":
+			ui = "on_hold"
+		elif has_open_log:
+			ui = "running"
+		else:
+			ui = "not_started"
+
+		out.append(
+			{
+				"name": jc.name,
+				"operation": jc.operation,
+				"workstation": jc.workstation,
+				"status": jc.status,
+				"for_quantity": for_qty,
+				"total_completed_qty": done_qty,
+				"remaining_qty": max(for_qty - done_qty, 0.0),
+				"uom": jc.get("stock_uom") or "",
+				"docstatus": jc.docstatus,
+				"employees": employees,
+				"has_employees": bool(employees),
+				"ui_state": ui,
+			}
+		)
+	return out
+
+
+@frappe.whitelist()
+def get_wo_job_cards(work_order):
+	"""Refresh the Job Cards section after a Start/Hold/Resume/Finish action."""
+	wo = frappe.get_doc("Work Order", work_order)
+	wo.check_permission("read")
+	return _wo_job_cards(wo)
+
+
+@frappe.whitelist()
+def run_job_card_action(job_card, action, employees=None, completed_qty=None):
+	"""Start / Hold / Resume / Finish a Job Card from the transfer popup, reusing
+	ERPNext's own make_time_log so behaviour + validations are identical to the Job Card
+	form. Exceptions are returned as {ok: False, error: ...} (not raised) so the popup can
+	show them inline next to the card. Always returns the refreshed job_cards list."""
+	from erpnext.manufacturing.doctype.job_card.job_card import make_time_log
+	from frappe.utils import now_datetime, strip_html_tags
+
+	jc = frappe.get_doc("Job Card", job_card)
+	jc.check_permission("write")
+	wo_name = jc.work_order
+	if isinstance(employees, str):
+		employees = json.loads(employees or "null")
+
+	now = str(now_datetime())
+	args = {"job_card_id": job_card}
+	if action == "start":
+		args.update({"start_time": now, "employees": employees or [], "status": "Work In Progress"})
+	elif action == "resume":
+		args.update({"start_time": now, "employees": employees or [], "status": "Resume Job"})
+	elif action == "hold":
+		args.update({"complete_time": now, "status": "On Hold"})
+	elif action == "finish":
+		args.update({"complete_time": now, "status": "Complete", "completed_qty": flt(completed_qty)})
+	else:
+		frappe.throw(_("Unknown Job Card action: {0}").format(action))
+
+	try:
+		make_time_log(args)
+	except Exception as e:
+		frappe.db.rollback()
+		msg = strip_html_tags(str(e)) or _("Could not update the Job Card.")
+		out = _wo_job_cards(frappe.get_doc("Work Order", wo_name)) if wo_name else []
+		return {"ok": False, "error": msg, "job_cards": out}
+
+	out = _wo_job_cards(frappe.get_doc("Work Order", wo_name)) if wo_name else []
+	return {"ok": True, "job_cards": out}
 
 
 # --- Plan (blueprint) ---------------------------------------------------------
