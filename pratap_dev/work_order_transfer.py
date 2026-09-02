@@ -71,7 +71,26 @@ def get_wo_transfer_context(work_order):
 		"plan_set": plan_set,
 		"can_set_plan": _can_set_plan(bool(wo.get("custom_plan_user_saved"))),
 		"job_cards": _wo_job_cards(wo),
+		"batch_started_at": str(wo.get("custom_batch_started_at") or "") or None,
 	}
+
+
+@frappe.whitelist()
+def start_batch(work_order):
+	"""Stamp the batch start time on the Work Order, once. Returns the stored value;
+	never overwrites an existing one (the popup hides the button after it is set)."""
+	from frappe.utils import now_datetime
+
+	wo = frappe.get_doc("Work Order", work_order)
+	wo.check_permission("read")
+	existing = wo.get("custom_batch_started_at")
+	if not existing:
+		existing = str(now_datetime())
+		frappe.db.set_value(
+			"Work Order", wo.name, "custom_batch_started_at", existing, update_modified=False
+		)
+		frappe.db.commit()
+	return {"batch_started_at": str(existing)}
 
 
 # --- Job Cards (operations run from the popup) --------------------------------

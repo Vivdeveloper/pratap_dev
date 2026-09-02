@@ -89,6 +89,8 @@ function render_wo_transfer_dialog(frm, ctx) {
 	update_set_plan_state(dialog, ctx);
 	// First Start with a complete FIFO prefill -> persist the blueprint automatically.
 	maybe_auto_set_plan(frm, dialog, ctx);
+	// "Start Batch" control in the dialog header (stamps the batch start time once).
+	add_start_batch_control(frm, dialog, ctx);
 
 	// Warn before closing (backdrop click / Esc / X) if there are unsaved batch edits,
 	// so the operator doesn't lose them by mistake — nudge them to Save as Draft.
@@ -421,6 +423,48 @@ function fifo_prefill_rows(it) {
 		need = flt(need - qty, 3);
 	});
 	return rows;
+}
+
+// "Start Batch" button in the dialog header (right of the title). Click stamps the batch
+// start time on the Work Order once; then the button is replaced by the stored time.
+function add_start_batch_control(frm, dialog, ctx) {
+	const $hdr = dialog.$wrapper.find(".modal-header");
+	$hdr.find(".wo-start-batch, .wo-batch-started").remove();
+	const $anchor = $hdr.find(".modal-actions");
+	if (ctx.batch_started_at) {
+		const txt = frappe.datetime.str_to_user(ctx.batch_started_at);
+		const $t = $(
+			`<span class="wo-batch-started text-muted small" style="margin-right:10px;align-self:center;">${__(
+				"Batch started"
+			)}: ${frappe.utils.escape_html(txt)}</span>`
+		);
+		$anchor.length ? $anchor.before($t) : $hdr.append($t);
+		return;
+	}
+	const $btn = $(
+		`<button class="btn btn-xs btn-primary wo-start-batch" style="margin-right:10px;align-self:center;">▶ ${__(
+			"Start Batch"
+		)}</button>`
+	);
+	$anchor.length ? $anchor.before($btn) : $hdr.append($btn);
+	$btn.on("click", (e) => {
+		e.preventDefault();
+		frappe.confirm(__("Start the batch now? This stamps the start time and cannot be undone."), () => {
+			frappe.call({
+				method: "pratap_dev.work_order_transfer.start_batch",
+				args: { work_order: frm.doc.name },
+				freeze: true,
+				freeze_message: __("Starting batch…"),
+				callback: (r) => {
+					if (r.message && r.message.batch_started_at) {
+						ctx.batch_started_at = r.message.batch_started_at;
+						frappe.show_alert({ message: __("Batch started."), indicator: "green" }, 4);
+						add_start_batch_control(frm, dialog, ctx); // swap button -> time text
+					}
+				},
+			});
+		});
+	});
 }
 
 // ---- Job Cards tab ---------------------------------------------------------
