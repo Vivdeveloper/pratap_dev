@@ -378,6 +378,11 @@ class PratapQualityInspection(Document):
 		if self.stock_entry:
 			return
 
+		# "Basic Testing" is a tracking-only inspection: never create a Manufacture Stock
+		# Entry and never auto-submit the Work Order, even when Accepted and submitted.
+		if (self.inspection_type or "").strip() == "Basic Testing":
+			return
+
 		if (self.status or "").strip() != "Accepted":
 			return
 

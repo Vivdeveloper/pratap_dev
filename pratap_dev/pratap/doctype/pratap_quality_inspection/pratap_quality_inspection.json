@@ -174,7 +174,7 @@
    "fieldname": "inspection_type",
    "fieldtype": "Select",
    "label": "Inspection Type",
-   "options": "\nIncoming\nOutgoing\nIn Process",
+   "options": "\nIncoming\nOutgoing\nIn Process\nBasic Testing",
    "reqd": 1
   },
   {
