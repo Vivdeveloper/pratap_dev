@@ -32,7 +32,9 @@ def get_wo_transfer_context(work_order):
 			continue
 		src = row.source_warehouse or wo.source_warehouse
 		required = flt(row.required_qty)
-		transferred = flt(row.transferred_qty)
+		# Exclude rework transfers from the main tab's figures — they belong to the
+		# Rework tab and are tracked per rework QC (see _wo_rework_qcs).
+		transferred = flt(row.transferred_qty) - _rework_transferred_qty(wo.name, row.item_code)
 		remaining = max(required - transferred, 0)
 		has_batch = bool(frappe.db.get_value("Item", row.item_code, "has_batch_no"))
 		items.append(
@@ -43,7 +45,7 @@ def get_wo_transfer_context(work_order):
 				"instruction_marathi": row.get("custom_operation_instruction_marathi") or "",
 				"uom": row.stock_uom,
 				"required_qty": required,
-				"transferred_qty": transferred,
+				"transferred_qty": flt(transferred, 3),
 				"remaining_qty": flt(remaining, 3),
 				"source_warehouse": src,
 				"has_batch": has_batch,
@@ -72,6 +74,7 @@ def get_wo_transfer_context(work_order):
 		"can_set_plan": _can_set_plan(bool(wo.get("custom_plan_user_saved"))),
 		"job_cards": _wo_job_cards(wo),
 		"batch_started_at": str(wo.get("custom_batch_started_at") or "") or None,
+		"rework_qcs": _wo_rework_qcs(wo),
 	}
 
 
@@ -468,6 +471,7 @@ def _item_transfers(work_order, item_code):
 		WHERE se.work_order = %(wo)s AND se.purpose = 'Material Transfer for Manufacture'
 		  AND se.docstatus = 1 AND sed.item_code = %(item)s
 		  AND IFNULL(sed.batch_no, '') != ''
+		  AND IFNULL(se.custom_rework_qc, '') = ''
 		ORDER BY se.posting_date ASC, se.creation ASC, sed.idx ASC
 		""",
 		{"wo": work_order, "item": item_code},
@@ -595,8 +599,10 @@ def transfer_item_for_manufacture(work_order, row_name, batches):
 	}
 
 
-def _make_single_item_transfer(wo, item_code, src, lines):
-	"""Build + submit a Material Transfer for Manufacture SE for one item's batches."""
+def _make_single_item_transfer(wo, item_code, src, lines, rework_qc=None):
+	"""Build + submit a Material Transfer for Manufacture SE for one item's batches.
+	When `rework_qc` is given, the SE is tagged to that rework QC (so it shows only in the
+	Rework tab and is excluded from the main tab's figures)."""
 	from erpnext.manufacturing.doctype.work_order.work_order import make_stock_entry
 
 	se = frappe.get_doc(make_stock_entry(wo.name, "Material Transfer for Manufacture"))
@@ -625,6 +631,8 @@ def _make_single_item_transfer(wo, item_code, src, lines):
 	# This is a deliberate partial, single-item transfer; per-item remaining is already
 	# enforced above. Exempt it from the fg_completed_qty-based over-transfer guard
 	# (which assumes a full-batch transfer).
+	if rework_qc:
+		se.custom_rework_qc = rework_qc
 	se.flags.pratap_partial_item_transfer = True
 	se.flags.ignore_permissions = True
 	se.insert(ignore_permissions=True)
@@ -660,3 +668,297 @@ def _save_batches_taken(row_name, lines):
 def _num(v):
 	v = flt(v)
 	return int(v) if v == int(v) else v
+
+
+# --- Rework (per rework-QC material transfer + timer) -------------------------
+
+def _rework_data(qc_name):
+	"""Parse the per-item rework timer/log JSON stored on the Pratap QC."""
+	raw = frappe.db.get_value("Pratap Quality Inspection", qc_name, "custom_rework_transfer_data")
+	if not raw:
+		return {}
+	try:
+		d = json.loads(raw)
+		return d if isinstance(d, dict) else {}
+	except (ValueError, TypeError):
+		return {}
+
+
+def _save_rework_data(qc_name, data):
+	frappe.db.set_value(
+		"Pratap Quality Inspection", qc_name, "custom_rework_transfer_data",
+		json.dumps(data), update_modified=False,
+	)
+
+
+def _compose_log(existing, action, now=None):
+	"""Append 'Action — timestamp' to a log string (does not persist)."""
+	from frappe.utils import now_datetime
+
+	if now is None:
+		now = now_datetime()
+	line = "%s — %s" % (action, format_datetime(now, "yyyy-MM-dd hh:mm:ss a"))
+	existing = (existing or "").strip()
+	return "\n".join([x for x in [existing] if x] + [line])
+
+
+def _rework_transferred_qty(work_order, item_code):
+	"""Total qty transferred for an item via rework-tagged Stock Entries (to keep the
+	main tab's transferred/remaining figures free of rework material)."""
+	v = frappe.db.sql(
+		"""
+		SELECT SUM(sed.qty) FROM `tabStock Entry Detail` sed
+		INNER JOIN `tabStock Entry` se ON se.name = sed.parent
+		WHERE se.work_order = %(wo)s AND se.purpose = 'Material Transfer for Manufacture'
+		  AND se.docstatus = 1 AND IFNULL(se.custom_rework_qc, '') != '' AND sed.item_code = %(item)s
+		""",
+		{"wo": work_order, "item": item_code},
+	)
+	return flt(v[0][0]) if v and v[0][0] else 0.0
+
+
+def _rework_item_transfers(work_order, qc_name, item_code):
+	"""Rework transfers (SEs tagged to this QC) for an item — same shape as _item_transfers."""
+	rows = frappe.db.sql(
+		"""
+		SELECT sed.parent AS stock_entry, se.posting_date, sed.batch_no, sed.qty
+		FROM `tabStock Entry Detail` sed
+		INNER JOIN `tabStock Entry` se ON se.name = sed.parent
+		WHERE se.work_order = %(wo)s AND se.purpose = 'Material Transfer for Manufacture'
+		  AND se.docstatus = 1 AND se.custom_rework_qc = %(qc)s
+		  AND sed.item_code = %(item)s AND IFNULL(sed.batch_no, '') != ''
+		ORDER BY se.posting_date ASC, se.creation ASC, sed.idx ASC
+		""",
+		{"wo": work_order, "qc": qc_name, "item": item_code},
+		as_dict=True,
+	)
+	default_pkg = _item_default_pkg_qty(item_code)
+	out = []
+	for r in rows:
+		std = flt(frappe.db.get_value("Batch", r.batch_no, "custom_standard_pkg_qty")) or default_pkg or 1
+		out.append(
+			{
+				"stock_entry": r.stock_entry,
+				"posting_date": str(r.posting_date or ""),
+				"batch_no": r.batch_no,
+				"qty": flt(r.qty, 3),
+				"std_pkg": flt(std, 3),
+				"units": flt(r.qty / std, 3) if std else 0,
+			}
+		)
+	return out
+
+
+def _wo_rework_qcs(wo):
+	"""Rework Pratap QCs for this Work Order. Each shows ONLY the items added to that QC's
+	Raw Materials table (not the whole WO), the QC's Rework Notes on top, and per-item a
+	rework material transfer (operator-entered qty) + a Start/Stop/Finish timer."""
+	names = frappe.get_all(
+		"Pratap Quality Inspection",
+		filters={
+			"reference_type": "Work Order",
+			"reference_name": wo.name,
+			"status": "Rework",
+			"docstatus": ["<", 2],
+		},
+		pluck="name",
+		order_by="creation asc",
+	)
+	out = []
+	for name in names:
+		qc = frappe.get_doc("Pratap Quality Inspection", name)
+		data = _rework_data(name)
+		items = []
+		for rm in (qc.get("raw_materials") or []):
+			if not rm.item_code:
+				continue
+			src = rm.get("source_warehouse") or wo.source_warehouse
+			has_batch = bool(frappe.db.get_value("Item", rm.item_code, "has_batch_no"))
+			d = data.get(rm.item_code, {})
+			log = d.get("addition_log") or ""
+			items.append(
+				{
+					"item_code": rm.item_code,
+					"item_name": rm.item_name or frappe.db.get_value("Item", rm.item_code, "item_name"),
+					"uom": rm.uom or frappe.db.get_value("Item", rm.item_code, "stock_uom"),
+					"required_qty": flt(rm.get("total_req_qty"), 3),
+					"source_warehouse": src,
+					"has_batch": has_batch,
+					"batches": _available_batches(rm.item_code, src) if has_batch else [],
+					"transfers": _rework_item_transfers(wo.name, name, rm.item_code),
+					"duration_mins": flt(d.get("duration_mins"), 3),
+					"timer_running": bool(d.get("addition_start")),
+					"finished": "Finish —" in log,
+					"addition_log": log,
+				}
+			)
+		out.append(
+			{
+				"name": name,
+				"inspection_type": qc.inspection_type,
+				"status": qc.status,
+				"inspection_date": str(qc.inspection_date or ""),
+				"rework_notes": qc.get("rework_notes") or "",
+				"items": items,
+			}
+		)
+	return out
+
+
+def _make_rework_transfer(wo, item_code, src, lines, qc):
+	"""Build + submit a Material Transfer for Manufacture SE for a rework item's batches,
+	tagged to the rework QC. Unlike the main transfer, the item may not be a WO required
+	item, so the rows are built generically (source -> WIP) rather than from the WO map."""
+	from erpnext.manufacturing.doctype.work_order.work_order import make_stock_entry
+
+	se = frappe.get_doc(make_stock_entry(wo.name, "Material Transfer for Manufacture"))
+	wip = wo.wip_warehouse
+	item = frappe.get_doc("Item", item_code)
+
+	se.set("items", [])
+	for ln in lines:
+		child = se.append(
+			"items",
+			{
+				"item_code": item_code,
+				"item_name": item.item_name,
+				"s_warehouse": src,
+				"t_warehouse": wip,
+				"uom": item.stock_uom,
+				"stock_uom": item.stock_uom,
+				"conversion_factor": 1,
+				"qty": ln["qty"],
+				"transfer_qty": ln["qty"],
+				"use_serial_batch_fields": 1,
+				"batch_no": ln["batch_no"],
+			},
+		)
+		child.set_basic_rate_manually = 0
+
+	se.custom_rework_qc = qc
+	se.flags.pratap_partial_item_transfer = True
+	se.flags.ignore_permissions = True
+	se.insert(ignore_permissions=True)
+	se.submit()
+	return se.name
+
+
+def _validate_rework_qc(qc, wo_name):
+	info = frappe.db.get_value(
+		"Pratap Quality Inspection", qc,
+		["reference_type", "reference_name", "status", "docstatus"], as_dict=True,
+	)
+	if not info or info.reference_type != "Work Order" or info.reference_name != wo_name or info.status != "Rework":
+		frappe.throw(_("This is not a rework QC for this Work Order."))
+
+
+@frappe.whitelist()
+def get_wo_rework(work_order):
+	"""Refresh the Rework tab after a transfer or timer action."""
+	wo = frappe.get_doc("Work Order", work_order)
+	wo.check_permission("read")
+	return _wo_rework_qcs(wo)
+
+
+@frappe.whitelist()
+def rework_transfer_item(work_order, qc, item_code, batches):
+	"""Create + submit a Material Transfer for Manufacture SE (tagged to the rework QC)
+	for the chosen batches of a rework item. Operator-entered qty; no required cap (rework
+	needs extra material) — only per-batch availability is enforced. The item comes from
+	the rework QC's Raw Materials table (it need not be a WO required item)."""
+	if isinstance(batches, str):
+		batches = json.loads(batches)
+	if not batches:
+		frappe.throw(_("Pick at least one batch to transfer."))
+
+	wo = frappe.get_doc("Work Order", work_order)
+	wo.check_permission("read")
+	_validate_rework_qc(qc, wo.name)
+
+	qc_doc = frappe.get_doc("Pratap Quality Inspection", qc)
+	rm = next((r for r in (qc_doc.get("raw_materials") or []) if r.item_code == item_code), None)
+	if not rm:
+		frappe.throw(_("Item {0} is not in this rework QC.").format(item_code))
+	src = rm.get("source_warehouse") or wo.source_warehouse
+
+	lines, total = [], 0.0
+	for b in batches:
+		std_pkg = flt(b.get("std_pkg"))
+		units = flt(b.get("units"))
+		qty = flt(std_pkg * units, 3)
+		batch_no = (b.get("batch_no") or "").strip()
+		if not batch_no or qty <= 0:
+			continue
+		lines.append({"batch_no": batch_no, "std_pkg": std_pkg, "units": units, "qty": qty})
+		total += qty
+	if not lines or total <= 0:
+		frappe.throw(_("Enter Std Pkg Qty and No of Units for the chosen batch(es)."))
+
+	avail = {b["batch_no"]: flt(b["available_qty"]) for b in _available_batches(item_code, src)}
+	qty_by_batch = {}
+	for ln in lines:
+		qty_by_batch[ln["batch_no"]] = qty_by_batch.get(ln["batch_no"], 0.0) + ln["qty"]
+	for batch_no, want in qty_by_batch.items():
+		have = flt(avail.get(batch_no, 0))
+		if flt(want, 3) > flt(have, 3) + 1e-6:
+			frappe.throw(
+				_("Only {0} available in batch {1} (tried to transfer {2}).").format(
+					flt(have, 3), batch_no, flt(want, 3)
+				)
+			)
+
+	se_name = _make_rework_transfer(wo, item_code, src, lines, qc)
+
+	data = _rework_data(qc)
+	d = data.setdefault(item_code, {})
+	d["addition_log"] = _compose_log(d.get("addition_log"), "Material Transfer")
+	_save_rework_data(qc, data)
+	frappe.db.commit()
+
+	return {
+		"stock_entry": se_name,
+		"transfers": _rework_item_transfers(wo.name, qc, item_code),
+		"addition_log": d["addition_log"],
+		"duration_mins": flt(d.get("duration_mins"), 3),
+	}
+
+
+@frappe.whitelist()
+def rework_log_event(work_order, qc, item_code, action):
+	"""Start/Stop/Finish timer for a rework item, stored per rework QC (per item)."""
+	from frappe.utils import get_datetime, now_datetime
+
+	wo = frappe.get_doc("Work Order", work_order)
+	wo.check_permission("read")
+	_validate_rework_qc(qc, wo.name)
+
+	now = now_datetime()
+	data = _rework_data(qc)
+	d = data.setdefault(item_code, {})
+	d["addition_log"] = _compose_log(d.get("addition_log"), action, now)
+	duration = flt(d.get("duration_mins"))
+	running = None
+
+	def _close(total):
+		start = d.get("addition_start")
+		if start:
+			total = flt(total + (now - get_datetime(start)).total_seconds() / 60.0, 3)
+			d["addition_start"] = None
+		return total
+
+	if action == "Start":
+		d["addition_start"] = str(now)
+		running = True
+	elif action in ("Stop", "Finish"):
+		duration = _close(duration)
+		running = False
+
+	d["duration_mins"] = duration
+	_save_rework_data(qc, data)
+	frappe.db.commit()
+	return {
+		"addition_log": d["addition_log"],
+		"duration_mins": duration,
+		"running": running,
+		"finished": "Finish —" in (d["addition_log"] or ""),
+	}

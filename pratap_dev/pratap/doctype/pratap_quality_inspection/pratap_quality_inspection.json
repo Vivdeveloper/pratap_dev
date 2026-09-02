@@ -51,7 +51,8 @@
   "readings_section",
   "readings",
   "section_break_kcls",
-  "raw_materials"
+  "raw_materials",
+  "custom_rework_transfer_data"
  ],
  "fields": [
   {
@@ -352,6 +353,14 @@
    "options": "User",
    "label": "Sample Issued By",
    "reqd": 0
+  },
+  {
+   "fieldname": "custom_rework_transfer_data",
+   "fieldtype": "Long Text",
+   "label": "Rework Transfer Data",
+   "hidden": 1,
+   "no_copy": 1,
+   "read_only": 1
   }
  ],
  "grid_page_length": 50,

@@ -48,25 +48,48 @@ function render_wo_transfer_dialog(frm, ctx) {
 	});
 	const $body = dialog.fields_dict.body.$wrapper;
 	const hasJC = (ctx.job_cards || []).length > 0;
+	const hasRW = (ctx.rework_qcs || []).length > 0;
 	const itemsHtml = ctx.items.map((it) => item_block_html(it)).join("");
-	if (hasJC) {
-		// Two tabs: the batch Material Transfer (existing) and the Job Cards / operations.
-		$body.html(`
-			<div class="wo-tabs" style="display:flex;gap:6px;border-bottom:1px solid var(--border-color,#d1d8dd);margin-bottom:12px;">
-				<button class="btn btn-xs btn-primary wo-tab-btn active" data-tab="transfer">${__("Material Transfer")}</button>
-				<button class="btn btn-xs btn-default wo-tab-btn" data-tab="jobcards">${__("Job Cards")} (${ctx.job_cards.length})</button>
-			</div>
-			<div class="wo-tab-pane" data-pane="transfer">${itemsHtml}</div>
-			<div class="wo-tab-pane" data-pane="jobcards" style="display:none;">${job_cards_html(ctx.job_cards)}</div>
-		`);
+	if (hasJC || hasRW) {
+		// Tabs: Material Transfer (existing) + Job Cards + Rework, whichever exist.
+		const tabs = [
+			`<button class="btn btn-xs btn-primary wo-tab-btn active" data-tab="transfer">${__("Material Transfer")}</button>`,
+		];
+		const panes = [`<div class="wo-tab-pane" data-pane="transfer">${itemsHtml}</div>`];
+		if (hasJC) {
+			tabs.push(
+				`<button class="btn btn-xs btn-default wo-tab-btn" data-tab="jobcards">${__("Job Cards")} (${ctx.job_cards.length})</button>`
+			);
+			panes.push(
+				`<div class="wo-tab-pane" data-pane="jobcards" style="display:none;">${job_cards_html(ctx.job_cards)}</div>`
+			);
+		}
+		if (hasRW) {
+			tabs.push(
+				`<button class="btn btn-xs btn-default wo-tab-btn" data-tab="rework">${__("Rework")} (${ctx.rework_qcs.length})</button>`
+			);
+			panes.push(
+				`<div class="wo-tab-pane" data-pane="rework" style="display:none;">${rework_pane_html(ctx.rework_qcs)}</div>`
+			);
+		}
+		$body.html(
+			`<div class="wo-tabs" style="display:flex;gap:6px;border-bottom:1px solid var(--border-color,#d1d8dd);margin-bottom:12px;">${tabs.join(
+				""
+			)}</div>${panes.join("")}`
+		);
 	} else {
 		$body.html(itemsHtml);
 	}
 	dialog._dirty = false;
 	ctx.items.forEach((it) => wire_item_block(frm, dialog, $body, it));
-	if (hasJC) {
+	if (hasJC || hasRW) {
 		wire_tabs($body);
+	}
+	if (hasJC) {
 		wire_job_cards(frm, dialog, ctx);
+	}
+	if (hasRW) {
+		wire_rework(frm, dialog, ctx);
 	}
 
 	// "Set Plan" — saves the blueprint once the draft covers every item fully.
@@ -76,6 +99,14 @@ function render_wo_transfer_dialog(frm, ctx) {
 		() => do_set_plan(frm, dialog, ctx),
 		"btn-primary wo-set-plan-btn"
 	);
+	// "In Process QC" — open a new partial (Basic Testing) Pratap QC for this WO, so a
+	// sample can be sent for testing mid-process. Basic Testing creates/submits nothing.
+	dialog.add_custom_action(
+		__("In Process QC"),
+		() => create_basic_testing_qc(frm, dialog),
+		"wo-inprocess-qc-btn"
+	);
+	dialog.$wrapper.find(".wo-inprocess-qc-btn").css("margin-left", "10px");
 	// Recompute the button's enabled state as the draft changes.
 	$body.on("input change", ".wo-b-batch, .wo-b-pkg, .wo-b-units, .wo-b-qty", () =>
 		update_set_plan_state(dialog, ctx)
@@ -467,6 +498,250 @@ function add_start_batch_control(frm, dialog, ctx) {
 	});
 }
 
+// ---- Rework tab ------------------------------------------------------------
+// One block per rework Pratap QC; each shows the WO's items with the same batch
+// Material Transfer UI + Start/Stop/Finish timer as the main tab, but operator-entered
+// qty, transfers tagged to the QC, and timer stored per rework QC.
+
+function rework_batch_opts(batches) {
+	return (batches || [])
+		.map(
+			(b) =>
+				`<option value="${frappe.utils.escape_html(b.batch_no)}" data-pkg="${b.std_pkg}" data-avail="${b.available_qty}">${frappe.utils.escape_html(
+					b.batch_no
+				)} · ${__("std")} ${format_number(b.std_pkg)} (${__("avail")}: ${format_number(
+					b.available_qty
+				)})</option>`
+		)
+		.join("");
+}
+
+function rework_item_html(qc, it) {
+	const req = it.required_qty
+		? ` · ${__("Req")}: <b>${format_number(it.required_qty)}</b> ${frappe.utils.escape_html(it.uom || "")}`
+		: "";
+	return `
+	<div class="wo-rw-item" data-qc="${frappe.utils.escape_html(qc)}" data-item="${frappe.utils.escape_html(
+		it.item_code
+	)}" style="border:1px solid var(--border-color,#d1d8dd);border-radius:8px;padding:10px 12px;margin-bottom:10px;background:#fff;">
+		<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;">
+			<b>${frappe.utils.escape_html(it.item_code)}</b>
+			<span class="text-muted">${frappe.utils.escape_html(it.item_name || "")}${req}</span>
+		</div>
+		<div class="wo-rw-taken">${transfers_table_html(it.transfers)}</div>
+		<table class="table table-bordered" style="margin:8px 0 6px;font-size:13px;">
+			<thead><tr>
+				<th style="width:34%">${__("Batch")}</th>
+				<th style="width:20%">${__("Std Pkg Qty")}</th>
+				<th style="width:18%">${__("No of Units")}</th>
+				<th style="width:18%">${__("Qty")}</th>
+				<th style="width:10%"></th>
+			</tr></thead>
+			<tbody class="wo-rw-rows"></tbody>
+		</table>
+		<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;">
+			<button class="btn btn-xs btn-default wo-rw-addbatch">+ ${__("Add Batch")}</button>
+			<button class="btn btn-xs btn-primary wo-rw-transfer">⇄ ${__("Material Transfer")}</button>
+			<div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
+				<button class="btn btn-xs btn-success wo-rw-start">▶ ${__("Start")}</button>
+				<button class="btn btn-xs btn-danger wo-rw-stop">■ ${__("Stop")}</button>
+				<button class="btn btn-xs btn-primary wo-rw-finish">✓ ${__("Finish")}</button>
+				<span class="text-muted small">${__("Total time")}: <b class="wo-rw-total">${fmt_dur(
+					it.duration_mins || 0
+				)}</b></span>
+			</div>
+		</div>
+		<div class="wo-rw-batchopts" style="display:none;">${rework_batch_opts(it.batches)}</div>
+		<div class="wo-rw-log text-muted small" style="margin-top:8px;white-space:pre-line;">${
+			it.addition_log ? "<b>" + __("Log") + ":</b>\n" + frappe.utils.escape_html(it.addition_log) : ""
+		}</div>
+	</div>`;
+}
+
+function rework_qc_block_html(qc) {
+	const notes = qc.rework_notes
+		? `<div class="wo-rw-notes" style="text-align:center;font-weight:600;margin:6px 0 12px;padding:8px 10px;border:1px dashed var(--border-color,#d1d8dd);border-radius:6px;background:#fff;white-space:pre-line;">${frappe.utils.escape_html(
+				qc.rework_notes
+		  )}</div>`
+		: "";
+	const items = (qc.items || []).length
+		? qc.items.map((it) => rework_item_html(qc.name, it)).join("")
+		: `<div class="text-muted">${__("No items added to this rework QC's Raw Materials.")}</div>`;
+	return `
+	<div class="wo-rw-qc" data-qc="${frappe.utils.escape_html(qc.name)}" style="border:1px solid var(--border-color,#d1d8dd);border-radius:8px;padding:10px 12px;margin-bottom:14px;background:var(--gray-50,#fafafa);">
+		<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:8px;">
+			<b>${__("Rework QC")}</b>
+			<span class="indicator-pill orange">${frappe.utils.escape_html(qc.status)}</span>
+			<span class="text-muted">${frappe.utils.escape_html(qc.inspection_type || "")}</span>
+			${qc.inspection_date ? `<span class="text-muted small">${frappe.datetime.str_to_user(qc.inspection_date)}</span>` : ""}
+			<a href="/app/pratap-quality-inspection/${encodeURIComponent(qc.name)}" target="_blank" rel="noopener" style="margin-left:auto;">${frappe.utils.escape_html(
+				qc.name
+			)} ↗</a>
+		</div>
+		${notes}
+		${items}
+	</div>`;
+}
+
+function rework_pane_html(qcs) {
+	if (!qcs || !qcs.length) {
+		return `<div class="text-muted">${__("No rework QCs for this Work Order.")}</div>`;
+	}
+	return qcs.map(rework_qc_block_html).join("");
+}
+
+function rework_recalc($tr, from_field) {
+	const pkg = flt($tr.find(".wo-rwb-pkg").val());
+	if (from_field === "qty") {
+		$tr.find(".wo-rwb-units").val(pkg ? flt(flt($tr.find(".wo-rwb-qty").val()) / pkg, 3) : 0);
+	} else {
+		$tr.find(".wo-rwb-qty").val(flt(pkg * flt($tr.find(".wo-rwb-units").val()), 3));
+	}
+}
+
+function rework_collect($item) {
+	const rows = [];
+	$item.find(".wo-rw-rows tr").each(function () {
+		const batch_no = $(this).find(".wo-rwb-batch").val();
+		const std_pkg = flt($(this).find(".wo-rwb-pkg").val());
+		const units = flt($(this).find(".wo-rwb-units").val());
+		if (batch_no || std_pkg || units) {
+			rows.push({ batch_no, std_pkg, units, qty: flt(std_pkg * units, 3) });
+		}
+	});
+	return rows;
+}
+
+function rework_add_row($item) {
+	const opts = $item.find(".wo-rw-batchopts").html();
+	$item.find(".wo-rw-rows").append(
+		`<tr>
+			<td><select class="form-control input-xs wo-rwb-batch"><option value="">${__("Select…")}</option>${opts}</select></td>
+			<td><input type="number" class="form-control input-xs wo-rwb-pkg" min="0" step="any"></td>
+			<td><input type="number" class="form-control input-xs wo-rwb-units text-right" min="0" step="any"></td>
+			<td><input type="number" class="form-control input-xs wo-rwb-qty text-right" min="0" step="any"></td>
+			<td><button class="btn btn-xs btn-default wo-rwb-del">✕</button></td>
+		</tr>`
+	);
+}
+
+function apply_rework_timer($item, running, finished) {
+	$item.find(".wo-rw-start").prop("disabled", !!running || !!finished);
+	$item.find(".wo-rw-stop").prop("disabled", !running || !!finished);
+	$item.find(".wo-rw-finish").prop("disabled", !!finished);
+}
+
+function rework_log($item, log) {
+	$item
+		.find(".wo-rw-log")
+		.html(log ? "<b>" + __("Log") + ":</b>\n" + frappe.utils.escape_html(log) : "");
+}
+
+function wire_rework(frm, dialog, ctx) {
+	const $body = dialog.fields_dict.body.$wrapper;
+	const info = (el) => {
+		const $i = $(el).closest(".wo-rw-item");
+		return { $item: $i, qc: $i.attr("data-qc"), item: $i.attr("data-item") };
+	};
+
+	// Seed one empty batch row per rework item + initial timer state.
+	$body.find(".wo-rw-item").each(function () {
+		rework_add_row($(this));
+	});
+	(ctx.rework_qcs || []).forEach((qc) => {
+		(qc.items || []).forEach((it) => {
+			const $i = $body.find(`.wo-rw-item[data-qc="${qc.name}"][data-item="${it.item_code}"]`);
+			apply_rework_timer($i, it.timer_running, it.finished);
+		});
+	});
+
+	$body.on("click", ".wo-rw-addbatch", function (e) {
+		e.preventDefault();
+		rework_add_row($(this).closest(".wo-rw-item"));
+	});
+	$body.on("click", ".wo-rwb-del", function (e) {
+		e.preventDefault();
+		$(this).closest("tr").remove();
+	});
+	$body.on("change", ".wo-rwb-batch", function () {
+		const pkg = $(this).find("option:selected").data("pkg");
+		const $tr = $(this).closest("tr");
+		$tr.find(".wo-rwb-pkg").val($(this).val() && pkg ? pkg : "");
+		rework_recalc($tr, "units");
+	});
+	$body.on("input", ".wo-rwb-pkg, .wo-rwb-units", function () {
+		rework_recalc($(this).closest("tr"), "units");
+	});
+	$body.on("input", ".wo-rwb-qty", function () {
+		rework_recalc($(this).closest("tr"), "qty");
+	});
+
+	$body.on("click", ".wo-rw-transfer", function (e) {
+		e.preventDefault();
+		const { $item, qc, item } = info(this);
+		const batches = rework_collect($item).filter((r) => r.batch_no && r.std_pkg > 0 && r.units > 0);
+		if (!batches.length) {
+			frappe.msgprint(__("Pick at least one batch with Std Pkg Qty and No of Units."));
+			return;
+		}
+		frappe.confirm(__("Transfer the rework material for this item?"), () => {
+			frappe.call({
+				method: "pratap_dev.work_order_transfer.rework_transfer_item",
+				args: { work_order: frm.doc.name, qc, item_code: item, batches: JSON.stringify(batches) },
+				freeze: true,
+				freeze_message: __("Creating Stock Entry…"),
+				callback: (r) => {
+					const res = r.message;
+					if (!res) return;
+					frappe.show_alert(
+						{ message: __("Transferred. Stock Entry {0} submitted.", [res.stock_entry]), indicator: "green" },
+						5
+					);
+					$item.find(".wo-rw-taken").html(transfers_table_html(res.transfers));
+					$item.find(".wo-rw-rows").empty();
+					rework_add_row($item);
+					rework_log($item, res.addition_log);
+					if (res.duration_mins != null) {
+						$item.find(".wo-rw-total").text(fmt_dur(res.duration_mins));
+					}
+				},
+			});
+		});
+	});
+
+	const timer = (el, action) => {
+		const { $item, qc, item } = info(el);
+		frappe.call({
+			method: "pratap_dev.work_order_transfer.rework_log_event",
+			args: { work_order: frm.doc.name, qc, item_code: item, action },
+			callback: (r) => {
+				if (!r.message) return;
+				rework_log($item, r.message.addition_log);
+				$item.find(".wo-rw-total").text(fmt_dur(r.message.duration_mins || 0));
+				apply_rework_timer($item, r.message.running, r.message.finished);
+			},
+		});
+	};
+	$body.on("click", ".wo-rw-start", function (e) {
+		e.preventDefault();
+		if ($(this).prop("disabled")) return;
+		timer(this, "Start");
+	});
+	$body.on("click", ".wo-rw-stop", function (e) {
+		e.preventDefault();
+		if ($(this).prop("disabled")) return;
+		timer(this, "Stop");
+	});
+	$body.on("click", ".wo-rw-finish", function (e) {
+		e.preventDefault();
+		if ($(this).prop("disabled")) return;
+		frappe.confirm(
+			__("Finish time logging for this rework item? Start / Stop will be disabled."),
+			() => timer(this, "Finish")
+		);
+	});
+}
+
 // ---- Job Cards tab ---------------------------------------------------------
 
 function wire_tabs($body) {
@@ -736,6 +1011,24 @@ function maybe_auto_set_plan(frm, dialog, ctx) {
 				);
 			}
 		},
+	});
+}
+
+// Open a new Basic Testing (partial / in-process) Pratap QC for this Work Order, with
+// the reference + inspection type pre-filled — same prefill as the WO's "Create Pratap QC"
+// button but inspection_type = "Basic Testing".
+function create_basic_testing_qc(frm, dialog) {
+	dialog._allow_close = true; // leaving for the QC page — don't nag about unsaved batches
+	dialog.hide();
+	frappe.new_doc("Pratap Quality Inspection", {
+		inspection_type: "Basic Testing",
+		reference_type: "Work Order",
+		reference_doctype: "Work Order",
+		reference_name: frm.doc.name,
+		company: frm.doc.company,
+		production_item: frm.doc.production_item,
+		item_name: frm.doc.item_name,
+		reference_qty: frm.doc.qty,
 	});
 }
 
