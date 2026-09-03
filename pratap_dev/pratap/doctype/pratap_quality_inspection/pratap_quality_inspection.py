@@ -140,8 +140,25 @@ class PratapQualityInspection(Document):
 		self._set_finished_qty()
 		self._set_readings_from_template()
 		self._inspect_and_set_status()
+		self._validate_rework_raw_materials()
 		self._sync_accepted_qc_to_grn()
 		self._sync_density_to_grn_item()
+
+	def _validate_rework_raw_materials(self):
+		"""When status is Rework and "Raw Material Required" is checked (default), at least
+		one raw material row must be added. Uncheck it to submit without raw materials."""
+		if (self.status or "").strip() != "Rework":
+			return
+		if not self.get("custom_raw_material_required"):
+			return
+		if not (self.get("raw_materials") or []):
+			frappe.throw(
+				_(
+					"Add at least one row in <b>Raw Materials</b> for a Rework QC, or uncheck "
+					"<b>Raw Material Required</b> to proceed without it."
+				),
+				title=_("Raw Materials Required"),
+			)
 
 	def _sync_accepted_qc_to_grn(self):
 		if not self.name:

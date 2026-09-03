@@ -51,6 +51,7 @@
   "readings_section",
   "readings",
   "section_break_kcls",
+  "custom_raw_material_required",
   "raw_materials",
   "custom_rework_transfer_data"
  ],
@@ -297,6 +298,13 @@
   {
    "fieldname": "section_break_kcls",
    "fieldtype": "Section Break"
+  },
+  {
+   "default": "1",
+   "depends_on": "eval:doc.status == \"Rework\"",
+   "fieldname": "custom_raw_material_required",
+   "fieldtype": "Check",
+   "label": "Raw Material Required"
   },
   {
    "depends_on": "eval:doc.status == \"Rework\"",
