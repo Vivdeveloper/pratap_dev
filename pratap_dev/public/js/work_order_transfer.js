@@ -122,6 +122,8 @@ function render_wo_transfer_dialog(frm, ctx) {
 	maybe_auto_set_plan(frm, dialog, ctx);
 	// "Start Batch" control in the dialog header (stamps the batch start time once).
 	add_start_batch_control(frm, dialog, ctx);
+	// Material Transfer + Start/Stop/Finish stay disabled until "Start Batch" is clicked.
+	apply_batch_gate(dialog, ctx);
 
 	// Warn before closing (backdrop click / Esc / X) if there are unsaved batch edits,
 	// so the operator doesn't lose them by mistake — nudge them to Save as Draft.
@@ -376,6 +378,10 @@ function wire_item_block(frm, dialog, $body, it) {
 	// Material Transfer -> confirm, then create + submit the Stock Entry.
 	$item.on("click", ".wo-tr-transfer", (e) => {
 		e.preventDefault();
+		if (!dialog._batch_started) {
+			frappe.msgprint(__("Click <b>Start Batch</b> (top-right) before transferring material."));
+			return;
+		}
 		frappe.confirm(__("Do you want to submit the materials?"), () =>
 			submit_item_transfer(frm, dialog, $item, it)
 		);
@@ -456,6 +462,27 @@ function fifo_prefill_rows(it) {
 	return rows;
 }
 
+// Gate the batch work behind "Start Batch": until the batch is started, Material Transfer
+// and the Start/Stop/Finish timer are disabled. After it's started they follow their
+// normal rules (timer only after an item is fully transferred).
+function apply_batch_gate(dialog, ctx) {
+	const started = !!ctx.batch_started_at;
+	dialog._batch_started = started;
+	const $body = dialog.fields_dict.body.$wrapper;
+	$body
+		.find(".wo-tr-transfer")
+		.prop("disabled", !started)
+		.attr("title", started ? "" : __("Click Start Batch first"));
+	(ctx.items || []).forEach((it) => {
+		const $item = $body.find(`.wo-tr-item[data-row="${it.row}"]`);
+		if (!started) {
+			$item.find(".wo-tr-start, .wo-tr-stop, .wo-tr-finish").prop("disabled", true);
+		} else {
+			apply_timer_buttons($item, it.timer_running, it.finished);
+		}
+	});
+}
+
 // "Start Batch" button in the dialog header (right of the title). Click stamps the batch
 // start time on the Work Order once; then the button is replaced by the stored time.
 function add_start_batch_control(frm, dialog, ctx) {
@@ -491,6 +518,7 @@ function add_start_batch_control(frm, dialog, ctx) {
 						ctx.batch_started_at = r.message.batch_started_at;
 						frappe.show_alert({ message: __("Batch started."), indicator: "green" }, 4);
 						add_start_batch_control(frm, dialog, ctx); // swap button -> time text
+						apply_batch_gate(dialog, ctx); // now enable Material Transfer + timer
 					}
 				},
 			});
