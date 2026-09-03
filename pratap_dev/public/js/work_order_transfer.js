@@ -810,7 +810,7 @@ function jc_buttons_html(jc) {
 		case "on_hold":
 			return `<button class="btn btn-xs btn-success wo-jc-resume">▶ ${__("Resume Job")}</button>`;
 		case "awaiting_submit":
-			return `<span class="text-muted small">${__("Quantity complete — submit the Job Card to finish.")}</span>`;
+			return "";
 		case "needs_material":
 			return `<span class="text-warning small">${__("Transfer this operation's material to WIP first.")}</span>`;
 		case "wo_not_started":
@@ -829,6 +829,18 @@ function job_card_block_html(jc) {
 					.map((e) => frappe.utils.escape_html(e.employee_name || e.employee))
 					.join(", ")}</div>`
 			: "";
+	// Times: planned operation time (the WO "Time" 60/30), actual time taken, start & end.
+	const tb = [];
+	if (jc.planned_mins) tb.push(`${__("Planned")}: <b>${fmt_dur(jc.planned_mins)}</b>`);
+	if (jc.actual_mins) tb.push(`${__("Took")}: <b>${fmt_dur(jc.actual_mins)}</b>`);
+	if (jc.start_time) tb.push(`${__("Start")}: ${frappe.datetime.str_to_user(jc.start_time)}`);
+	if (jc.end_time) tb.push(`${__("End")}: ${frappe.datetime.str_to_user(jc.end_time)}`);
+	const timeLine = tb.length
+		? `<div class="text-muted small" style="margin-top:4px;">${tb.join(" · ")}</div>`
+		: "";
+	const submitBtn = jc.can_submit
+		? `<button class="btn btn-xs btn-primary wo-jc-submit">✓ ${__("Submit Job Card")}</button>`
+		: "";
 	return `
 	<div class="wo-jc" data-jc="${frappe.utils.escape_html(jc.name)}"
 		style="border:1px solid var(--border-color,#d1d8dd);border-radius:8px;padding:10px 12px;margin-bottom:12px;">
@@ -844,9 +856,10 @@ function job_card_block_html(jc) {
 			)} ↗</a>
 		</div>
 		${emp}
+		${timeLine}
 		<div class="wo-jc-controls" style="margin-top:8px;display:flex;gap:8px;align-items:center;">${jc_buttons_html(
 			jc
-		)}</div>
+		)}${submitBtn}</div>
 		<div class="wo-jc-error text-danger small" style="margin-top:6px;"></div>
 	</div>`;
 }
@@ -964,6 +977,13 @@ function wire_job_cards(frm, dialog, ctx) {
 	$body.on("click", ".wo-jc-finish", function (e) {
 		e.preventDefault();
 		jc_finish(frm, dialog, ctx, nameOf(this));
+	});
+	$body.on("click", ".wo-jc-submit", function (e) {
+		e.preventDefault();
+		const name = nameOf(this);
+		frappe.confirm(__("Submit this Job Card? It can't be edited after submission."), () =>
+			jc_run(frm, dialog, ctx, name, { action: "submit" })
+		);
 	});
 }
 

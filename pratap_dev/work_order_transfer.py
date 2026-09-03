@@ -145,6 +145,13 @@ def _wo_job_cards(wo):
 		else:
 			ui = "not_started"
 
+		# Planned operation time (the WO Operations "Time" column, e.g. 60 / 30 mins).
+		planned_mins = 0.0
+		if jc.get("operation_id"):
+			planned_mins = flt(frappe.db.get_value("Work Order Operation", jc.operation_id, "time_in_mins"))
+		if not planned_mins:
+			planned_mins = flt(jc.get("time_required"))
+
 		out.append(
 			{
 				"name": jc.name,
@@ -159,6 +166,13 @@ def _wo_job_cards(wo):
 				"employees": employees,
 				"has_employees": bool(employees),
 				"ui_state": ui,
+				# times: planned (op time), actual (from time logs), and start/end stamps.
+				"planned_mins": flt(planned_mins, 2),
+				"actual_mins": flt(jc.get("total_time_in_mins"), 2),
+				"start_time": str(jc.get("actual_start_date") or ""),
+				"end_time": str(jc.get("actual_end_date") or ""),
+				# Submit becomes available once some qty is completed and it's still a draft.
+				"can_submit": jc.docstatus == 0 and done_qty > 0,
 			}
 		)
 	return out
@@ -186,6 +200,18 @@ def run_job_card_action(job_card, action, employees=None, completed_qty=None):
 	wo_name = jc.work_order
 	if isinstance(employees, str):
 		employees = json.loads(employees or "null")
+
+	# Submit the Job Card (docstatus 0 -> 1); ERPNext validates completeness on submit.
+	if action == "submit":
+		try:
+			jc.submit()
+		except Exception as e:
+			frappe.db.rollback()
+			msg = strip_html_tags(str(e)) or _("Could not submit the Job Card.")
+			out = _wo_job_cards(frappe.get_doc("Work Order", wo_name)) if wo_name else []
+			return {"ok": False, "error": msg, "job_cards": out}
+		out = _wo_job_cards(frappe.get_doc("Work Order", wo_name)) if wo_name else []
+		return {"ok": True, "job_cards": out}
 
 	now = str(now_datetime())
 	args = {"job_card_id": job_card}
