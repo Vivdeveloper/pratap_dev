@@ -633,6 +633,10 @@ def _make_single_item_transfer(wo, item_code, src, lines, rework_qc=None):
 	# (which assumes a full-batch transfer).
 	if rework_qc:
 		se.custom_rework_qc = rework_qc
+	# Per-item partial transfer: don't claim a full FG batch. Leaving fg_completed_qty at
+	# the WO qty makes every transfer add wo.qty to material_transferred_for_manufacturing
+	# (6 transfers -> 6x). Set 0 so the WO recomputes it from actual item transfers.
+	se.fg_completed_qty = 0
 	se.flags.pratap_partial_item_transfer = True
 	se.flags.ignore_permissions = True
 	se.insert(ignore_permissions=True)
@@ -836,6 +840,7 @@ def _make_rework_transfer(wo, item_code, src, lines, qc):
 		child.set_basic_rate_manually = 0
 
 	se.custom_rework_qc = qc
+	se.fg_completed_qty = 0  # per-item partial transfer; don't inflate material_transferred
 	se.flags.pratap_partial_item_transfer = True
 	se.flags.ignore_permissions = True
 	se.insert(ignore_permissions=True)
