@@ -282,6 +282,7 @@ doctype_js = {
         "public/js/work_order_alternate_repack.js",
         "public/js/work_order_batch_sheet.js",
         "public/js/work_order_transfer.js",
+        "public/js/work_order_time_log.js",
     ],
     "Purchase Order": "public/js/purchase_order_grn.js",
     "Supplier Quotation": "public/js/supplier_quotation.js",

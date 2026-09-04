@@ -205,6 +205,7 @@ def run_job_card_action(job_card, action, employees=None, completed_qty=None):
 	if action == "submit":
 		try:
 			jc.submit()
+			frappe.db.set_value("Job Card", jc.name, "custom_submitted_at", now_datetime(), update_modified=False)
 		except Exception as e:
 			frappe.db.rollback()
 			msg = strip_html_tags(str(e)) or _("Could not submit the Job Card.")
@@ -610,6 +611,11 @@ def transfer_item_for_manufacture(work_order, row_name, batches):
 	frappe.db.set_value(
 		"Work Order Item", row.name, "custom_transfer_draft", "", update_modified=False
 	)
+	# Track the last material-transfer time on the Work Order (shown below Batch Started At).
+	from frappe.utils import now_datetime
+	frappe.db.set_value(
+		"Work Order", wo.name, "custom_last_material_transfer_at", now_datetime(), update_modified=False
+	)
 
 	# Return updated figures.
 	new_transferred = flt(frappe.db.get_value("Work Order Item", row.name, "transferred_qty"))
@@ -992,4 +998,170 @@ def rework_log_event(work_order, qc, item_code, action):
 		"duration_mins": duration,
 		"running": running,
 		"finished": "Finish —" in (d["addition_log"] or ""),
+	}
+
+
+# --- Time Log tab (read-only report on the Work Order form) -------------------
+
+def _parse_log_events(log):
+	"""Split an addition_log string ('Action — timestamp' lines) into structured events."""
+	events = []
+	for line in (log or "").split("\n"):
+		line = line.strip()
+		if not line or " — " not in line:
+			continue
+		action, ts = line.split(" — ", 1)
+		events.append({"action": action.strip(), "time": ts.strip()})
+	return events
+
+
+def _transfer_bounds(work_order, rework):
+	"""First & last material-transfer time (SE creation) for a WO — rework-tagged or not."""
+	cond = "!= ''" if rework else "= ''"
+	rows = frappe.db.sql(
+		f"""SELECT MIN(creation) AS first_at, MAX(creation) AS last_at
+		    FROM `tabStock Entry`
+		    WHERE work_order = %(wo)s AND purpose = 'Material Transfer for Manufacture'
+		      AND docstatus = 1 AND IFNULL(custom_rework_qc, '') {cond}""",
+		{"wo": work_order}, as_dict=True,
+	)
+	r = rows[0] if rows else {}
+	return str(r.get("first_at") or "") or None, str(r.get("last_at") or "") or None
+
+
+@frappe.whitelist()
+def get_wo_time_log(work_order):
+	"""All time-stamps and per-item/operation logs for the Work Order 'Time Log' tab:
+	batch (start / first & last transfer + per-item log), job cards (first started / last
+	submitted + per-card time logs), and rework (first & last transfer + per-item log)."""
+	wo = frappe.get_doc("Work Order", work_order)
+	wo.check_permission("read")
+
+	# --- Batch section ---
+	b_first, b_last = _transfer_bounds(wo.name, rework=False)
+	batch_items = []
+	# The batch is "ended" only once every required material has been fully
+	# transferred; at that point it ends at the last material transfer time.
+	batch_complete = True
+	any_required = False
+	for row in wo.required_items:
+		if not row.item_code:
+			continue
+		req = flt(row.required_qty)
+		if req > 0:
+			any_required = True
+			transferred = flt(row.transferred_qty) - _rework_transferred_qty(wo.name, row.item_code)
+			if transferred + 1e-6 < req:
+				batch_complete = False
+		log = row.get("custom_addition_log") or ""
+		if not (log or _item_transfers(wo.name, row.item_code)):
+			pass  # still list it so the dropdown is complete
+		batch_items.append(
+			{
+				"row": row.name,
+				"item_code": row.item_code,
+				"item_name": row.item_name,
+				"uom": row.stock_uom,
+				"duration_mins": flt(row.get("custom_addition_duration_mins"), 2),
+				"events": _parse_log_events(log),
+				"transfers": _item_transfers(wo.name, row.item_code),
+			}
+		)
+	batch_ended = b_last if (any_required and batch_complete) else None
+
+	# --- Job Cards section ---
+	jc_names = frappe.get_all(
+		"Job Card", filters={"work_order": wo.name, "docstatus": ["<", 2]},
+		pluck="name", order_by="sequence_id asc, creation asc",
+	)
+	job_cards = []
+	first_started = None
+	last_submitted = None
+	any_unsubmitted = False
+	for name in jc_names:
+		jc = frappe.get_doc("Job Card", name)
+		started = str(jc.get("actual_start_date") or "") or None
+		ended = str(jc.get("actual_end_date") or "") or None
+		submitted = None
+		if jc.docstatus == 1:
+			submitted = str(jc.get("custom_submitted_at") or jc.get("modified") or "") or None
+		else:
+			any_unsubmitted = True
+		if started and (first_started is None or started < first_started):
+			first_started = started
+		if submitted and (last_submitted is None or submitted > last_submitted):
+			last_submitted = submitted
+		logs = []
+		for tl in (jc.get("time_logs") or []):
+			logs.append(
+				{
+					"from_time": str(tl.from_time or ""),
+					"to_time": str(tl.to_time or ""),
+					"mins": flt(tl.time_in_mins, 2),
+					"employee": tl.employee,
+					"employee_name": frappe.db.get_value("Employee", tl.employee, "employee_name") if tl.employee else "",
+					"completed_qty": flt(tl.completed_qty, 3),
+				}
+			)
+		job_cards.append(
+			{
+				"name": jc.name,
+				"operation": jc.operation,
+				"workstation": jc.workstation,
+				"status": jc.status,
+				"started": started,
+				"ended": ended,
+				"submitted": submitted,
+				"total_time_in_mins": flt(jc.get("total_time_in_mins"), 2),
+				"time_logs": logs,
+			}
+		)
+
+	# "Last Job Card Submitted" is meaningful only once every job card is submitted.
+	if any_unsubmitted or not jc_names:
+		last_submitted = None
+
+	# --- Rework section (per rework QC) ---
+	rw_first, rw_last = _transfer_bounds(wo.name, rework=True)
+	rework = []
+	for qc in _wo_rework_qcs(wo):
+		items = []
+		for it in qc["items"]:
+			items.append(
+				{
+					"item_code": it["item_code"],
+					"item_name": it["item_name"],
+					"uom": it["uom"],
+					"duration_mins": it["duration_mins"],
+					"events": _parse_log_events(it["addition_log"]),
+					"transfers": it["transfers"],
+				}
+			)
+		rework.append(
+			{
+				"name": qc["name"],
+				"status": qc["status"],
+				"rework_notes": qc.get("rework_notes") or "",
+				"items": items,
+			}
+		)
+
+	return {
+		"batch": {
+			"start_batch": str(wo.get("custom_batch_started_at") or "") or None,
+			"batch_ended": batch_ended,
+			"first_transfer": b_first,
+			"last_transfer": b_last,
+			"items": batch_items,
+		},
+		"job_cards": {
+			"first_started": first_started,
+			"last_submitted": last_submitted,
+			"list": job_cards,
+		},
+		"rework": {
+			"first_transfer": rw_first,
+			"last_transfer": rw_last,
+			"qcs": rework,
+		},
 	}
