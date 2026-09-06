@@ -48,14 +48,17 @@ function render_wo_transfer_dialog(frm, ctx) {
 	});
 	const $body = dialog.fields_dict.body.$wrapper;
 	const hasJC = (ctx.job_cards || []).length > 0;
-	const hasRW = (ctx.rework_qcs || []).length > 0;
+	const rwCount = (ctx.rework_qcs || []).length + (ctx.basic_testing_qcs || []).length;
+	const hasRW = rwCount > 0;
 	const itemsHtml = ctx.items.map((it) => item_block_html(it)).join("");
+	// Banner shown at the top of the Material Transfer tab when the QC gate is closed.
+	const bannerHtml = `<div class="wo-qc-banner" style="display:none;"></div>`;
 	if (hasJC || hasRW) {
-		// Tabs: Material Transfer (existing) + Job Cards + Rework, whichever exist.
+		// Tabs: Material Transfer (existing) + Job Cards + QC (rework + accepted basic testing).
 		const tabs = [
 			`<button class="btn btn-xs btn-primary wo-tab-btn active" data-tab="transfer">${__("Material Transfer")}</button>`,
 		];
-		const panes = [`<div class="wo-tab-pane" data-pane="transfer">${itemsHtml}</div>`];
+		const panes = [`<div class="wo-tab-pane" data-pane="transfer">${bannerHtml}${itemsHtml}</div>`];
 		if (hasJC) {
 			tabs.push(
 				`<button class="btn btn-xs btn-default wo-tab-btn" data-tab="jobcards">${__("Job Cards")} (${ctx.job_cards.length})</button>`
@@ -66,10 +69,10 @@ function render_wo_transfer_dialog(frm, ctx) {
 		}
 		if (hasRW) {
 			tabs.push(
-				`<button class="btn btn-xs btn-default wo-tab-btn" data-tab="rework">${__("Rework")} (${ctx.rework_qcs.length})</button>`
+				`<button class="btn btn-xs btn-default wo-tab-btn" data-tab="rework">${__("QC")} (${rwCount})</button>`
 			);
 			panes.push(
-				`<div class="wo-tab-pane" data-pane="rework" style="display:none;">${rework_pane_html(ctx.rework_qcs)}</div>`
+				`<div class="wo-tab-pane" data-pane="rework" style="display:none;">${qc_pane_html(ctx)}</div>`
 			);
 		}
 		$body.html(
@@ -78,7 +81,7 @@ function render_wo_transfer_dialog(frm, ctx) {
 			)}</div>${panes.join("")}`
 		);
 	} else {
-		$body.html(itemsHtml);
+		$body.html(bannerHtml + itemsHtml);
 	}
 	dialog._dirty = false;
 	ctx.items.forEach((it) => wire_item_block(frm, dialog, ctx, $body, it));
@@ -388,6 +391,12 @@ function wire_item_block(frm, dialog, ctx, $body, it) {
 			frappe.msgprint(__("Click <b>Start Batch</b> (top-right) before transferring material."));
 			return;
 		}
+		if (dialog._qc_blocked) {
+			frappe.msgprint(
+				__("Material transfer is on hold — the latest In Process QC is not Accepted. Do In Process QC again and get an Accepted Basic Testing QC to resume.")
+			);
+			return;
+		}
 		if (dialog._blocker_row && dialog._blocker_row !== it.row) {
 			const b = (ctx.items || []).find((x) => x.row === dialog._blocker_row);
 			frappe.msgprint(
@@ -492,23 +501,30 @@ function open_item(ctx) {
 function apply_batch_gate(dialog, ctx) {
 	const started = !!ctx.batch_started_at;
 	dialog._batch_started = started;
+	// QC gate: if the latest Basic Testing (In Process) QC is not Accepted, Material
+	// Transfer AND the timer are on hold until a fresh Accepted QC clears it.
+	const qc = ctx.qc_gate || {};
+	const qcBlocked = !!qc.blocked;
+	dialog._qc_blocked = qcBlocked;
 	const blocker = started ? open_item(ctx) : null;
 	dialog._blocker_row = blocker ? blocker.row : null;
 	const $body = dialog.fields_dict.body.$wrapper;
 	(ctx.items || []).forEach((it) => {
 		const $item = $body.find(`.wo-tr-item[data-row="${it.row}"]`);
 		const blockedByOther = blocker && blocker.row !== it.row;
-		// Material Transfer: needs batch started, this item not blocked by another open one.
-		const canTransfer = started && !blockedByOther;
-		const title = !started
+		// Material Transfer: batch started, item not blocked by another open one, QC gate open.
+		const canTransfer = started && !blockedByOther && !qcBlocked;
+		const title = qcBlocked
+			? __("On hold — latest In Process QC is not Accepted")
+			: !started
 			? __("Click Start Batch first")
 			: blockedByOther
 			? __("Finish {0} first", [blocker.item_code])
 			: "";
 		$item.find(".wo-tr-transfer").prop("disabled", !canTransfer).attr("title", title);
-		// Timer: Finish is ALWAYS allowed on a full, not-yet-finished item (it's how you
-		// release the lock and clear an item). Start/Stop are limited to the one open item.
-		if (!started) {
+		// Timer: disabled before Start Batch or while the QC gate is closed. Otherwise
+		// Finish is always allowed; Start/Stop are limited to the one open item.
+		if (!started || qcBlocked) {
 			$item.find(".wo-tr-start, .wo-tr-stop, .wo-tr-finish").prop("disabled", true);
 		} else {
 			apply_timer_buttons($item, it.timer_running, it.finished);
@@ -518,8 +534,34 @@ function apply_batch_gate(dialog, ctx) {
 		}
 	});
 
+	// Banner on the Material Transfer tab explaining the QC hold.
+	const $banner = $body.find(".wo-qc-banner");
+	if (qcBlocked) {
+		$banner
+			.html(
+				`⚠ ${__("Material transfer is on hold — the latest In Process QC")} <b>${frappe.utils.escape_html(
+					qc.qc || ""
+				)}</b> ${__("is")} <b>${frappe.utils.escape_html(qc.status || __("Pending"))}</b>, ${__(
+					"not Accepted. Do In Process QC again and get an Accepted Basic Testing QC to resume."
+				)}`
+			)
+			.css({
+				display: "block",
+				background: "#fff3cd",
+				border: "1px solid #ffe69c",
+				color: "#664d03",
+				padding: "8px 12px",
+				"border-radius": "6px",
+				"margin-bottom": "12px",
+				"font-size": "13px",
+			});
+	} else {
+		$banner.hide().empty();
+	}
+
 	// "In Process QC" is allowed only when there is NO active transaction — i.e. no item
-	// is in progress (transferred but not yet finished). If one is open, disable it.
+	// is in progress (transferred but not yet finished). It stays enabled when QC-blocked,
+	// since re-doing In Process QC is exactly how you clear the hold.
 	const $ipqc = dialog.$wrapper.find(".wo-inprocess-qc-btn");
 	$ipqc
 		.prop("disabled", !!blocker)
@@ -659,6 +701,46 @@ function rework_pane_html(qcs) {
 		return `<div class="text-muted">${__("No rework QCs for this Work Order.")}</div>`;
 	}
 	return qcs.map(rework_qc_block_html).join("");
+}
+
+// A read-only card for an Accepted Basic Testing (In Process) QC — shown in the QC tab
+// as history; no transfer UI (transfer resumes on the Material Transfer tab).
+function basic_testing_qc_card(qc) {
+	const items = (qc.items || []).length
+		? `<div class="text-muted small" style="margin-top:4px;">${__("Items")}: ${qc.items
+				.map((i) => frappe.utils.escape_html(i.item_code))
+				.join(", ")}</div>`
+		: "";
+	const pill = (qc.status || "").trim() === "Accepted" ? "green" : "red";
+	return `
+	<div style="border:1px solid var(--border-color,#d1d8dd);border-radius:8px;padding:10px 12px;margin-bottom:10px;background:#fff;">
+		<div style="display:flex;gap:10px;align-items:center;">
+			<b>${__("In Process QC")}</b>
+			<span class="indicator-pill ${pill}">${frappe.utils.escape_html(qc.status)}</span>
+			${qc.inspection_date ? `<span class="text-muted small">${frappe.datetime.str_to_user(qc.inspection_date)}</span>` : ""}
+			<a href="/app/pratap-quality-inspection/${encodeURIComponent(qc.name)}" target="_blank" rel="noopener" style="margin-left:auto;">${frappe.utils.escape_html(
+				qc.name
+			)} ↗</a>
+		</div>
+		${items}
+	</div>`;
+}
+
+// The 3rd tab combines Accepted Basic Testing QCs (read-only) with the Rework QCs
+// (which keep their material-transfer + timer UI).
+function qc_pane_html(ctx) {
+	let html = "";
+	const bt = ctx.basic_testing_qcs || [];
+	if (bt.length) {
+		html += `<h5 style="margin:6px 0 8px;">${__("In Process QC (Basic Testing)")}</h5>`;
+		html += bt.map(basic_testing_qc_card).join("");
+	}
+	const rw = ctx.rework_qcs || [];
+	if (rw.length) {
+		html += `<h5 style="margin:14px 0 8px;">${__("Rework")}</h5>`;
+		html += rw.map(rework_qc_block_html).join("");
+	}
+	return html || `<div class="text-muted">${__("No QC records for this Work Order.")}</div>`;
 }
 
 function rework_recalc($tr, from_field) {

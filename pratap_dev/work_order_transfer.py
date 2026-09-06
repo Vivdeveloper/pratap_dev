@@ -75,7 +75,80 @@ def get_wo_transfer_context(work_order):
 		"job_cards": _wo_job_cards(wo),
 		"batch_started_at": str(wo.get("custom_batch_started_at") or "") or None,
 		"rework_qcs": _wo_rework_qcs(wo),
+		"basic_testing_qcs": _accepted_basic_testing_qcs(wo.name),
+		"qc_gate": _qc_gate(wo.name),
 	}
+
+
+def _qc_gate(work_order):
+	"""Quality checkpoint for material transfer: the MOST RECENT Basic Testing (In Process
+	QC) for this Work Order must be Accepted. If the latest Basic Testing QC is anything
+	else (Rework / Rejected / Pending …), material transfer + timer are blocked until a
+	fresh Accepted Basic Testing QC clears it. No Basic Testing QC yet -> not blocked."""
+	latest = frappe.get_all(
+		"Pratap Quality Inspection",
+		filters={
+			"reference_type": "Work Order",
+			"reference_name": work_order,
+			"inspection_type": "Basic Testing",
+			"docstatus": ["<", 2],
+		},
+		fields=["name", "status"],
+		order_by="creation desc",
+		limit=1,
+	)
+	if not latest:
+		return {"blocked": False, "qc": None, "status": None}
+	q = latest[0]
+	accepted = (q.status or "").strip() == "Accepted"
+	return {"blocked": not accepted, "qc": q.name, "status": q.status}
+
+
+def _assert_qc_gate_open(work_order):
+	"""Throw if material transfer / timer is blocked by the QC gate (latest Basic Testing
+	QC not Accepted)."""
+	gate = _qc_gate(work_order)
+	if gate["blocked"]:
+		frappe.throw(
+			_(
+				"Material transfer is on hold: the latest In Process QC ({0}) is <b>{1}</b>, "
+				"not Accepted. Do In Process QC again and get an Accepted Basic Testing QC to resume."
+			).format(gate["qc"], gate["status"] or _("Pending"))
+		)
+
+
+def _accepted_basic_testing_qcs(work_order):
+	"""Basic Testing QCs for the Work Order shown in the 3rd tab (newest first). Both
+	Accepted and Rejected are shown for tracking — but note only Accepted unblocks
+	material transfer (see _qc_gate); Rejected is display-only."""
+	names = frappe.get_all(
+		"Pratap Quality Inspection",
+		filters={
+			"reference_type": "Work Order",
+			"reference_name": work_order,
+			"inspection_type": "Basic Testing",
+			"status": ["in", ["Accepted", "Rejected"]],
+			"docstatus": ["<", 2],
+		},
+		pluck="name",
+		order_by="creation desc",
+	)
+	out = []
+	for name in names:
+		qc = frappe.get_doc("Pratap Quality Inspection", name)
+		out.append(
+			{
+				"name": name,
+				"status": qc.status,
+				"inspection_date": str(qc.inspection_date or ""),
+				"items": [
+					{"item_code": rm.item_code, "item_name": rm.item_name, "uom": rm.uom,
+					 "qty": flt(rm.get("total_req_qty"), 3)}
+					for rm in (qc.get("raw_materials") or []) if rm.item_code
+				],
+			}
+		)
+	return out
 
 
 def _open_item_other_than(wo, exclude_row):
@@ -415,6 +488,10 @@ def log_addition_event(work_order, row_name, action):
 	if row_name not in {r.name for r in wo.required_items}:
 		frappe.throw(_("Required item row not found on this Work Order."))
 
+	# Quality gate applies to the timer too (Material Transfer + timer are blocked when the
+	# latest Basic Testing QC is not Accepted).
+	_assert_qc_gate_open(wo.name)
+
 	# One item at a time for Start/Stop, but Finish is ALWAYS allowed — it's how an open
 	# item is closed, so it must never be blocked by another open item.
 	if action in ("Start", "Stop"):
@@ -581,6 +658,9 @@ def transfer_item_for_manufacture(work_order, row_name, batches):
 	row = next((r for r in wo.required_items if r.name == row_name), None)
 	if not row:
 		frappe.throw(_("Required item row not found on this Work Order."))
+
+	# Quality gate: the latest Basic Testing QC must be Accepted to transfer.
+	_assert_qc_gate_open(wo.name)
 
 	# Only one item open at a time: block if another item is transferred but not yet
 	# fully transferred AND finished.
