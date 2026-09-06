@@ -81,7 +81,7 @@ function render_wo_transfer_dialog(frm, ctx) {
 		$body.html(itemsHtml);
 	}
 	dialog._dirty = false;
-	ctx.items.forEach((it) => wire_item_block(frm, dialog, $body, it));
+	ctx.items.forEach((it) => wire_item_block(frm, dialog, ctx, $body, it));
 	if (hasJC || hasRW) {
 		wire_tabs($body);
 	}
@@ -219,18 +219,24 @@ function transfers_table_html(transfers) {
 // Start / Stop time controls + running total. Always shown (even after the item is
 // fully transferred) so time logging can continue.
 function time_controls_html(it, inline) {
-	// `inline` -> rendered on the right end of the batch button row (no top margin, no
-	// left auto-push of its own). Standalone -> its own row below (used for fully
-	// transferred items which have no Material Transfer button row).
-	const wrap = inline ? "" : "margin-top:10px;";
-	return `
-	<div class="wo-tr-timer" style="display:flex;gap:8px;align-items:center;${wrap}">
+	const startStop = `
 		<button class="btn btn-xs btn-success wo-tr-start">▶ ${__("Start")}</button>
-		<button class="btn btn-xs btn-danger wo-tr-stop">■ ${__("Stop")}</button>
+		<button class="btn btn-xs btn-danger wo-tr-stop">■ ${__("Stop")}</button>`;
+	const finishTime = `
 		<button class="btn btn-xs btn-primary wo-tr-finish">✓ ${__("Finish")}</button>
 		<span class="text-muted small" style="margin-left:6px;">${__("Total time")}: <b class="wo-tr-total">${fmt_dur(
 			it.duration_mins || 0
-		)}</b></span>
+		)}</b></span>`;
+	if (inline) {
+		// Right end of the batch button row (not-full item): keep the compact group.
+		return `<div class="wo-tr-timer" style="display:flex;gap:8px;align-items:center;">${startStop}${finishTime}</div>`;
+	}
+	// Standalone (fully transferred item): Start/Stop on the LEFT, Finish + total time
+	// pushed to the RIGHT end.
+	return `
+	<div class="wo-tr-timer" style="display:flex;gap:8px;align-items:center;margin-top:10px;">
+		${startStop}
+		<div style="margin-left:auto;display:flex;gap:8px;align-items:center;">${finishTime}</div>
 	</div>`;
 }
 
@@ -274,7 +280,7 @@ function batch_area_html(it) {
 	</div>`;
 }
 
-function wire_item_block(frm, dialog, $body, it) {
+function wire_item_block(frm, dialog, ctx, $body, it) {
 	const $item = $body.find(`.wo-tr-item[data-row="${it.row}"]`);
 
 	// Start / Stop time controls — wired ALWAYS (continue logging even after the item
@@ -283,12 +289,12 @@ function wire_item_block(frm, dialog, $body, it) {
 	$item.on("click", ".wo-tr-start", (e) => {
 		e.preventDefault();
 		if ($item.find(".wo-tr-start").prop("disabled")) return;
-		log_event(frm, $item, it.row, "Start");
+		log_event(frm, dialog, ctx, $item, it, "Start");
 	});
 	$item.on("click", ".wo-tr-stop", (e) => {
 		e.preventDefault();
 		if ($item.find(".wo-tr-stop").prop("disabled")) return;
-		log_event(frm, $item, it.row, "Stop");
+		log_event(frm, dialog, ctx, $item, it, "Stop");
 	});
 	// Finish -> last click: close any open interval, lock Start/Stop, show final time.
 	$item.on("click", ".wo-tr-finish", (e) => {
@@ -298,7 +304,7 @@ function wire_item_block(frm, dialog, $body, it) {
 			__(
 				"Finish time logging for this item? Start / Stop will be disabled and the total time locked."
 			),
-			() => log_event(frm, $item, it.row, "Finish")
+			() => log_event(frm, dialog, ctx, $item, it, "Finish")
 		);
 	});
 	apply_timer_buttons($item, it.timer_running, it.finished);
@@ -382,8 +388,17 @@ function wire_item_block(frm, dialog, $body, it) {
 			frappe.msgprint(__("Click <b>Start Batch</b> (top-right) before transferring material."));
 			return;
 		}
+		if (dialog._blocker_row && dialog._blocker_row !== it.row) {
+			const b = (ctx.items || []).find((x) => x.row === dialog._blocker_row);
+			frappe.msgprint(
+				__("Finish <b>{0}</b> (fully transfer and click Finish) before working on another item.", [
+					(b && b.item_code) || dialog._blocker_row,
+				])
+			);
+			return;
+		}
 		frappe.confirm(__("Do you want to submit the materials?"), () =>
-			submit_item_transfer(frm, dialog, $item, it)
+			submit_item_transfer(frm, dialog, ctx, $item, it)
 		);
 	});
 }
@@ -465,20 +480,41 @@ function fifo_prefill_rows(it) {
 // Gate the batch work behind "Start Batch": until the batch is started, Material Transfer
 // and the Start/Stop/Finish timer are disabled. After it's started they follow their
 // normal rules (timer only after an item is fully transferred).
+// An item is "open" once it has been transferred (partial or full) but is not yet BOTH
+// fully transferred AND finished. Only one item may be open at a time: while one is open,
+// Material Transfer + timer are disabled on every other item.
+function open_item(ctx) {
+	return (ctx.items || []).find(
+		(it) => flt(it.transferred_qty) > 0.0001 && !(it.is_full && it.finished)
+	);
+}
+
 function apply_batch_gate(dialog, ctx) {
 	const started = !!ctx.batch_started_at;
 	dialog._batch_started = started;
+	const blocker = started ? open_item(ctx) : null;
+	dialog._blocker_row = blocker ? blocker.row : null;
 	const $body = dialog.fields_dict.body.$wrapper;
-	$body
-		.find(".wo-tr-transfer")
-		.prop("disabled", !started)
-		.attr("title", started ? "" : __("Click Start Batch first"));
 	(ctx.items || []).forEach((it) => {
 		const $item = $body.find(`.wo-tr-item[data-row="${it.row}"]`);
+		const blockedByOther = blocker && blocker.row !== it.row;
+		// Material Transfer: needs batch started, this item not blocked by another open one.
+		const canTransfer = started && !blockedByOther;
+		const title = !started
+			? __("Click Start Batch first")
+			: blockedByOther
+			? __("Finish {0} first", [blocker.item_code])
+			: "";
+		$item.find(".wo-tr-transfer").prop("disabled", !canTransfer).attr("title", title);
+		// Timer: Finish is ALWAYS allowed on a full, not-yet-finished item (it's how you
+		// release the lock and clear an item). Start/Stop are limited to the one open item.
 		if (!started) {
 			$item.find(".wo-tr-start, .wo-tr-stop, .wo-tr-finish").prop("disabled", true);
 		} else {
 			apply_timer_buttons($item, it.timer_running, it.finished);
+			if (blockedByOther) {
+				$item.find(".wo-tr-start, .wo-tr-stop").prop("disabled", true);
+			}
 		}
 	});
 }
@@ -993,15 +1029,18 @@ function set_log($item, log) {
 		.html(log ? "<b>" + __("Log") + ":</b>\n" + frappe.utils.escape_html(log) : "");
 }
 
-function log_event(frm, $item, row_name, action) {
+function log_event(frm, dialog, ctx, $item, it, action) {
 	frappe.call({
 		method: "pratap_dev.work_order_transfer.log_addition_event",
-		args: { work_order: frm.doc.name, row_name, action },
+		args: { work_order: frm.doc.name, row_name: it.row, action },
 		callback(r) {
 			if (!r.message) return;
 			set_log($item, r.message.addition_log);
 			$item.find(".wo-tr-total").text(fmt_dur(r.message.duration_mins || 0));
-			apply_timer_buttons($item, r.message.running, r.message.finished);
+			// Track finished so the single-open-item gate can release other items.
+			it.finished = !!r.message.finished;
+			it.timer_running = !!r.message.running;
+			apply_batch_gate(dialog, ctx);
 		},
 	});
 }
@@ -1126,7 +1165,7 @@ function save_all_drafts(frm, dialog, ctx) {
 	});
 }
 
-function submit_item_transfer(frm, dialog, $item, it) {
+function submit_item_transfer(frm, dialog, ctx, $item, it) {
 	const batches = collect_rows($item).filter(
 		(r) => r.batch_no && r.std_pkg > 0 && r.units > 0
 	);
@@ -1180,6 +1219,11 @@ function submit_item_transfer(frm, dialog, $item, it) {
 				$item.find(".wo-tr-rows").empty();
 				$item.find(".wo-tr-addbatch").click();
 			}
+			// Update live state so the single-open-item gate locks the other items until
+			// this one is fully transferred AND finished.
+			it.transferred_qty = res.transferred_qty;
+			it.is_full = !!res.is_full;
+			apply_batch_gate(dialog, ctx);
 			frm.reload_doc();
 		},
 	});

@@ -78,6 +78,23 @@ def get_wo_transfer_context(work_order):
 	}
 
 
+def _open_item_other_than(wo, exclude_row):
+	"""Return the (item_code) of any required item that is currently OPEN — transferred
+	(partial or full, excluding rework) but not yet BOTH fully transferred AND finished —
+	other than `exclude_row`. Only one item may be worked on at a time."""
+	for row in wo.required_items:
+		if row.name == exclude_row or not row.item_code:
+			continue
+		transferred = flt(row.transferred_qty) - _rework_transferred_qty(wo.name, row.item_code)
+		if transferred <= 0.0001:
+			continue
+		full = transferred + 0.0001 >= flt(row.required_qty)
+		finished = "Finish —" in (row.get("custom_addition_log") or "")
+		if not (full and finished):
+			return row.item_code
+	return None
+
+
 @frappe.whitelist()
 def start_batch(work_order):
 	"""Stamp the batch start time on the Work Order, once. Returns the stored value;
@@ -398,6 +415,15 @@ def log_addition_event(work_order, row_name, action):
 	if row_name not in {r.name for r in wo.required_items}:
 		frappe.throw(_("Required item row not found on this Work Order."))
 
+	# One item at a time for Start/Stop, but Finish is ALWAYS allowed — it's how an open
+	# item is closed, so it must never be blocked by another open item.
+	if action in ("Start", "Stop"):
+		blocker = _open_item_other_than(wo, row_name)
+		if blocker:
+			frappe.throw(
+				_("Finish {0} (fully transfer and click Finish) before working on another item.").format(blocker)
+			)
+
 	now = now_datetime()
 	log = _append_log(row_name, action, now)
 	duration = flt(frappe.db.get_value("Work Order Item", row_name, "custom_addition_duration_mins"))
@@ -555,6 +581,14 @@ def transfer_item_for_manufacture(work_order, row_name, batches):
 	row = next((r for r in wo.required_items if r.name == row_name), None)
 	if not row:
 		frappe.throw(_("Required item row not found on this Work Order."))
+
+	# Only one item open at a time: block if another item is transferred but not yet
+	# fully transferred AND finished.
+	blocker = _open_item_other_than(wo, row_name)
+	if blocker:
+		frappe.throw(
+			_("Finish {0} (fully transfer and click Finish) before working on another item.").format(blocker)
+		)
 
 	item_code = row.item_code
 	src = row.source_warehouse or wo.source_warehouse
