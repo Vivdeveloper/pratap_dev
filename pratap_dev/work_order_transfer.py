@@ -117,6 +117,44 @@ def _assert_qc_gate_open(work_order):
 		)
 
 
+def _rework_pending(work_order):
+	"""True if any rework item (in a Rework QC's Raw Materials) has NOT yet been both
+	transferred AND finished — while such an item exists, the main Material Transfer tab's
+	transfer/start/stop are blocked (rework must be completed first)."""
+	qc_names = frappe.get_all(
+		"Pratap Quality Inspection",
+		filters={
+			"reference_type": "Work Order",
+			"reference_name": work_order,
+			"status": "Rework",
+			"docstatus": ["<", 2],
+		},
+		pluck="name",
+	)
+	for name in qc_names:
+		data = _rework_data(name)
+		qc = frappe.get_doc("Pratap Quality Inspection", name)
+		for rm in (qc.get("raw_materials") or []):
+			if not rm.item_code:
+				continue
+			finished = "Finish —" in ((data.get(rm.item_code) or {}).get("addition_log") or "")
+			has_transfer = bool(_rework_item_transfers(work_order, name, rm.item_code))
+			if not (has_transfer and finished):
+				return True
+	return False
+
+
+def _assert_no_pending_rework(work_order):
+	"""Throw if a rework item still needs to be transferred & finished."""
+	if _rework_pending(work_order):
+		frappe.throw(
+			_(
+				"Complete the rework first: every rework item must be transferred and "
+				"finished before you can transfer material on the main tab."
+			)
+		)
+
+
 def _accepted_basic_testing_qcs(work_order):
 	"""Basic Testing QCs for the Work Order shown in the 3rd tab (newest first). Both
 	Accepted and Rejected are shown for tracking — but note only Accepted unblocks
@@ -493,8 +531,9 @@ def log_addition_event(work_order, row_name, action):
 	_assert_qc_gate_open(wo.name)
 
 	# One item at a time for Start/Stop, but Finish is ALWAYS allowed — it's how an open
-	# item is closed, so it must never be blocked by another open item.
+	# item is closed, so it must never be blocked by another open item or by rework.
 	if action in ("Start", "Stop"):
+		_assert_no_pending_rework(wo.name)
 		blocker = _open_item_other_than(wo, row_name)
 		if blocker:
 			frappe.throw(
@@ -661,6 +700,8 @@ def transfer_item_for_manufacture(work_order, row_name, batches):
 
 	# Quality gate: the latest Basic Testing QC must be Accepted to transfer.
 	_assert_qc_gate_open(wo.name)
+	# Rework gate: no pending rework item may be outstanding.
+	_assert_no_pending_rework(wo.name)
 
 	# Only one item open at a time: block if another item is transferred but not yet
 	# fully transferred AND finished.
@@ -1082,6 +1123,10 @@ def rework_log_event(work_order, qc, item_code, action):
 	wo = frappe.get_doc("Work Order", work_order)
 	wo.check_permission("read")
 	_validate_rework_qc(qc, wo.name)
+
+	# Timer is only usable after the rework item has been transferred (mirrors the main tab).
+	if not _rework_item_transfers(work_order, qc, item_code):
+		frappe.throw(_("Transfer the material for this rework item before starting the timer."))
 
 	now = now_datetime()
 	data = _rework_data(qc)

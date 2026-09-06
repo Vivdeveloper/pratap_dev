@@ -397,6 +397,12 @@ function wire_item_block(frm, dialog, ctx, $body, it) {
 			);
 			return;
 		}
+		if (dialog._rework_pending) {
+			frappe.msgprint(
+				__("Complete the rework first — transfer and finish every rework item (QC tab) before transferring material here.")
+			);
+			return;
+		}
 		if (dialog._blocker_row && dialog._blocker_row !== it.row) {
 			const b = (ctx.items || []).find((x) => x.row === dialog._blocker_row);
 			frappe.msgprint(
@@ -498,6 +504,14 @@ function open_item(ctx) {
 	);
 }
 
+// A rework item is "pending" until it has been BOTH transferred and finished. While any
+// rework item is pending, the main tab's transfer/start/stop are blocked.
+function rework_pending(ctx) {
+	return (ctx.rework_qcs || []).some((qc) =>
+		(qc.items || []).some((it) => !((it.transfers || []).length && it.finished))
+	);
+}
+
 function apply_batch_gate(dialog, ctx) {
 	const started = !!ctx.batch_started_at;
 	dialog._batch_started = started;
@@ -506,16 +520,23 @@ function apply_batch_gate(dialog, ctx) {
 	const qc = ctx.qc_gate || {};
 	const qcBlocked = !!qc.blocked;
 	dialog._qc_blocked = qcBlocked;
+	// Rework gate: block main transfer/start/stop while any rework item is not yet
+	// transferred + finished.
+	const rwPending = rework_pending(ctx);
+	dialog._rework_pending = rwPending;
 	const blocker = started ? open_item(ctx) : null;
 	dialog._blocker_row = blocker ? blocker.row : null;
 	const $body = dialog.fields_dict.body.$wrapper;
 	(ctx.items || []).forEach((it) => {
 		const $item = $body.find(`.wo-tr-item[data-row="${it.row}"]`);
 		const blockedByOther = blocker && blocker.row !== it.row;
-		// Material Transfer: batch started, item not blocked by another open one, QC gate open.
-		const canTransfer = started && !blockedByOther && !qcBlocked;
+		// Material Transfer: batch started, not blocked by another open one, QC gate open,
+		// and no pending rework.
+		const canTransfer = started && !blockedByOther && !qcBlocked && !rwPending;
 		const title = qcBlocked
 			? __("On hold — latest In Process QC is not Accepted")
+			: rwPending
+			? __("Complete the rework first")
 			: !started
 			? __("Click Start Batch first")
 			: blockedByOther
@@ -523,38 +544,43 @@ function apply_batch_gate(dialog, ctx) {
 			: "";
 		$item.find(".wo-tr-transfer").prop("disabled", !canTransfer).attr("title", title);
 		// Timer: disabled before Start Batch or while the QC gate is closed. Otherwise
-		// Finish is always allowed; Start/Stop are limited to the one open item.
+		// Finish is always allowed; Start/Stop are limited to the one open item AND blocked
+		// while rework is pending.
 		if (!started || qcBlocked) {
 			$item.find(".wo-tr-start, .wo-tr-stop, .wo-tr-finish").prop("disabled", true);
 		} else {
 			apply_timer_buttons($item, it.timer_running, it.finished);
-			if (blockedByOther) {
+			if (blockedByOther || rwPending) {
 				$item.find(".wo-tr-start, .wo-tr-stop").prop("disabled", true);
 			}
 		}
 	});
 
-	// Banner on the Material Transfer tab explaining the QC hold.
+	// Banner on the Material Transfer tab explaining a hold (QC gate takes priority).
 	const $banner = $body.find(".wo-qc-banner");
+	let msg = "";
 	if (qcBlocked) {
-		$banner
-			.html(
-				`⚠ ${__("Material transfer is on hold — the latest In Process QC")} <b>${frappe.utils.escape_html(
-					qc.qc || ""
-				)}</b> ${__("is")} <b>${frappe.utils.escape_html(qc.status || __("Pending"))}</b>, ${__(
-					"not Accepted. Do In Process QC again and get an Accepted Basic Testing QC to resume."
-				)}`
-			)
-			.css({
-				display: "block",
-				background: "#fff3cd",
-				border: "1px solid #ffe69c",
-				color: "#664d03",
-				padding: "8px 12px",
-				"border-radius": "6px",
-				"margin-bottom": "12px",
-				"font-size": "13px",
-			});
+		msg = `⚠ ${__("Material transfer is on hold — the latest In Process QC")} <b>${frappe.utils.escape_html(
+			qc.qc || ""
+		)}</b> ${__("is")} <b>${frappe.utils.escape_html(qc.status || __("Pending"))}</b>, ${__(
+			"not Accepted. Do In Process QC again and get an Accepted Basic Testing QC to resume."
+		)}`;
+	} else if (rwPending) {
+		msg = `⚠ ${__(
+			"Material transfer is on hold — complete the rework (transfer and finish every rework item) in the QC tab first."
+		)}`;
+	}
+	if (msg) {
+		$banner.html(msg).css({
+			display: "block",
+			background: "#fff3cd",
+			border: "1px solid #ffe69c",
+			color: "#664d03",
+			padding: "8px 12px",
+			"border-radius": "6px",
+			"margin-bottom": "12px",
+			"font-size": "13px",
+		});
 	} else {
 		$banner.hide().empty();
 	}
@@ -778,16 +804,27 @@ function rework_add_row($item) {
 	);
 }
 
-function apply_rework_timer($item, running, finished) {
-	$item.find(".wo-rw-start").prop("disabled", !!running || !!finished);
-	$item.find(".wo-rw-stop").prop("disabled", !running || !!finished);
-	$item.find(".wo-rw-finish").prop("disabled", !!finished);
+// Like the main tab: the timer is only usable AFTER the rework item has been transferred
+// (>=1 transfer). Before that (and once finished), Start/Stop/Finish are disabled.
+function apply_rework_timer($item, transferred, running, finished) {
+	if (!transferred || finished) {
+		$item.find(".wo-rw-start, .wo-rw-stop, .wo-rw-finish").prop("disabled", true);
+		return;
+	}
+	$item.find(".wo-rw-start").prop("disabled", !!running);
+	$item.find(".wo-rw-stop").prop("disabled", !running);
+	$item.find(".wo-rw-finish").prop("disabled", false);
 }
 
 function rework_log($item, log) {
 	$item
 		.find(".wo-rw-log")
 		.html(log ? "<b>" + __("Log") + ":</b>\n" + frappe.utils.escape_html(log) : "");
+}
+
+function find_rw_item(ctx, qcName, itemCode) {
+	const qc = (ctx.rework_qcs || []).find((q) => q.name === qcName);
+	return qc && (qc.items || []).find((i) => i.item_code === itemCode);
 }
 
 function wire_rework(frm, dialog, ctx) {
@@ -804,7 +841,7 @@ function wire_rework(frm, dialog, ctx) {
 	(ctx.rework_qcs || []).forEach((qc) => {
 		(qc.items || []).forEach((it) => {
 			const $i = $body.find(`.wo-rw-item[data-qc="${qc.name}"][data-item="${it.item_code}"]`);
-			apply_rework_timer($i, it.timer_running, it.finished);
+			apply_rework_timer($i, (it.transfers || []).length > 0, it.timer_running, it.finished);
 		});
 	});
 
@@ -857,6 +894,12 @@ function wire_rework(frm, dialog, ctx) {
 					if (res.duration_mins != null) {
 						$item.find(".wo-rw-total").text(fmt_dur(res.duration_mins));
 					}
+					// Now transferred -> the timer becomes usable for this rework item.
+					apply_rework_timer($item, true, false, "Finish —" in (res.addition_log || ""));
+					// Sync ctx + re-gate the main tab (rework progress affects the main block).
+					const rit = find_rw_item(ctx, qc, item);
+					if (rit) rit.transfers = res.transfers || [];
+					apply_batch_gate(dialog, ctx);
 				},
 			});
 		});
@@ -871,7 +914,12 @@ function wire_rework(frm, dialog, ctx) {
 				if (!r.message) return;
 				rework_log($item, r.message.addition_log);
 				$item.find(".wo-rw-total").text(fmt_dur(r.message.duration_mins || 0));
-				apply_rework_timer($item, r.message.running, r.message.finished);
+				// Sync ctx + re-gate the main tab (finishing rework can unblock it).
+				const rit = find_rw_item(ctx, qc, item);
+				if (rit) rit.finished = !!r.message.finished;
+				const transferred = !!(rit && (rit.transfers || []).length);
+				apply_rework_timer($item, transferred, r.message.running, r.message.finished);
+				apply_batch_gate(dialog, ctx);
 			},
 		});
 	};
