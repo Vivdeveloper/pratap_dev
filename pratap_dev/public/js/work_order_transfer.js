@@ -517,6 +517,13 @@ function apply_batch_gate(dialog, ctx) {
 			}
 		}
 	});
+
+	// "In Process QC" is allowed only when there is NO active transaction — i.e. no item
+	// is in progress (transferred but not yet finished). If one is open, disable it.
+	const $ipqc = dialog.$wrapper.find(".wo-inprocess-qc-btn");
+	$ipqc
+		.prop("disabled", !!blocker)
+		.attr("title", blocker ? __("Finish {0} before starting In Process QC", [blocker.item_code]) : "");
 }
 
 // "Start Batch" button in the dialog header (right of the title). Click stamps the batch
@@ -1105,6 +1112,14 @@ function maybe_auto_set_plan(frm, dialog, ctx) {
 // the reference + inspection type pre-filled — same prefill as the WO's "Create Pratap QC"
 // button but inspection_type = "Basic Testing".
 function create_basic_testing_qc(frm, dialog) {
+	// Blocked while an item is in progress (transferred but not finished) — no active
+	// transaction may be open when starting In Process QC.
+	if (dialog._blocker_row) {
+		frappe.msgprint(
+			__("Finish the in-progress item (fully transfer and click Finish) before starting In Process QC.")
+		);
+		return;
+	}
 	dialog._allow_close = true; // leaving for the QC page — don't nag about unsaved batches
 	dialog.hide();
 	frappe.new_doc("Pratap Quality Inspection", {
