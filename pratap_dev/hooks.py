@@ -277,6 +277,7 @@ override_whitelisted_methods = {
 doctype_js = {
     "Opportunity": "public/js/opportunity_override.js",
     "Pratap Quality Inspection": "public/js/pratap_quality_inspection.js",
+    "Item": "public/js/item.js",
     "Work Order": [
         "public/js/work_order_override.js",
         "public/js/work_order_bom_item.js",

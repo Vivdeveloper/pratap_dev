@@ -1025,6 +1025,15 @@
    "width": null
   },
   {
+   "dt": "Item",
+   "fieldname": "custom_job_work_warehouse",
+   "fieldtype": "Link",
+   "label": "Processing Location",
+   "options": "Warehouse",
+   "insert_after": "custom_manufacturing_location",
+   "is_system_generated": 0
+  },
+  {
    "_assign": null,
    "_comments": null,
    "_liked_by": null,
