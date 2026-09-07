@@ -593,14 +593,14 @@ def _append_log(row_name, action, now=None):
 	return combined
 
 
-def _available_batches(item_code, warehouse):
-	"""Batches of an item with positive on-hand qty in a warehouse (+ default pkg qty).
+def _real_stock_by_batch(item_code, warehouse):
+	"""Real on-hand qty per batch in a warehouse (Serial-and-Batch-Bundle aware).
 
-	Uses ERPNext's Serial-and-Batch-Bundle-aware availability (batch qty lives on the
-	bundle, not directly on the Stock Ledger Entry), then keeps only positive balances.
+	Used to validate transfers against actual stock, independent of the (additive-only)
+	Batch Package Ledger, so a ledger drift can never let a transfer exceed real stock.
 	"""
 	if not warehouse:
-		return []
+		return {}
 	from erpnext.stock.doctype.serial_and_batch_bundle.serial_and_batch_bundle import (
 		get_available_batches,
 	)
@@ -608,23 +608,61 @@ def _available_batches(item_code, warehouse):
 	rows = get_available_batches(
 		frappe._dict({"item_code": item_code, "warehouse": warehouse})
 	)
-	# Sum per batch (rows are per batch+warehouse) and drop non-positive balances.
 	agg = {}
 	for r in rows:
 		agg[r.batch_no] = agg.get(r.batch_no, 0.0) + flt(r.qty)
+	return {b: flt(q, 3) for b, q in agg.items() if q > 0.0001}
 
-	# Fallback pkg qty when the batch has none: the item's latest GRN packing qty.
-	item_default_pkg = _item_default_pkg_qty(item_code)
+
+def _available_batches(item_code, warehouse):
+	"""Batch pack options for the WO transfer dropdown, sourced from the Batch Package
+	Ledger: one row per (batch, pack size) carrying std pkg + no of units, so the exact
+	packages received via GRN flow straight into the popup (FIFO-ordered, oldest first).
+
+	Falls back to real stock (one row per batch, with a fallback Std Pkg Qty and derived
+	units) for any batch that has real stock here but no package-ledger rows — e.g. stock
+	received before packaging tracking existed.
+	"""
+	if not warehouse:
+		return []
+
+	from pratap_dev.batch_package_hooks import get_item_package_options
+
 	out = []
-	for batch_no, qty in agg.items():
-		if qty <= 0.0001:
+	seen_batches = set()
+	for opt in get_item_package_options(item_code, warehouse):
+		total = flt(opt.get("total_qty"), 3)
+		if total <= 0.0001:
+			continue
+		batch_no = opt.get("batch_no")
+		seen_batches.add(batch_no)
+		out.append(
+			{
+				"batch_no": batch_no,
+				"std_pkg": flt(opt.get("standard_pkg_qty"), 3) or 1,
+				"no_of_unit": flt(opt.get("no_of_unit"), 3),
+				"available_qty": total,
+			}
+		)
+
+	# Fallback: batches with real stock but no package-ledger rows in this warehouse.
+	item_default_pkg = _item_default_pkg_qty(item_code)
+	for batch_no, qty in _real_stock_by_batch(item_code, warehouse).items():
+		if batch_no in seen_batches:
 			continue
 		std_pkg = (
 			flt(frappe.db.get_value("Batch", batch_no, "custom_standard_pkg_qty"))
 			or item_default_pkg
 			or 1
 		)
-		out.append({"batch_no": batch_no, "available_qty": flt(qty, 3), "std_pkg": std_pkg})
+		out.append(
+			{
+				"batch_no": batch_no,
+				"std_pkg": std_pkg,
+				"no_of_unit": flt(qty / std_pkg, 3) if std_pkg else 0,
+				"available_qty": flt(qty, 3),
+			}
+		)
 	return out
 
 
@@ -740,8 +778,10 @@ def transfer_item_for_manufacture(work_order, row_name, batches):
 			)
 		)
 
-	# Guard: don't transfer more than what's on hand for each batch.
-	avail = {b["batch_no"]: flt(b["available_qty"]) for b in _available_batches(item_code, src)}
+	# Guard: don't transfer more than what's on hand for each batch. Validate against
+	# REAL stock (not the package-ledger dropdown), so a ledger drift can't allow an
+	# over-transfer beyond actual on-hand qty.
+	avail = _real_stock_by_batch(item_code, src)
 	qty_by_batch = {}
 	for ln in lines:
 		qty_by_batch[ln["batch_no"]] = qty_by_batch.get(ln["batch_no"], 0.0) + ln["qty"]
@@ -1089,7 +1129,8 @@ def rework_transfer_item(work_order, qc, item_code, batches):
 	if not lines or total <= 0:
 		frappe.throw(_("Enter Std Pkg Qty and No of Units for the chosen batch(es)."))
 
-	avail = {b["batch_no"]: flt(b["available_qty"]) for b in _available_batches(item_code, src)}
+	# Validate against real on-hand stock per batch (not the package-ledger dropdown).
+	avail = _real_stock_by_batch(item_code, src)
 	qty_by_batch = {}
 	for ln in lines:
 		qty_by_batch[ln["batch_no"]] = qty_by_batch.get(ln["batch_no"], 0.0) + ln["qty"]

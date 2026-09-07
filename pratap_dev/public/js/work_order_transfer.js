@@ -255,11 +255,11 @@ function batch_area_html(it) {
 	const opts = (it.batches || [])
 		.map(
 			(b) =>
-				`<option value="${frappe.utils.escape_html(b.batch_no)}" data-pkg="${b.std_pkg}" data-avail="${b.available_qty}">${frappe.utils.escape_html(
+				`<option value="${frappe.utils.escape_html(b.batch_no)}" data-pkg="${b.std_pkg}" data-units="${b.no_of_unit || ""}" data-avail="${b.available_qty}">${frappe.utils.escape_html(
 					b.batch_no
-				)} · ${__("std")} ${format_number(b.std_pkg)} (${__("avail")}: ${format_number(
-					b.available_qty
-				)})</option>`
+				)} · ${__("std")} ${format_number(b.std_pkg)}${
+					b.no_of_unit ? ` · ${format_number(b.no_of_unit)} ${__("units")}` : ""
+				} (${__("avail")}: ${format_number(b.available_qty)})</option>`
 		)
 		.join("");
 	return `
@@ -361,10 +361,13 @@ function wire_item_block(frm, dialog, ctx, $body, it) {
 	$item.on("change", ".wo-b-batch", function () {
 		const $sel = $(this).find("option:selected");
 		const pkg = $sel.data("pkg");
+		const units = $sel.data("units");
 		const $tr = $(this).closest("tr");
-		// Always reset Std Pkg Qty to the newly selected batch's size (overwrite the
-		// previous batch's value); if "Select…" is chosen, clear it.
-		$tr.find(".wo-b-pkg").val($(this).val() && pkg ? pkg : "");
+		const picked = !!$(this).val();
+		// Reset Std Pkg Qty AND No of Units to the newly selected pack option (from the
+		// Package Ledger); if "Select…" is chosen, clear both. Qty is then recomputed.
+		$tr.find(".wo-b-pkg").val(picked && pkg ? pkg : "");
+		$tr.find(".wo-b-units").val(picked && units ? units : "");
 		recalc_row($tr, "units");
 	});
 	$item.on("input", ".wo-b-pkg", function () {
@@ -646,11 +649,11 @@ function rework_batch_opts(batches) {
 	return (batches || [])
 		.map(
 			(b) =>
-				`<option value="${frappe.utils.escape_html(b.batch_no)}" data-pkg="${b.std_pkg}" data-avail="${b.available_qty}">${frappe.utils.escape_html(
+				`<option value="${frappe.utils.escape_html(b.batch_no)}" data-pkg="${b.std_pkg}" data-units="${b.no_of_unit || ""}" data-avail="${b.available_qty}">${frappe.utils.escape_html(
 					b.batch_no
-				)} · ${__("std")} ${format_number(b.std_pkg)} (${__("avail")}: ${format_number(
-					b.available_qty
-				)})</option>`
+				)} · ${__("std")} ${format_number(b.std_pkg)}${
+					b.no_of_unit ? ` · ${format_number(b.no_of_unit)} ${__("units")}` : ""
+				} (${__("avail")}: ${format_number(b.available_qty)})</option>`
 		)
 		.join("");
 }
