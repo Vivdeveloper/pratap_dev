@@ -1071,6 +1071,9 @@ def rework_transfer_item(work_order, qc, item_code, batches):
 	rm = next((r for r in (qc_doc.get("raw_materials") or []) if r.item_code == item_code), None)
 	if not rm:
 		frappe.throw(_("Item {0} is not in this rework QC.").format(item_code))
+	# One transfer per rework item: once transferred, Finish is the only remaining step.
+	if _rework_item_transfers(work_order, qc, item_code):
+		frappe.throw(_("This rework item is already transferred — click Finish to complete it."))
 	src = rm.get("source_warehouse") or wo.source_warehouse
 
 	lines, total = [], 0.0

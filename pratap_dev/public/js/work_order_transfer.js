@@ -659,6 +659,26 @@ function rework_item_html(qc, it) {
 	const req = it.required_qty
 		? ` · ${__("Req")}: <b>${format_number(it.required_qty)}</b> ${frappe.utils.escape_html(it.uom || "")}`
 		: "";
+	// The batch input area (Add Batch + Material Transfer) is shown ONLY until the item has
+	// been transferred once. After a transfer it's removed, leaving Finish as the next step.
+	const transferred = (it.transfers || []).length > 0;
+	const inputArea = transferred
+		? ""
+		: `<div class="wo-rw-input">
+			<table class="table table-bordered" style="margin:8px 0 6px;font-size:13px;">
+				<thead><tr>
+					<th style="width:34%">${__("Batch")}</th>
+					<th style="width:20%">${__("Std Pkg Qty")}</th>
+					<th style="width:18%">${__("No of Units")}</th>
+					<th style="width:18%">${__("Qty")}</th>
+					<th style="width:10%"></th>
+				</tr></thead>
+				<tbody class="wo-rw-rows"></tbody>
+			</table>
+			<button class="btn btn-xs btn-default wo-rw-addbatch">+ ${__("Add Batch")}</button>
+			<button class="btn btn-xs btn-primary wo-rw-transfer">⇄ ${__("Material Transfer")}</button>
+			<div class="wo-rw-batchopts" style="display:none;">${rework_batch_opts(it.batches)}</div>
+		</div>`;
 	return `
 	<div class="wo-rw-item" data-qc="${frappe.utils.escape_html(qc)}" data-item="${frappe.utils.escape_html(
 		it.item_code
@@ -668,29 +688,15 @@ function rework_item_html(qc, it) {
 			<span class="text-muted">${frappe.utils.escape_html(it.item_name || "")}${req}</span>
 		</div>
 		<div class="wo-rw-taken">${transfers_table_html(it.transfers)}</div>
-		<table class="table table-bordered" style="margin:8px 0 6px;font-size:13px;">
-			<thead><tr>
-				<th style="width:34%">${__("Batch")}</th>
-				<th style="width:20%">${__("Std Pkg Qty")}</th>
-				<th style="width:18%">${__("No of Units")}</th>
-				<th style="width:18%">${__("Qty")}</th>
-				<th style="width:10%"></th>
-			</tr></thead>
-			<tbody class="wo-rw-rows"></tbody>
-		</table>
-		<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;">
-			<button class="btn btn-xs btn-default wo-rw-addbatch">+ ${__("Add Batch")}</button>
-			<button class="btn btn-xs btn-primary wo-rw-transfer">⇄ ${__("Material Transfer")}</button>
-			<div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
-				<button class="btn btn-xs btn-success wo-rw-start">▶ ${__("Start")}</button>
-				<button class="btn btn-xs btn-danger wo-rw-stop">■ ${__("Stop")}</button>
-				<button class="btn btn-xs btn-primary wo-rw-finish">✓ ${__("Finish")}</button>
-				<span class="text-muted small">${__("Total time")}: <b class="wo-rw-total">${fmt_dur(
-					it.duration_mins || 0
-				)}</b></span>
-			</div>
+		${inputArea}
+		<div class="wo-rw-timer-row" style="display:flex;gap:8px;align-items:center;justify-content:flex-end;margin-top:8px;">
+			<button class="btn btn-xs btn-success wo-rw-start">▶ ${__("Start")}</button>
+			<button class="btn btn-xs btn-danger wo-rw-stop">■ ${__("Stop")}</button>
+			<button class="btn btn-xs btn-primary wo-rw-finish">✓ ${__("Finish")}</button>
+			<span class="text-muted small">${__("Total time")}: <b class="wo-rw-total">${fmt_dur(
+				it.duration_mins || 0
+			)}</b></span>
 		</div>
-		<div class="wo-rw-batchopts" style="display:none;">${rework_batch_opts(it.batches)}</div>
 		<div class="wo-rw-log text-muted small" style="margin-top:8px;white-space:pre-line;">${
 			it.addition_log ? "<b>" + __("Log") + ":</b>\n" + frappe.utils.escape_html(it.addition_log) : ""
 		}</div>
@@ -888,8 +894,8 @@ function wire_rework(frm, dialog, ctx) {
 						5
 					);
 					$item.find(".wo-rw-taken").html(transfers_table_html(res.transfers));
-					$item.find(".wo-rw-rows").empty();
-					rework_add_row($item);
+					// Transferred once -> remove the input area (no more transfers); Finish next.
+					$item.find(".wo-rw-input").remove();
 					rework_log($item, res.addition_log);
 					if (res.duration_mins != null) {
 						$item.find(".wo-rw-total").text(fmt_dur(res.duration_mins));
