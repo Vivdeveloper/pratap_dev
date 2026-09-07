@@ -137,7 +137,10 @@ def purchase_receipt_on_submit(doc, method=None):
 				continue
 			by_batch.setdefault(batch_no, []).append(
 				{
-					"warehouse": item.warehouse,
+					# Prefer the warehouse stamped on the pack row (QC writes accepted rows
+					# to the accepted warehouse and rejected rows to the rejected one). Fall
+					# back to the GRN row's accepted warehouse for rows with no split.
+					"warehouse": pr.get("warehouse") or item.warehouse,
 					"standard_pkg_qty": flt(pr.get("standard_pkg_qty")),
 					"no_of_unit": flt(pr.get("no_of_unit")),
 					"total_qty": flt(pr.get("total_qty")),

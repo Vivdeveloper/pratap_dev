@@ -174,7 +174,62 @@ def update_grn_from_batch_qc(grn_doc, item_row, batch_rows, custom_density=None)
 		is_rejected=True,
 	)
 
+	_write_batch_packages_json(grn_doc, item_row, batch_rows)
+
 	_update_batch_density_from_qc(batch_rows, custom_density)
+
+
+def _write_batch_packages_json(grn_doc, item_row, batch_rows):
+	"""Rebuild the GRN row's pack breakdown so the Batch Package Ledger reflects the
+	QC accept/reject split.
+
+	Batch entry originally stamps custom_batch_packages_json with the WHOLE receipt
+	pointed at the accepted warehouse. Once QC splits accepted vs rejected, the Package
+	Ledger (built on GRN submit) must show accepted units in the accepted warehouse and
+	rejected units in the rejected warehouse — otherwise it double-counts everything as
+	accepted. Each row now carries its own warehouse; the submit hook honours it.
+	"""
+	if not item_row.meta.has_field("custom_batch_packages_json"):
+		return
+
+	accepted_warehouse = item_row.warehouse
+	rejected_warehouse = item_row.rejected_warehouse or grn_doc.rejected_warehouse
+
+	package_rows = []
+	for row in batch_rows:
+		batch_no = (row.get("batch_no") or "").strip()
+		if not batch_no:
+			continue
+
+		standard_pkg_qty = flt(row.get("standard_pkg_qty")) or 1
+
+		accepted_unit = flt(row.get("accepted_unit"))
+		accepted_qty = flt(row.get("accepted_qty"))
+		if accepted_unit > 0 or accepted_qty > 0:
+			package_rows.append(
+				{
+					"batch_no": batch_no,
+					"warehouse": accepted_warehouse,
+					"standard_pkg_qty": standard_pkg_qty,
+					"no_of_unit": accepted_unit,
+					"total_qty": accepted_qty or (standard_pkg_qty * accepted_unit),
+				}
+			)
+
+		rejected_unit = flt(row.get("rejected_unit"))
+		rejected_qty = flt(row.get("rejected_qty"))
+		if rejected_unit > 0 or rejected_qty > 0:
+			package_rows.append(
+				{
+					"batch_no": batch_no,
+					"warehouse": rejected_warehouse,
+					"standard_pkg_qty": standard_pkg_qty,
+					"no_of_unit": rejected_unit,
+					"total_qty": rejected_qty or (standard_pkg_qty * rejected_unit),
+				}
+			)
+
+	item_row.custom_batch_packages_json = json.dumps(package_rows)
 
 
 def _update_item_bundle(grn_doc, item_row, batch_map, total_qty, is_rejected=False):
