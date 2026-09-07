@@ -21,6 +21,28 @@ from frappe.utils import flt, nowdate
 MR_QTY_FIELD = "custom_qty_amount"
 
 
+def set_mr_qty(doc, method=None):
+	"""Keep each Required Items row's MR Qty (``custom_qty_amount``) = required qty minus
+	what is already available at that row's source warehouse, floored at 0.
+
+	Runs on Work Order validate (drafts and the after-submit qty Update). The available
+	figure is recomputed here from live stock (same helper ERPNext uses) and written back
+	to ``available_qty_at_source_warehouse`` so the shown Available column and the derived
+	MR Qty always agree: if a row is already fully stocked, MR Qty is 0 (nothing to request).
+	"""
+	from erpnext.stock.utils import get_latest_stock_qty
+
+	for row in doc.get("required_items") or []:
+		available = 0.0
+		if row.source_warehouse and row.item_code:
+			available = flt(get_latest_stock_qty(row.item_code, row.source_warehouse))
+
+		row.available_qty_at_source_warehouse = available
+
+		shortfall = flt(row.required_qty) - available
+		row.set(MR_QTY_FIELD, shortfall if shortfall > 0 else 0)
+
+
 @frappe.whitelist()
 def create_and_submit_material_request(work_order_name):
 	if not work_order_name:

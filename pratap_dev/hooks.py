@@ -361,6 +361,7 @@ doc_events = {
         "validate": [
             "pratap_dev.work_order_instruction.set_operation_instructions",
             "pratap_dev.bom_batch_sheet.sync_work_order_batch_sheet",
+            "pratap_dev.work_order_material_request.set_mr_qty",
         ],
     },
     "BOM": {
