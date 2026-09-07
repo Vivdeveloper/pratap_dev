@@ -753,7 +753,7 @@ function show_sales_forecast_dialog(frm, data, stock_map) {
 				html += `
 					<tr>
 						<td>${frappe.utils.escape_html(i.item_code)}</td>
-						<td>${frappe.utils.escape_html(i.item_name || "")}</td>
+						<td>${frappe.utils.escape_html(i.item_name || "")}${draft_mr_tag(i.draft_mrs)}</td>
 						<td><span class="sf-qty-badge">${i.qty}</span></td>
 						${stock_cols
 							.map(
@@ -871,6 +871,24 @@ function show_sales_forecast_dialog(frm, data, stock_map) {
 // (qty set, not added) and the source Work Orders are recorded on the row.
 // ---------------------------------------------------------------------------
 
+// Small "already in draft MR" identifier shown next to an item in the pickers: a
+// clickable link per draft Material Request the item is already sitting in. These items
+// are NOT hidden (a draft isn't final) — they drop off once that MR is submitted.
+function draft_mr_tag(draft_mrs) {
+	if (!draft_mrs || !draft_mrs.length) {
+		return "";
+	}
+	const links = draft_mrs
+		.map(
+			(mr) =>
+				`<a href="/app/material-request/${encodeURIComponent(mr)}" target="_blank" style="color:#b8860b;text-decoration:underline;">${frappe.utils.escape_html(
+					mr
+				)}</a>`
+		)
+		.join(", ");
+	return `<div style="font-size:11px;color:#b8860b;margin-top:2px;">${__("In draft MR")}: ${links}</div>`;
+}
+
 function open_work_order_dialog(frm) {
 	frappe.call({
 		method: "pratap_dev.material_request_work_order.get_work_orders_for_material_request",
@@ -942,7 +960,7 @@ function show_work_order_dialog(frm, data) {
 				html += `
 					<tr>
 						<td>${frappe.utils.escape_html(i.item_code)}</td>
-						<td>${frappe.utils.escape_html(i.item_name || "")}</td>
+						<td>${frappe.utils.escape_html(i.item_name || "")}${draft_mr_tag(i.draft_mrs)}</td>
 						<td><span class="wo-qty-badge">${i.qty}</span></td>
 					</tr>`;
 			});

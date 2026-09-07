@@ -38,6 +38,11 @@ def get_forecast_clubs_for_material_request():
     # (forecast club, item) pairs already procured via the forecast->MR->PO link.
     procured = _get_procured_forecast_items(club_names)
 
+    # Material Request coverage per (club, item): submitted MR qty nets off the forecast
+    # qty (item drops off once covered); draft MRs are shown as an identifier/link and
+    # drop off once submitted.
+    submitted_by_club_item, draft_mrs_by_club_item = _mr_coverage_by_club(club_names)
+
     item_codes = list({row.item_code for row in rows if row.item_code})
 
     # Broad rule (item code + qty): also hide a forecast item once submitted Purchase
@@ -66,7 +71,7 @@ def get_forecast_clubs_for_material_request():
 
     for row in rows:
         if not row.item_code or flt(row.qty) <= 0:
-            continue
+            continue  # nothing to request -> hide (expected qty = 0)
         # Skip items already procured via the forecast link (club + item).
         if (row.parent, row.item_code) in procured:
             continue
@@ -74,16 +79,63 @@ def get_forecast_clubs_for_material_request():
         # qty rule), so historic purchases without a forecast link also drop off.
         if flt(ordered_by_item.get(row.item_code, 0.0)) + 1e-9 >= flt(row.qty):
             continue
+
+        # Net off qty already requested via SUBMITTED Material Requests linked to this
+        # (club, item); hide the item once fully covered, else show the remaining qty.
+        submitted = flt(submitted_by_club_item.get((row.parent, row.item_code), 0.0))
+        remaining = flt(flt(row.qty) - submitted, 3)
+        if remaining <= 0:
+            continue
+
         grouped[row.parent]["items"].append(
             {
                 "item_code": row.item_code,
                 "item_name": name_map.get(row.item_code, ""),
-                "qty": flt(row.qty),
+                "qty": remaining,
                 "uom": row.uom,
+                "draft_mrs": draft_mrs_by_club_item.get((row.parent, row.item_code), []),
             }
         )
 
     return [group for group in grouped.values() if group["items"]]
+
+
+def _mr_coverage_by_club(club_names):
+    """Material Request coverage for forecast items, keyed by (forecast_club, item_code).
+
+    Links are read from Material Request Item.custom_forecast_club. Returns:
+        submitted_by_club_item = {(club, item_code): submitted MR qty}
+        draft_mrs_by_club_item = {(club, item_code): [draft MR names]}
+    """
+    submitted_by_club_item = {}
+    draft_mrs_by_club_item = {}
+    if not club_names:
+        return submitted_by_club_item, draft_mrs_by_club_item
+
+    rows = frappe.db.sql(
+        """
+        SELECT mri.item_code, mri.qty, mri.custom_forecast_club AS club,
+               mr.name AS mr_name, mr.docstatus
+        FROM `tabMaterial Request Item` mri
+        INNER JOIN `tabMaterial Request` mr ON mr.name = mri.parent
+        WHERE mr.docstatus < 2
+          AND mri.custom_forecast_club IN %(clubs)s
+          AND IFNULL(mri.item_code, '') != ''
+        """,
+        {"clubs": tuple(club_names)},
+        as_dict=True,
+    )
+
+    for r in rows:
+        key = (r.club, r.item_code)
+        if r.docstatus == 1:
+            submitted_by_club_item[key] = flt(submitted_by_club_item.get(key, 0.0)) + flt(r.qty)
+        else:
+            lst = draft_mrs_by_club_item.setdefault(key, [])
+            if r.mr_name not in lst:
+                lst.append(r.mr_name)
+
+    return submitted_by_club_item, draft_mrs_by_club_item
 
 
 def _submitted_po_qty_by_item(item_codes):
