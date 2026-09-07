@@ -278,6 +278,8 @@ function add_material_request_button(frm) {
 }
 
 function handle_rework_consumption(frm) {
+    // Button hidden from the Work Order UI (logic kept for reference / future use).
+    return;
     frm.add_custom_button(__("Rework Consumption"), () => {
         if (!frm.doc.custom_rework_qc) {
             frappe.msgprint(__("No Rework QC is linked to this Work Order."));
