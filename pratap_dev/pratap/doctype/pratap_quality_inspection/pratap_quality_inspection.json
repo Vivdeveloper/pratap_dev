@@ -52,6 +52,7 @@
   "readings",
   "section_break_kcls",
   "custom_raw_material_required",
+  "custom_item_group_filter",
   "raw_materials",
   "custom_rework_transfer_data"
  ],
@@ -305,6 +306,14 @@
    "fieldname": "custom_raw_material_required",
    "fieldtype": "Check",
    "label": "Raw Material Required"
+  },
+  {
+   "depends_on": "eval:doc.status == \"Rework\"",
+   "description": "Select an Item Group to filter the Item Code list in the Raw Materials table below.",
+   "fieldname": "custom_item_group_filter",
+   "fieldtype": "Link",
+   "label": "Filter",
+   "options": "Item Group"
   },
   {
    "depends_on": "eval:doc.status == \"Rework\"",

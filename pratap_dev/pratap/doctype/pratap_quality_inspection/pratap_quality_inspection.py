@@ -1091,3 +1091,34 @@ def _parse_float(value):
 		return float(str(value).replace(",", ""))
 	except (TypeError, ValueError):
 		return 0.0
+
+
+@frappe.whitelist()
+@frappe.validate_and_sanitize_search_inputs
+def item_group_filtered_item_query(doctype, txt, searchfield, start, page_len, filters):
+	"""Link query for the Raw Materials item_code, filtered by the selected Item Group
+	(and its descendants) via the 'Filter' field — mirrors the BOM's item-group filter."""
+	filters = filters or {}
+	if isinstance(filters, str):
+		import json as _json
+		filters = _json.loads(filters)
+
+	conditions = ["disabled = 0"]
+	values = {"txt": "%%%s%%" % (txt or ""), "start": start, "page_len": page_len}
+
+	item_group = filters.get("item_group_filter")
+	if item_group and frappe.db.exists("Item Group", item_group):
+		groups = (frappe.db.get_descendants("Item Group", item_group) or []) + [item_group]
+		conditions.append("item_group in %(groups)s")
+		values["groups"] = tuple(groups)
+
+	conditions.append("(name like %(txt)s or item_name like %(txt)s)")
+	return frappe.db.sql(
+		"""
+		SELECT name, item_name FROM `tabItem`
+		WHERE {conditions}
+		ORDER BY (name like %(txt)s) DESC, name ASC
+		LIMIT %(start)s, %(page_len)s
+		""".format(conditions=" AND ".join(conditions)),
+		values,
+	)
