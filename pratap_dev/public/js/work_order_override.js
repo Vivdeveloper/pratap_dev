@@ -31,10 +31,9 @@ frappe.ui.form.on("Work Order", {
         // Count" (draft only), and the fetched snapshot then persists (once saved)
         // until the next click.
         add_refresh_stock_button(frm);
-        // NOTE: gate_start_button_on_stock is superseded by the new batch-wise transfer
-        // popup (work_order_transfer.js), which handles availability per batch. Left
-        // defined but no longer called to avoid a misleading "Start disabled" banner.
-        // gate_start_button_on_stock(frm);
+        // Gate the Start button: it stays hidden until every required item's MR Qty is 0
+        // (i.e. nothing left to procure — all materials available at the source warehouse).
+        gate_start_button_on_stock(frm);
         populate_wo_instructions(frm);
         },
 
@@ -102,17 +101,17 @@ const WO_STOCK_WAREHOUSES = [
 ];
 
 // Gate the standard "Start" button: it may only be used once EVERY required item has
-// enough stock at its source warehouse (Available Qty at Source Warehouse >= Required
-// Qty). Otherwise the Start button is removed and a warning headline is shown. ERPNext
-// adds "Start" in its own refresh; ours runs after, so we remove it here (plus a short
-// retry in case it's re-added asynchronously).
+// MR Qty 0 (nothing left to procure — enough stock at the source warehouse). Otherwise
+// the Start button is removed and a warning headline is shown. ERPNext adds "Start" in
+// its own refresh; ours runs after, so we remove it here (plus a short retry in case it
+// is re-added asynchronously).
 function gate_start_button_on_stock(frm) {
     const enforce = () => {
         const short = (frm.doc.required_items || []).filter(
-            (row) => flt(row.available_qty_at_source_warehouse) + 1e-9 < flt(row.required_qty)
+            (row) => flt(row.custom_qty_amount) > 1e-9
         );
         if (!short.length) {
-            return; // all items have enough -> leave Start enabled
+            return; // all items have MR Qty 0 -> leave Start enabled
         }
         frm.remove_custom_button(__("Start"));
         const items = short.map((r) => r.item_code).join(", ");
@@ -121,7 +120,7 @@ function gate_start_button_on_stock(frm) {
         frm.dashboard.clear_headline();
         frm.dashboard.set_headline_alert(
             __(
-                "Start disabled: Available Qty at Source Warehouse is less than Required Qty for: {0}",
+                "Start disabled: Material Request still pending (MR Qty > 0) for: {0}",
                 [items]
             ),
             "orange"
