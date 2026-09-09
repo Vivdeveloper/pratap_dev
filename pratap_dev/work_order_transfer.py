@@ -647,6 +647,15 @@ def _real_stock_by_batch(item_code, warehouse):
 	return {b: flt(q, 3) for b, q in agg.items() if q > 0.0001}
 
 
+def _real_stock_total(item_code, warehouse):
+	"""Total real on-hand qty of an item in a warehouse (batched or not)."""
+	if not (item_code and warehouse):
+		return 0.0
+	from erpnext.stock.utils import get_latest_stock_qty
+
+	return flt(get_latest_stock_qty(item_code, warehouse))
+
+
 def _available_batches(item_code, warehouse):
 	"""Batch pack options for the WO transfer dropdown.
 
@@ -1184,6 +1193,16 @@ def rework_transfer_item(work_order, qc, item_code, batches):
 	if not lines or total <= 0:
 		frappe.throw(_("Enter Std Pkg Qty and No of Units for the chosen batch(es)."))
 
+	# Auto-provision an item-level shortfall: if the source warehouse holds less of the item
+	# than this transfer needs, create a Rework Material Transfer MR + move the missing qty
+	# into the source (from a donor warehouse) before transferring — same behaviour as the
+	# QC-grid "Rework Material Transfer".
+	provision = None
+	if flt(_real_stock_total(item_code, src), 3) + 1e-6 < flt(total, 3):
+		from pratap_dev.rework_material_transfer import provision_source_shortfall
+
+		provision = provision_source_shortfall(wo.name, item_code, total, src)
+
 	# Validate against real on-hand stock per batch (not the package-ledger dropdown).
 	avail = _real_stock_by_batch(item_code, src)
 	qty_by_batch = {}
@@ -1208,6 +1227,7 @@ def rework_transfer_item(work_order, qc, item_code, batches):
 
 	return {
 		"stock_entry": se_name,
+		"provision": provision if (provision and provision.get("shortfall")) else None,
 		"transfers": _rework_item_transfers(wo.name, qc, item_code),
 		"addition_log": d["addition_log"],
 		"duration_mins": flt(d.get("duration_mins"), 3),

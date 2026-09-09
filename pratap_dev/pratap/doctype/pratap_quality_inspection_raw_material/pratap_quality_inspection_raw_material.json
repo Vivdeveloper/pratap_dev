@@ -13,7 +13,13 @@
   "total_req_qty",
   "column_break_hhzn",
   "source_warehouse",
-  "actual_qty"
+  "actual_qty",
+  "custom_batch",
+  "custom_batch_qty",
+  "custom_plant_1_wip_rm",
+  "custom_plant_2_wip_rm",
+  "custom_main_store_rm",
+  "custom_transfer_qty"
  ],
  "fields": [
   {
@@ -70,6 +76,47 @@
   {
    "fieldname": "column_break_hhzn",
    "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "custom_batch",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Batch",
+   "options": "Batch"
+  },
+  {
+   "fieldname": "custom_batch_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Batch Qty",
+   "read_only": 1
+  },
+  {
+   "fieldname": "custom_plant_1_wip_rm",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Plant 1 WIP RM",
+   "read_only": 1
+  },
+  {
+   "fieldname": "custom_plant_2_wip_rm",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Plant 2 WIP RM",
+   "read_only": 1
+  },
+  {
+   "fieldname": "custom_main_store_rm",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Main Store RM",
+   "read_only": 1
+  },
+  {
+   "fieldname": "custom_transfer_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Transfer Qty"
   }
  ],
  "grid_page_length": 50,
