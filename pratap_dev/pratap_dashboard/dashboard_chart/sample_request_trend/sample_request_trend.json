@@ -1,0 +1,40 @@
+{
+ "chart_name": "Sample Request Trend",
+ "chart_type": "Report",
+ "creation": "2026-09-09 11:19:52.961774",
+ "currency": "",
+ "docstatus": 0,
+ "doctype": "Dashboard Chart",
+ "dynamic_filters_json": "{}",
+ "filters_json": "{\"from_date\":\"2026-04-01\",\"to_date\":\"2027-03-31\",\"periodicity\":\"Monthly\",\"date_based_on\":\"Created Date\"}",
+ "group_by_type": "Count",
+ "idx": 0,
+ "is_public": 1,
+ "is_standard": 1,
+ "modified": "2026-09-09 11:19:52.961774",
+ "modified_by": "Administrator",
+ "module": "Pratap Dashboard",
+ "name": "Sample Request Trend",
+ "number_of_groups": 0,
+ "owner": "Administrator",
+ "report_name": "Sample Request Trend",
+ "roles": [],
+ "show_values_over_chart": 0,
+ "time_interval": "Yearly",
+ "timeseries": 0,
+ "timespan": "Last Year",
+ "type": "Line",
+ "use_report_chart": 0,
+ "x_field": "period",
+ "y_axis": [
+  {
+   "y_field": "request_count"
+  },
+  {
+   "y_field": "total_quantity"
+  },
+  {
+   "y_field": "average_quantity"
+  }
+ ]
+}

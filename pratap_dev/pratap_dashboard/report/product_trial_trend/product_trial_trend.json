@@ -1,0 +1,43 @@
+{
+ "add_total_row": 0,
+ "add_translate_data": 0,
+ "columns": [],
+ "creation": "2026-09-09 11:21:25.667862",
+ "disable_prepared_report_automation": 0,
+ "disabled": 0,
+ "docstatus": 0,
+ "doctype": "Report",
+ "doctype_to_sync": [],
+ "filters": [],
+ "idx": 0,
+ "is_standard": "Yes",
+ "letter_head": null,
+ "modified": "2026-09-09 11:21:25.667862",
+ "modified_by": "Administrator",
+ "module": "Pratap Dashboard",
+ "name": "Product Trial Trend",
+ "owner": "Administrator",
+ "prepared_report": 0,
+ "ref_doctype": "Product Trial",
+ "report_name": "Product Trial Trend",
+ "report_type": "Script Report",
+ "roles": [
+  {
+   "role": "System Manager"
+  },
+  {
+   "role": "Sales User"
+  },
+  {
+   "role": "Sales Person User"
+  },
+  {
+   "role": "Sales Manager"
+  },
+  {
+   "role": "CRM Read"
+  }
+ ],
+ "snapshot_report": 0,
+ "timeout": 0
+}
