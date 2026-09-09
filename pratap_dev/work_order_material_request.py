@@ -39,7 +39,12 @@ def set_mr_qty(doc, method=None):
 
 		row.available_qty_at_source_warehouse = available
 
-		shortfall = flt(row.required_qty) - available
+		# Already-transferred material has left the source warehouse but is still procured
+		# for this Work Order, so it counts toward the requirement. Without this, every
+		# transfer would drop `available` and make MR Qty spike back above 0 mid-flow
+		# (which then wrongly re-hid the Start gate).
+		procured = available + flt(row.transferred_qty)
+		shortfall = flt(row.required_qty) - procured
 		row.set(MR_QTY_FIELD, shortfall if shortfall > 0 else 0)
 
 

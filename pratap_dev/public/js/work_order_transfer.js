@@ -11,7 +11,13 @@ frappe.ui.form.on("Work Order", {
 		const pending = (frm.doc.required_items || []).some(
 			(r) => flt(r.transferred_qty) < flt(r.required_qty)
 		);
-		if (!pending) {
+		// Keep the popup opener available once ANY material has been transferred, even after
+		// everything is fully transferred — the popup also hosts Job Cards, timers and QC,
+		// which the operator still needs to run afterwards. (The WO status is an unreliable
+		// signal here: the custom single-item transfer sets fg_completed_qty = 0, so the WO
+		// can stay "Not Started" even when fully transferred — hence we key on transferred_qty.)
+		const started = (frm.doc.required_items || []).some((r) => flt(r.transferred_qty) > 0);
+		if (!pending && !started) {
 			return;
 		}
 		const btn = frm.add_custom_button(__("Start"), () => open_wo_transfer_dialog(frm));

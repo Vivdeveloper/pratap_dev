@@ -363,6 +363,11 @@ doc_events = {
             "pratap_dev.bom_batch_sheet.sync_work_order_batch_sheet",
             "pratap_dev.work_order_material_request.set_mr_qty",
         ],
+        # validate does not fire when saving a SUBMITTED doc, so recompute MR Qty here too
+        # — otherwise MR Qty (and the Start gate) never refreshes on a submitted Work Order
+        # even after material reaches the source warehouse. The fields it writes
+        # (available_qty_at_source_warehouse, custom_qty_amount) are allow_on_submit.
+        "before_update_after_submit": "pratap_dev.work_order_material_request.set_mr_qty",
     },
     "BOM": {
         "validate": [

@@ -615,54 +615,76 @@ def _real_stock_by_batch(item_code, warehouse):
 
 
 def _available_batches(item_code, warehouse):
-	"""Batch pack options for the WO transfer dropdown, sourced from the Batch Package
-	Ledger: one row per (batch, pack size) carrying std pkg + no of units, so the exact
-	packages received via GRN flow straight into the popup (FIFO-ordered, oldest first).
+	"""Batch pack options for the WO transfer dropdown.
 
-	Falls back to real stock (one row per batch, with a fallback Std Pkg Qty and derived
-	units) for any batch that has real stock here but no package-ledger rows — e.g. stock
-	received before packaging tracking existed.
+	REAL stock (Serial-and-Batch-Bundle) is authoritative for AVAILABILITY; the Batch
+	Package Ledger only supplies the pack breakdown (std pkg size + no of units). So we
+	list every batch that actually has stock in the warehouse, deriving each pack row from
+	the ledger but capping it at the batch's real qty — and we NEVER offer a batch/units
+	the ledger claims but real stock does not have (ledger drift would otherwise surface a
+	phantom batch that the transfer then rejects with "Only 0.0 available"). Batches with
+	real stock but no ledger rows fall back to the item's default pack size. FIFO order
+	(oldest batch first).
 	"""
 	if not warehouse:
 		return []
 
-	from pratap_dev.batch_package_hooks import get_item_package_options
+	real = _real_stock_by_batch(item_code, warehouse)
+	if not real:
+		return []
+
+	from pratap_dev.batch_package_hooks import get_available_rows
+
+	item_default_pkg = _item_default_pkg_qty(item_code)
+
+	# FIFO: oldest batch first (by manufacturing date, then creation).
+	ordered = frappe.get_all(
+		"Batch",
+		filters={"name": ["in", list(real.keys())]},
+		fields=["name"],
+		order_by="manufacturing_date asc, creation asc",
+	)
+	ordered_batches = [b.name for b in ordered] or list(real.keys())
 
 	out = []
-	seen_batches = set()
-	for opt in get_item_package_options(item_code, warehouse):
-		total = flt(opt.get("total_qty"), 3)
-		if total <= 0.0001:
+	for batch_no in ordered_batches:
+		remaining = flt(real.get(batch_no), 3)
+		if remaining <= 0.0001:
 			continue
-		batch_no = opt.get("batch_no")
-		seen_batches.add(batch_no)
-		out.append(
-			{
-				"batch_no": batch_no,
-				"std_pkg": flt(opt.get("standard_pkg_qty"), 3) or 1,
-				"no_of_unit": flt(opt.get("no_of_unit"), 3),
-				"available_qty": total,
-			}
-		)
 
-	# Fallback: batches with real stock but no package-ledger rows in this warehouse.
-	item_default_pkg = _item_default_pkg_qty(item_code)
-	for batch_no, qty in _real_stock_by_batch(item_code, warehouse).items():
-		if batch_no in seen_batches:
-			continue
-		std_pkg = (
-			flt(frappe.db.get_value("Batch", batch_no, "custom_standard_pkg_qty"))
-			or item_default_pkg
-			or 1
-		)
-		out.append(
-			{
-				"batch_no": batch_no,
-				"std_pkg": std_pkg,
-				"no_of_unit": flt(qty / std_pkg, 3) if std_pkg else 0,
-				"available_qty": flt(qty, 3),
-			}
-		)
+		# Pack breakdown from the ledger, each row capped at what is really in stock.
+		for lr in get_available_rows(batch_no, warehouse):
+			if remaining <= 0.0001:
+				break
+			pkg = flt(lr.get("standard_pkg_qty")) or item_default_pkg or 1
+			take = min(flt(lr.get("total_qty")), remaining)
+			if take <= 0.0001:
+				continue
+			out.append(
+				{
+					"batch_no": batch_no,
+					"std_pkg": pkg,
+					"no_of_unit": flt(take / pkg, 3) if pkg else 0,
+					"available_qty": flt(take, 3),
+				}
+			)
+			remaining = flt(remaining - take, 3)
+
+		# Real stock the ledger doesn't account for -> one fallback pack row.
+		if remaining > 0.0001:
+			pkg = (
+				flt(frappe.db.get_value("Batch", batch_no, "custom_standard_pkg_qty"))
+				or item_default_pkg
+				or 1
+			)
+			out.append(
+				{
+					"batch_no": batch_no,
+					"std_pkg": pkg,
+					"no_of_unit": flt(remaining / pkg, 3) if pkg else 0,
+					"available_qty": flt(remaining, 3),
+				}
+			)
 	return out
 
 

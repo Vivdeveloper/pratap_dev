@@ -107,6 +107,15 @@ const WO_STOCK_WAREHOUSES = [
 // is re-added asynchronously).
 function gate_start_button_on_stock(frm) {
     const enforce = () => {
+        // The gate only applies BEFORE any material has been transferred. Once transfer has
+        // started, the popup "Start" button must stay available — it also hosts Job Cards,
+        // timers and QC needed after transfer. (Keyed on transferred_qty, not WO status:
+        // the custom transfer sets fg_completed_qty = 0, so status can stay "Not Started"
+        // even when fully transferred.)
+        const started = (frm.doc.required_items || []).some((row) => flt(row.transferred_qty) > 0);
+        if (started) {
+            return;
+        }
         const short = (frm.doc.required_items || []).filter(
             (row) => flt(row.custom_qty_amount) > 1e-9
         );
@@ -167,7 +176,10 @@ function refresh_wo_stock_counts(frm) {
 }
 
 // Fetch one required-item row's on-hand stock across the tracked warehouses and write
-// it into the read-only columns. Returns a promise that resolves when the row is done.
+// it into the read-only columns. Also recomputes the row's Available Qty at Source
+// Warehouse and MR Qty (custom_qty_amount) so the Start gate (which hides Start until
+// every row's MR Qty is 0) reflects the freshly-fetched stock — otherwise MR Qty would
+// stay stale until a full save. Returns a promise that resolves when the row is done.
 function fetch_row_stock(frm, row) {
     if (!row || !row.item_code) {
         WO_STOCK_WAREHOUSES.forEach(([, fieldname]) =>
@@ -175,21 +187,64 @@ function fetch_row_stock(frm, row) {
         );
         return Promise.resolve();
     }
-    return Promise.all(
-        WO_STOCK_WAREHOUSES.map(([warehouse_name, fieldname]) =>
-            get_wo_warehouse_stock(row.item_code, warehouse_name, frm.doc.company).then((qty) =>
-                set_wo_qty_field(row.doctype, row.name, fieldname, qty)
-            )
+    const jobs = WO_STOCK_WAREHOUSES.map(([warehouse_name, fieldname]) =>
+        get_wo_warehouse_stock(row.item_code, warehouse_name, frm.doc.company).then((qty) =>
+            set_wo_qty_field(row.doctype, row.name, fieldname, qty)
         )
     );
+    jobs.push(refresh_row_mr_qty(frm, row));
+    return Promise.all(jobs);
+}
+
+// Recompute Available Qty at Source Warehouse + MR Qty for a row from live stock at the
+// row's own source warehouse (falling back to the Work Order's source warehouse).
+// MR Qty = max(required_qty - available, 0), matching the server-side set_mr_qty hook,
+// so the Start gate updates on Refresh Stock without needing a full save.
+function refresh_row_mr_qty(frm, row) {
+    const source_warehouse = row.source_warehouse || frm.doc.source_warehouse;
+    if (!source_warehouse) {
+        return Promise.resolve();
+    }
+    return frappe
+        .xcall("erpnext.stock.utils.get_latest_stock_qty", {
+            item_code: row.item_code,
+            warehouse: source_warehouse,
+        })
+        .then((qty) => {
+            const available = flt(qty, 3);
+            const shortfall = flt(flt(row.required_qty) - available, 3);
+            frappe.model.set_value(
+                row.doctype,
+                row.name,
+                "available_qty_at_source_warehouse",
+                available
+            );
+            frappe.model.set_value(
+                row.doctype,
+                row.name,
+                "custom_qty_amount",
+                shortfall > 0 ? shortfall : 0
+            );
+        })
+        .catch(() => {});
 }
 
 // Warehouse names may carry a trailing space (e.g. "Plant 1 WIP RM "), so match by prefix.
+// EXCLUDE the "JOB WORK" variant: the prefix "Plant 1 WIP RM" also matches
+// "Plant 1 WIP RM- JOB WORK - PTPL", so without this filter the stock could be read from
+// the JOB WORK warehouse instead of "Plant 1 WIP RM  - PTPL". Also restrict to leaf
+// warehouses (is_group 0) and order deterministically.
 function get_wo_warehouse_stock(item_code, warehouse_name, company) {
     return frappe.db
         .get_list("Warehouse", {
-            filters: { warehouse_name: ["like", `${warehouse_name}%`], company: company },
+            filters: [
+                ["warehouse_name", "like", `${warehouse_name}%`],
+                ["warehouse_name", "not like", "%JOB WORK%"],
+                ["company", "=", company],
+                ["is_group", "=", 0],
+            ],
             fields: ["name"],
+            order_by: "name asc",
             limit: 1,
         })
         .then((rows) => {
