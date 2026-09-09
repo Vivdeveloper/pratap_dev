@@ -239,6 +239,14 @@ def _open_item_other_than(wo, exclude_row):
 	return None
 
 
+def _mark_wo_in_process(work_order):
+	"""Flip a Work Order from "Not Started" to "In Process" once any material has been
+	transferred. The custom per-item transfer sets fg_completed_qty = 0, so ERPNext's own
+	status logic never advances it — we set it directly (status only; nothing else changes)."""
+	if frappe.db.get_value("Work Order", work_order, "status") == "Not Started":
+		frappe.db.set_value("Work Order", work_order, "status", "In Process", update_modified=False)
+
+
 @frappe.whitelist()
 def start_batch(work_order):
 	"""Stamp the batch start time on the Work Order, once. Returns the stored value;
@@ -875,6 +883,9 @@ def transfer_item_for_manufacture(work_order, row_name, batches):
 	frappe.db.set_value(
 		"Work Order", wo.name, "custom_last_material_transfer_at", now_datetime(), update_modified=False
 	)
+
+	# Once any material is transferred, move the WO from "Not Started" to "In Process".
+	_mark_wo_in_process(wo.name)
 
 	# Return updated figures.
 	new_transferred = flt(frappe.db.get_value("Work Order Item", row.name, "transferred_qty"))
