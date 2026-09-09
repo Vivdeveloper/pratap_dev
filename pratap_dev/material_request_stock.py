@@ -120,3 +120,61 @@ def update_pipeline_fields(doc, method=None):
         expected = flt(row.get("custom_expected_qty")) or flt(row.qty)
         required = expected - total_stock - pending_pr - pending_grn
         row.custom_required_qty_for_pr = required if required > 0 else 0
+
+
+def move_fulfilled_items(doc, method=None):
+    """For a Purchase Material Request, remove rows whose warehouse stock already covers the
+    expected qty (the "Already Fulfilled — No PO" set) from the Items child table so they do
+    NOT move forward to a PO. The removed rows are snapshotted to custom_fulfilled_items_json
+    so they still show in the "Already Fulfilled" box below.
+
+    Runs on validate (drafts) only — items can't be changed after submit. Idempotent and
+    additive: the snapshot accumulates across saves, de-duplicated by item_code.
+    """
+    import json
+
+    if (doc.get("material_request_type") or "") != "Purchase":
+        return
+
+    # existing snapshot (keyed by item_code) so it persists across repeated saves
+    snapshot = {}
+    if doc.get("custom_fulfilled_items_json"):
+        try:
+            for s in json.loads(doc.custom_fulfilled_items_json) or []:
+                if s.get("item_code"):
+                    snapshot[s["item_code"]] = s
+        except (ValueError, TypeError):
+            snapshot = {}
+
+    keep = []
+    for row in doc.get("items") or []:
+        expected = flt(row.get("custom_expected_qty")) or flt(row.qty)
+        stock = flt(row.get("custom_total_stock_qty"))
+        is_fulfilled = expected > 0 and stock + 1e-9 >= expected
+        if is_fulfilled and row.item_code:
+            snapshot[row.item_code] = {
+                "item_code": row.item_code,
+                "item_name": row.item_name,
+                "custom_expected_qty": expected,
+                "custom_total_stock_qty": stock,
+                "custom_required_qty_for_pr": 0,
+            }
+        else:
+            keep.append(row)
+
+    doc.custom_fulfilled_items_json = json.dumps(list(snapshot.values()))
+
+    if len(keep) != len(doc.get("items") or []):
+        # Don't leave the MR with zero items (ERPNext rejects that) — if EVERYTHING is
+        # fulfilled, stop with a clear message rather than a generic error.
+        if not keep:
+            frappe.throw(
+                _(
+                    "All requested items are already fulfilled from stock — no Purchase "
+                    "Material Request is needed."
+                )
+            )
+        # renumber idx and replace the table
+        for i, row in enumerate(keep, start=1):
+            row.idx = i
+        doc.set("items", keep)
