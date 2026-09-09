@@ -99,37 +99,39 @@ const MR_TRANSFER_COLS = [
 ];
 
 function configure_items_grid(frm) {
-	const grid = frm.fields_dict.items && frm.fields_dict.items.grid;
-	if (!grid || !grid.fields_map) {
-		return;
-	}
-
-	const is_transfer = frm.doc.material_request_type === "Material Transfer";
-
-	if (!is_transfer) {
-		// Let the grid recompute its default (Purchase) columns.
-		grid.visible_columns = null;
-		grid.refresh();
-		return;
-	}
-
-	// Force EXACTLY the issue-slip columns, bypassing any saved "Configure Columns"
-	// (GridView) preference: setup_visible_columns() returns early when visible_columns is
-	// already populated, so we build it ourselves in the required order.
-	const cols = [];
-	MR_TRANSFER_COLS.forEach(([fn, size]) => {
-		const df = grid.fields_map[fn] || frappe.meta.get_docfield("Material Request Item", fn);
-		if (!df) {
+	// Only Material Transfer MRs get the custom issue-slip column set. For every other
+	// purpose (Purchase, etc.) leave the grid exactly as ERPNext renders it — never touch
+	// it, so nothing about the standard form/save flow can be affected. Wrapped in
+	// try/catch so a grid-internals change can never break the form or block Save.
+	try {
+		if (frm.doc.material_request_type !== "Material Transfer") {
 			return;
 		}
-		df.in_list_view = 1;
-		df.columns = size;
-		df.colsize = size;
-		cols.push([df, size]);
-	});
-	grid.user_defined_columns = [];
-	grid.visible_columns = cols;
-	grid.refresh();
+		const grid = frm.fields_dict.items && frm.fields_dict.items.grid;
+		if (!grid || !grid.fields_map) {
+			return;
+		}
+		// Force EXACTLY the issue-slip columns, bypassing any saved "Configure Columns"
+		// (GridView) preference: setup_visible_columns() returns early when visible_columns
+		// is already populated, so we build it ourselves in the required order.
+		const cols = [];
+		MR_TRANSFER_COLS.forEach(([fn, size]) => {
+			const df = grid.fields_map[fn] || frappe.meta.get_docfield("Material Request Item", fn);
+			if (!df) {
+				return;
+			}
+			df.in_list_view = 1;
+			df.columns = size;
+			df.colsize = size;
+			cols.push([df, size]);
+		});
+		grid.user_defined_columns = [];
+		grid.visible_columns = cols;
+		grid.refresh();
+	} catch (e) {
+		// Never let a grid tweak break the form.
+		console.warn("configure_items_grid skipped:", e);
+	}
 }
 
 // Total Issue Qty = Pack Size × Nos; Balance Qty = Required Qty − Total Issue Qty.
@@ -694,11 +696,22 @@ function recompute_required_qty_for_pr(cdt, cdn) {
 }
 
 // Warehouse names may carry a trailing space (e.g. "Plant 1 WIP RM "), so match by prefix.
+// EXCLUDE the "JOB WORK" variant: "Plant 2 WIP RM" as a prefix also matches
+// "Plant 2 WIP RM- JOB WORK - PTPL", so without this the stock could be read from the
+// (empty) JOB WORK warehouse instead of "Plant 2 WIP RM  - PTPL". This must match the
+// server-side resolution (material_request_stock._resolve_stock_warehouse) or the client
+// and server disagree on Total Stock, which leaves the form perpetually "Not Saved".
 function get_rm_warehouse_stock(item_code, warehouse_name, company) {
 	return frappe.db
 		.get_list("Warehouse", {
-			filters: { warehouse_name: ["like", `${warehouse_name}%`], company: company },
+			filters: [
+				["warehouse_name", "like", `${warehouse_name}%`],
+				["warehouse_name", "not like", "%JOB WORK%"],
+				["company", "=", company],
+				["is_group", "=", 0],
+			],
 			fields: ["name"],
+			order_by: "name asc",
 			limit: 1,
 		})
 		.then((rows) => {
