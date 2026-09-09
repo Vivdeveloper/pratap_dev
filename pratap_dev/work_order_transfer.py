@@ -76,8 +76,41 @@ def get_wo_transfer_context(work_order):
 		"batch_started_at": str(wo.get("custom_batch_started_at") or "") or None,
 		"rework_qcs": _wo_rework_qcs(wo),
 		"basic_testing_qcs": _accepted_basic_testing_qcs(wo.name),
+		"in_process_qcs": _in_process_qcs(wo.name),
 		"qc_gate": _qc_gate(wo.name),
 	}
+
+
+def _in_process_qcs(work_order):
+	"""Pratap QCs of inspection type "In Process" linked to this Work Order, newest first
+	— shown in the popup's In Process QC tab (created by the "Final QC" button, which mirrors
+	the form's "Create Pratap QC")."""
+	names = frappe.get_all(
+		"Pratap Quality Inspection",
+		filters={
+			"reference_type": "Work Order",
+			"reference_name": work_order,
+			"inspection_type": "In Process",
+			"docstatus": ["<", 2],
+		},
+		pluck="name",
+		order_by="creation desc",
+	)
+	out = []
+	for name in names:
+		qc = frappe.get_doc("Pratap Quality Inspection", name)
+		out.append(
+			{
+				"name": name,
+				"status": qc.status,
+				"docstatus": qc.docstatus,
+				"inspection_date": str(qc.inspection_date or ""),
+				"inspector": qc.get("inspector") or "",
+				"reference_qty": flt(qc.get("reference_qty")),
+				"finished_qty": flt(qc.get("finished_qty")),
+			}
+		)
+	return out
 
 
 def _qc_gate(work_order):

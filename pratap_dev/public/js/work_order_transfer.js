@@ -56,10 +56,12 @@ function render_wo_transfer_dialog(frm, ctx) {
 	const hasJC = (ctx.job_cards || []).length > 0;
 	const rwCount = (ctx.rework_qcs || []).length + (ctx.basic_testing_qcs || []).length;
 	const hasRW = rwCount > 0;
+	const ipqcCount = (ctx.in_process_qcs || []).length;
+	const hasIPQC = ipqcCount > 0;
 	const itemsHtml = ctx.items.map((it) => item_block_html(it)).join("");
 	// Banner shown at the top of the Material Transfer tab when the QC gate is closed.
 	const bannerHtml = `<div class="wo-qc-banner" style="display:none;"></div>`;
-	if (hasJC || hasRW) {
+	if (hasJC || hasRW || hasIPQC) {
 		// Tabs: Material Transfer (existing) + Job Cards + QC (rework + accepted basic testing).
 		const tabs = [
 			`<button class="btn btn-xs btn-primary wo-tab-btn active" data-tab="transfer">${__("Material Transfer")}</button>`,
@@ -81,6 +83,14 @@ function render_wo_transfer_dialog(frm, ctx) {
 				`<div class="wo-tab-pane" data-pane="rework" style="display:none;">${qc_pane_html(ctx)}</div>`
 			);
 		}
+		if (hasIPQC) {
+			tabs.push(
+				`<button class="btn btn-xs btn-default wo-tab-btn" data-tab="ipqc">${__("Final QC")} (${ipqcCount})</button>`
+			);
+			panes.push(
+				`<div class="wo-tab-pane" data-pane="ipqc" style="display:none;">${in_process_qc_pane_html(ctx)}</div>`
+			);
+		}
 		$body.html(
 			`<div class="wo-tabs" style="display:flex;gap:6px;border-bottom:1px solid var(--border-color,#d1d8dd);margin-bottom:12px;">${tabs.join(
 				""
@@ -91,7 +101,7 @@ function render_wo_transfer_dialog(frm, ctx) {
 	}
 	dialog._dirty = false;
 	ctx.items.forEach((it) => wire_item_block(frm, dialog, ctx, $body, it));
-	if (hasJC || hasRW) {
+	if (hasJC || hasRW || hasIPQC) {
 		wire_tabs($body);
 	}
 	if (hasJC) {
@@ -116,6 +126,14 @@ function render_wo_transfer_dialog(frm, ctx) {
 		"wo-inprocess-qc-btn"
 	);
 	dialog.$wrapper.find(".wo-inprocess-qc-btn").css("margin-left", "10px");
+	// "Final QC" — same as the form's "Create Pratap QC": opens a new In Process Pratap QC
+	// for this Work Order (prefilled), sitting right beside the In Process QC button.
+	dialog.add_custom_action(
+		__("Final QC"),
+		() => create_final_qc(frm, dialog),
+		"wo-final-qc-btn"
+	);
+	dialog.$wrapper.find(".wo-final-qc-btn").css("margin-left", "10px");
 	// Recompute the button's enabled state as the draft changes.
 	$body.on("input change", ".wo-b-batch, .wo-b-pkg, .wo-b-units, .wo-b-qty", () =>
 		update_set_plan_state(dialog, ctx)
@@ -784,6 +802,40 @@ function qc_pane_html(ctx) {
 	return html || `<div class="text-muted">${__("No QC records for this Work Order.")}</div>`;
 }
 
+// 4th tab — read-only list of every "In Process" inspection-type Pratap QC linked to this
+// Work Order (these are the QCs the "Final QC" / form "Create Pratap QC" button creates).
+function in_process_qc_pane_html(ctx) {
+	const qcs = ctx.in_process_qcs || [];
+	if (!qcs.length) {
+		return `<div class="text-muted">${__("No Final QC for this Work Order.")}</div>`;
+	}
+	return qcs
+		.map((qc) => {
+			const st = (qc.status || "").trim();
+			const pill = st === "Accepted" ? "green" : st === "Rejected" ? "red" : "orange";
+			const draft = qc.docstatus === 0 ? ` <span class="text-muted small">(${__("Draft")})</span>` : "";
+			const qty =
+				qc.reference_qty || qc.finished_qty
+					? `<div class="text-muted small" style="margin-top:4px;">${__("Reference Qty")}: ${format_number(
+							qc.reference_qty
+					  )} · ${__("Finished Qty")}: ${format_number(qc.finished_qty)}</div>`
+					: "";
+			return `
+		<div style="border:1px solid var(--border-color,#d1d8dd);border-radius:8px;padding:10px 12px;margin-bottom:10px;background:#fff;">
+			<div style="display:flex;gap:10px;align-items:center;">
+				<b>${__("Final QC")}</b>
+				<span class="indicator-pill ${pill}">${frappe.utils.escape_html(qc.status || __("Pending"))}</span>${draft}
+				${qc.inspection_date ? `<span class="text-muted small">${frappe.datetime.str_to_user(qc.inspection_date)}</span>` : ""}
+				<a href="/app/pratap-quality-inspection/${encodeURIComponent(qc.name)}" target="_blank" rel="noopener" style="margin-left:auto;">${frappe.utils.escape_html(
+					qc.name
+				)} ↗</a>
+			</div>
+			${qty}
+		</div>`;
+		})
+		.join("");
+}
+
 function rework_recalc($tr, from_field) {
 	const pkg = flt($tr.find(".wo-rwb-pkg").val());
 	if (from_field === "qty") {
@@ -1269,6 +1321,23 @@ function create_basic_testing_qc(frm, dialog) {
 	dialog.hide();
 	frappe.new_doc("Pratap Quality Inspection", {
 		inspection_type: "Basic Testing",
+		reference_type: "Work Order",
+		reference_doctype: "Work Order",
+		reference_name: frm.doc.name,
+		company: frm.doc.company,
+		production_item: frm.doc.production_item,
+		item_name: frm.doc.item_name,
+		reference_qty: frm.doc.qty,
+	});
+}
+
+// "Final QC" — identical to the form's "Create Pratap QC" button: opens a new In Process
+// Pratap QC for this Work Order (same prefilled values, same page/clicks).
+function create_final_qc(frm, dialog) {
+	dialog._allow_close = true; // leaving for the QC page — don't nag about unsaved batches
+	dialog.hide();
+	frappe.new_doc("Pratap Quality Inspection", {
+		inspection_type: "In Process",
 		reference_type: "Work Order",
 		reference_doctype: "Work Order",
 		reference_name: frm.doc.name,
