@@ -45,6 +45,13 @@ frappe.ui.form.on("Material Request", {
 			$(wo_btn).css({ "background-color": "black", color: "white" });
 		}
 
+		// Material Transfer MRs use the "Material Issue Against Requisition" column set
+		// (Item Code, Item Description, Unit, Required Qty, Pack Size, Nos, Total Issue Qty,
+		// Balance Qty, Batch Number); Purchase MRs keep the procurement columns. Run again
+		// deferred so it overrides the grid's own initial column setup.
+		configure_items_grid(frm);
+		setTimeout(() => configure_items_grid(frm), 300);
+
 		// Keep the warehouse stock columns filled on drafts too, so they are
 		// visible before the Material Request is ever saved.
 		populate_rm_stock_all(frm);
@@ -67,8 +74,74 @@ frappe.ui.form.on("Material Request", {
 
 	material_request_type(frm) {
 		clear_stale_from_warehouse(frm);
+		configure_items_grid(frm);
 	},
 });
+
+// Exact "Material Issue Against Requisition" column set for Material Transfer MRs, in the
+// order they must appear: [fieldname, grid column width]. (Sr No is the grid's built-in
+// row number.) Grid column ORDER follows the doctype field order — uom was moved after
+// description so this renders Item Code · Item Description · Unit · Required Qty · Pack
+// Size · Nos · Total Issue Qty · Balance Qty · Batch Number.
+// Exact "Material Issue Against Requisition" column set for Material Transfer MRs, in
+// order: [fieldname, grid column width]. Total width must stay within the grid's ~11 unit
+// budget (1+2+1+1+1+1+1+1+1 = 10). Sr No is the grid's built-in row number.
+const MR_TRANSFER_COLS = [
+	["item_code", 1],
+	["description", 2],
+	["uom", 1],
+	["qty", 1],
+	["custom_pack_size", 1],
+	["custom_nos", 1],
+	["custom_total_issue_qty", 1],
+	["custom_balance_qty", 1],
+	["custom_batch_number", 1],
+];
+
+function configure_items_grid(frm) {
+	const grid = frm.fields_dict.items && frm.fields_dict.items.grid;
+	if (!grid || !grid.fields_map) {
+		return;
+	}
+
+	const is_transfer = frm.doc.material_request_type === "Material Transfer";
+
+	if (!is_transfer) {
+		// Let the grid recompute its default (Purchase) columns.
+		grid.visible_columns = null;
+		grid.refresh();
+		return;
+	}
+
+	// Force EXACTLY the issue-slip columns, bypassing any saved "Configure Columns"
+	// (GridView) preference: setup_visible_columns() returns early when visible_columns is
+	// already populated, so we build it ourselves in the required order.
+	const cols = [];
+	MR_TRANSFER_COLS.forEach(([fn, size]) => {
+		const df = grid.fields_map[fn] || frappe.meta.get_docfield("Material Request Item", fn);
+		if (!df) {
+			return;
+		}
+		df.in_list_view = 1;
+		df.columns = size;
+		df.colsize = size;
+		cols.push([df, size]);
+	});
+	grid.user_defined_columns = [];
+	grid.visible_columns = cols;
+	grid.refresh();
+}
+
+// Total Issue Qty = Pack Size × Nos; Balance Qty = Required Qty − Total Issue Qty.
+function mr_recalc_issue_row(frm, cdt, cdn) {
+	const row = locals[cdt][cdn];
+	if (!row) {
+		return;
+	}
+	const total_issue = flt(row.custom_pack_size) * flt(row.custom_nos);
+	frappe.model.set_value(cdt, cdn, "custom_total_issue_qty", total_issue);
+	frappe.model.set_value(cdt, cdn, "custom_balance_qty", flt(row.qty) - total_issue);
+}
 
 // Split the Purchase MR items into two reference tables: "Required for PR"
 // (unfulfilled -> can proceed to PO) and "Already Fulfilled — No PO" (warehouse
@@ -308,6 +381,18 @@ frappe.ui.form.on("Material Request Item", {
 	},
 	custom_expected_qty(frm, cdt, cdn) {
 		recompute_required_qty_for_pr(cdt, cdn);
+	},
+	// Material Transfer issue-slip: recompute Total Issue Qty / Balance Qty.
+	custom_pack_size(frm, cdt, cdn) {
+		mr_recalc_issue_row(frm, cdt, cdn);
+	},
+	custom_nos(frm, cdt, cdn) {
+		mr_recalc_issue_row(frm, cdt, cdn);
+	},
+	qty(frm, cdt, cdn) {
+		if (frm.doc.material_request_type === "Material Transfer") {
+			mr_recalc_issue_row(frm, cdt, cdn);
+		}
 	},
 });
 
