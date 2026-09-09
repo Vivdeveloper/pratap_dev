@@ -311,6 +311,7 @@ doctype_js = {
 doctype_list_js = {
     "Pratap Quality Inspection": "public/js/pratap_quality_inspection_list.js",
     "Purchase Receipt": "public/js/purchase_receipt_list.js",
+    "Item": "public/js/item_list.js",
 }
 
 doc_events = {
