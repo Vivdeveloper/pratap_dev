@@ -49,6 +49,13 @@ frappe.ui.form.on("Material Request", {
 		// visible before the Material Request is ever saved.
 		populate_rm_stock_all(frm);
 
+		// Pipeline columns ("Pending PR for GRN" / "Pending for GRN Approved (QC Pending)")
+		// matter most AFTER submission — that is when POs exist for these items. The draft
+		// path above is guarded to docstatus 0, so on a SUBMITTED Material Request refresh
+		// the pipeline status here too (company-wide, from open POs) so the columns reflect
+		// the POs raised for this order instead of staying stale at 0.
+		refresh_pipeline_status_all(frm);
+
 		setup_reject_button(frm);
 		clear_stale_from_warehouse(frm);
 		render_pr_bifurcation(frm);
@@ -152,6 +159,20 @@ function populate_rm_stock_all(frm) {
 		return;
 	}
 	(frm.doc.items || []).forEach((row) => set_rm_warehouse_qty(frm, row.doctype, row.name));
+}
+
+// Refresh the pipeline columns (Pending PR for GRN / Pending for GRN QC) on a SUBMITTED
+// Material Request. On drafts this already happens via populate_rm_stock_all; here we cover
+// the submitted case (where POs for the order exist) so the columns don't stay stale at 0.
+// The fields are allow_on_submit, so the refreshed snapshot can be saved.
+function refresh_pipeline_status_all(frm) {
+	if (frm.doc.docstatus !== 1) {
+		return;
+	}
+	if (frm.doc.material_request_type !== "Purchase") {
+		return;
+	}
+	(frm.doc.items || []).forEach((row) => set_material_pipeline_status(frm, row.doctype, row.name));
 }
 
 // "Reject" lets the current approver peel selected items off this Material

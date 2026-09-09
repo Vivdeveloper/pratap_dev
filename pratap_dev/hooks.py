@@ -378,6 +378,14 @@ doc_events = {
     "Custom Field": {
         "on_update": "pratap_dev.fixture_export.export_custom_field_on_save",
     },
+    "Material Request": {
+        # Compute the Purchase MR pipeline columns (Pending PR for GRN / Pending for GRN
+        # QC / total stock / Required Qty for PR) server-side so they always update on save,
+        # not only when the client script runs. before_update_after_submit keeps them fresh
+        # on submitted MRs (fields are allow_on_submit).
+        "validate": "pratap_dev.material_request_stock.update_pipeline_fields",
+        "before_update_after_submit": "pratap_dev.material_request_stock.update_pipeline_fields",
+    },
     "Request for Quotation": {
         "validate": "pratap_dev.rfq_supplier_fields.set_supplier_fields",
     },
