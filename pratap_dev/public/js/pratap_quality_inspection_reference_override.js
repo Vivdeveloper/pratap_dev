@@ -26,6 +26,7 @@ function remove_qc_button(frm) {
 frappe.ui.form.on("Purchase Receipt", {
 	async refresh(frm) {
 		remove_qc_button(frm);
+		set_grn_qc_status_indicator(frm);
 		await setup_pratap_qc_buttons(frm);
 		await setup_grn_submit_gate(frm);
 
@@ -85,6 +86,20 @@ frappe.ui.form.on("Sales Invoice", {
 		setup_pratap_qc_buttons(frm);
 	},
 });
+
+// Colored indicator for the GRN QC lifecycle: Draft (grey) -> QC Pending (orange).
+// (Submitted GRNs already show the standard "Submitted" indicator.)
+function set_grn_qc_status_indicator(frm) {
+	if (frm.is_new() || frm.doc.docstatus !== 0) {
+		return;
+	}
+	const status = frm.doc.custom_qc_status || "Draft";
+	if (status === "QC Pending") {
+		frm.page.set_indicator(__("QC Pending"), "orange");
+	} else {
+		frm.page.set_indicator(__("Draft"), "red");
+	}
+}
 
 function clear_pratap_qc_buttons(frm) {
 	(frm._pratap_qc_button_labels || []).forEach(({ label, group }) => {
@@ -150,9 +165,42 @@ async function setup_grn_pratap_qc_buttons(frm) {
 	});
 
 	if (data.can_create) {
-		add_pratap_qc_button(frm, __("Create Pratap QC"), () =>
-			create_pratap_qc_from_grn(frm, data.items_need_create || [])
-		);
+		// "Send for QC": auto-creates + saves the Pratap QC(s), moves the GRN to
+		// "QC Pending", then redirects to the QC (or the filtered list if several).
+		add_pratap_qc_button(frm, __("Send for QC"), () => send_grn_for_qc(frm));
+	}
+}
+
+async function send_grn_for_qc(frm) {
+	if (frm.is_dirty()) {
+		frappe.msgprint(__("Please save the GRN before sending for QC."));
+		return;
+	}
+	const { message } = await frappe.call({
+		method: "pratap_dev.purchase_receipt.send_grn_for_qc",
+		args: { purchase_receipt: frm.doc.name },
+		freeze: true,
+		freeze_message: __("Creating Pratap QC..."),
+	});
+	if (!message) {
+		return;
+	}
+	const qcs = message.qcs || [];
+	frappe.show_alert(
+		{
+			message: __("Sent for QC — {0} Pratap QC created. GRN is now QC Pending.", [
+				(message.created || []).length,
+			]),
+			indicator: "green",
+		},
+		5
+	);
+	if (qcs.length === 1) {
+		frappe.set_route("Form", "Pratap Quality Inspection", qcs[0]);
+	} else if (qcs.length > 1) {
+		frappe.set_route("List", "Pratap Quality Inspection", { reference_name: frm.doc.name });
+	} else {
+		frm.reload_doc();
 	}
 }
 

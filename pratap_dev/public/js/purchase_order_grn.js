@@ -98,6 +98,28 @@ function open_create_grn_dialog(frm, items) {
 		size: "extra-large",
 		fields: [
 			{
+				fieldname: "sales_invoice_number",
+				fieldtype: "Data",
+				label: __("Sales Invoice Number"),
+				reqd: 1,
+			},
+			{
+				fieldname: "sales_invoice_date",
+				fieldtype: "Date",
+				label: __("Invoice Date"),
+				reqd: 1,
+			},
+			{
+				fieldname: "gate_pass",
+				fieldtype: "Link",
+				options: "Gate Pass",
+				label: __("Gate Pass"),
+			},
+			{
+				fieldname: "invoice_section_break",
+				fieldtype: "Section Break",
+			},
+			{
 				fieldname: "items",
 				fieldtype: "Table",
 				label: __("Items"),
@@ -149,6 +171,7 @@ function open_create_grn_dialog(frm, items) {
 
 				payload.push({
 					po_item: row.po_item,
+					item_code: row.item_code,
 					grn_qty: total_qty,
 					qty: total_qty,
 					custom_packing_qty: row.custom_packing_qty,
@@ -167,6 +190,9 @@ function open_create_grn_dialog(frm, items) {
 				args: {
 					purchase_order: frm.doc.name,
 					items: payload,
+					sales_invoice_number: dialog.get_value("sales_invoice_number"),
+					sales_invoice_date: dialog.get_value("sales_invoice_date"),
+					gate_pass: dialog.get_value("gate_pass"),
 				},
 				freeze: true,
 				freeze_message: __("Creating and saving Purchase Receipts..."),
@@ -217,6 +243,16 @@ function open_create_grn_dialog(frm, items) {
 
 	dialog.show();
 	bind_grn_grid_events(dialog);
+
+	// Auto-link the Gate Pass that references this PO, if one exists.
+	frappe.db
+		.get_value("Gate Pass", { purchase_order_po_no: frm.doc.name }, "name")
+		.then((r) => {
+			const gp = r && r.message && r.message.name;
+			if (gp) {
+				dialog.set_value("gate_pass", gp);
+			}
+		});
 }
 
 function get_grn_dialog_table_fields() {

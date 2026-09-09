@@ -6,7 +6,12 @@ import json
 import frappe
 from frappe import _
 from frappe.model.mapper import get_mapped_doc
+from frappe.model.naming import make_autoname
 from frappe.utils import flt
+
+# Running series for the GRN group id, e.g. PRG-26-00001, PRG-26-00002 ...
+# `.YY.` = 2-digit year, `.#####` = zero-padded incrementing counter (kept in `tabSeries`).
+GRN_GROUP_SERIES = "PRG-.YY.-.#####"
 
 from erpnext.buying.doctype.purchase_order.purchase_order import set_missing_values
 
@@ -161,7 +166,7 @@ def get_packing_and_units(po_item_row):
 	po_no_of_unit = flt(po_item_row.get("custom_total_qty"))
 
 	if not po_no_of_unit and packing_qty:
-		po_no_of_unit = po_qty / packing_qty
+		po_no_of_unit = flt(po_qty / packing_qty, 3)
 
 	return packing_qty, po_no_of_unit, po_qty
 
@@ -176,8 +181,8 @@ def get_balance_units_and_qty(po_item_row, grn_stats=None):
 		item_stats = grn_stats.get(po_item_row.name) or {}
 		draft_grn_qty = flt(item_stats.get("draft_grn_qty"))
 
-	received_units = received_qty / packing_qty if packing_qty else 0
-	draft_units = draft_grn_qty / packing_qty if packing_qty else 0
+	received_units = flt(received_qty / packing_qty, 3) if packing_qty else 0
+	draft_units = flt(draft_grn_qty / packing_qty, 3) if packing_qty else 0
 	balance_units = max(po_no_of_unit - received_units - draft_units, 0)
 	balance_qty = balance_units * packing_qty
 
@@ -293,19 +298,29 @@ def _validate_grn_qty(po_item_name, item_row):
 	return receive_qty, packing_qty, no_of_unit
 
 
-def _make_single_purchase_receipt(purchase_order, item_row):
-	"""Create and save one Purchase Receipt containing a single PO item."""
-	po_item = item_row.get("po_item")
-	receive_qty, packing_qty, no_of_unit = _validate_grn_qty(po_item, item_row)
+def _make_purchase_receipt_for_rows(
+	purchase_order,
+	item_rows,
+	group_id=None,
+	sales_invoice_number=None,
+	sales_invoice_date=None,
+	gate_pass=None,
+):
+	"""Create and save one Purchase Receipt containing the given PO item rows.
 
-	item_data_map = {
-		po_item: {
+	Multiple rows of the SAME item (each with its own Standard Pkg Qty / No of Unit)
+	are placed into ONE GRN, so batches for each row can be handled together.
+	"""
+	item_data_map = {}
+	for item_row in item_rows:
+		po_item = item_row.get("po_item")
+		receive_qty, packing_qty, no_of_unit = _validate_grn_qty(po_item, item_row)
+		item_data_map[po_item] = {
 			**item_row,
 			"grn_qty": receive_qty,
 			"custom_packing_qty": packing_qty,
 			"custom_total_qty": no_of_unit,
 		}
-	}
 
 	def update_item(obj, target, source_parent):
 		row_data = item_data_map.get(obj.name)
@@ -359,13 +374,33 @@ def _make_single_purchase_receipt(purchase_order, item_row):
 		postprocess=set_missing_values,
 	)
 
+	if group_id and doc.meta.has_field("custom_grn_group_id"):
+		doc.custom_grn_group_id = group_id
+
+	# Dialog's Sales Invoice Number / Date go into the GRN's Supplier Invoice fields
+	# (these flow to the combined Purchase Invoice later).
+	if sales_invoice_number and doc.meta.has_field("custom_supplier_invoice_no"):
+		doc.custom_supplier_invoice_no = sales_invoice_number
+	if sales_invoice_date and doc.meta.has_field("custom_supplier_invoice_date"):
+		doc.custom_supplier_invoice_date = sales_invoice_date
+
+	# Link the Gate Pass chosen in the dialog (auto-matched from this PO).
+	if gate_pass and doc.meta.has_field("custom_gate_pass"):
+		doc.custom_gate_pass = gate_pass
+
 	doc.save()
 	return doc
 
 
 @frappe.whitelist()
-def make_purchase_receipts_from_po(purchase_order, items=None):
-	"""Create and auto-save one Purchase Receipt per PO item row."""
+def make_purchase_receipts_from_po(
+	purchase_order, items=None, sales_invoice_number=None, sales_invoice_date=None, gate_pass=None
+):
+	"""Create and auto-save one Purchase Receipt per PO item row.
+
+	All receipts made in one call share a single GRN group id; the combined Purchase
+	Invoice is created once every GRN in that group is submitted (see purchase_receipt.py).
+	"""
 	if isinstance(items, str):
 		items = json.loads(items)
 
@@ -379,17 +414,49 @@ def make_purchase_receipts_from_po(purchase_order, items=None):
 	if not valid_items:
 		frappe.throw(_("Please enter No of Unit or GRN quantity for at least one item."))
 
+	if not sales_invoice_number:
+		frappe.throw(_("Sales Invoice Number is mandatory."))
+	if not sales_invoice_date:
+		frappe.throw(_("Invoice Date is mandatory."))
+
 	frappe.get_doc("Purchase Order", purchase_order).check_permission("read")
 
-	purchase_receipts = []
+	group_id = make_autoname(GRN_GROUP_SERIES)
+
+	# Group selected rows by item_code -> one GRN per unique item. So a PO where the
+	# same item appears in multiple rows (different Std Pkg Qty / No of Unit) makes a
+	# single GRN for that item (e.g. 4 rows with 2 same item -> 3 GRNs, not 4).
+	from collections import OrderedDict
+
+	grouped = OrderedDict()
 	for row in valid_items:
-		purchase_receipts.append(_make_single_purchase_receipt(purchase_order, row))
+		item_code = row.get("item_code") or frappe.db.get_value(
+			"Purchase Order Item", row.get("po_item"), "item_code"
+		)
+		grouped.setdefault(item_code, []).append(row)
+
+	purchase_receipts = []
+	for item_rows in grouped.values():
+		purchase_receipts.append(
+			_make_purchase_receipt_for_rows(
+				purchase_order,
+				item_rows,
+				group_id=group_id,
+				sales_invoice_number=sales_invoice_number,
+				sales_invoice_date=sales_invoice_date,
+				gate_pass=gate_pass,
+			)
+		)
 
 	return purchase_receipts
 
 
 @frappe.whitelist()
-def make_purchase_receipt_from_po(purchase_order, items=None):
+def make_purchase_receipt_from_po(
+	purchase_order, items=None, sales_invoice_number=None, sales_invoice_date=None
+):
 	"""Backward-compatible API: returns a single PR when only one item is passed."""
-	receipts = make_purchase_receipts_from_po(purchase_order, items)
+	receipts = make_purchase_receipts_from_po(
+		purchase_order, items, sales_invoice_number, sales_invoice_date
+	)
 	return receipts[0] if len(receipts) == 1 else receipts

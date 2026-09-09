@@ -6,19 +6,109 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import cint
 # from erpnext.manufacturing.doctype.work_order.work_order import make_stock_entry
-from erpnext.stock.doctype.quality_inspection_template.quality_inspection_template import (
-	get_template_details
-)
+
+# GRN QC outcomes that still count as "passed enough" to flow to the GRN
+# (fully accepted, or partially accepted/rejected across batches).
+QC_GRN_OK_STATUSES = {"Accepted", "Partially Accepted", "Partially Rejected"}
+
+
+def get_template_parameters(template):
+	"""Template parameters incl. our custom fields (qc_method, specifications).
+
+	ERPNext's get_template_details() only returns a fixed set of columns and
+	drops custom fields, so we fetch the same rows ourselves and add ours.
+	"""
+	if not template:
+		return []
+
+	return frappe.get_all(
+		"Item Quality Inspection Parameter",
+		fields=[
+			"specification",
+			"value",
+			"acceptance_formula",
+			"numeric",
+			"formula_based_criteria",
+			"min_value",
+			"max_value",
+			"qc_method",
+			"specifications",
+		],
+		filters={"parenttype": "Quality Inspection Template", "parent": template},
+		order_by="idx",
+	)
 
 
 class PratapQualityInspection(Document):
 	def before_submit(self):
+		self._validate_required_before_submit()
 		self._ensure_density_for_submit()
 		self._validate_custom_density()
 		self._validate_inspected_qty()
+		self._validate_all_batches_qc_done()
 		self._validate_readings_status_mandatory()
 		self._validate_status_for_submit()
 		self._freeze_batch_qc_json()
+
+	def _validate_required_before_submit(self):
+		"""Inspector and Sample Issued By must be set before the QC can be submitted
+		(they stay optional on the draft)."""
+		missing = []
+		if not self.get("inspector"):
+			missing.append(_("Inspector"))
+		if not self.get("sample_issued_by"):
+			missing.append(_("Sample Issued By"))
+		if missing:
+			frappe.throw(
+				_("Please set {0} before submitting.").format(", ".join(missing)),
+				title=_("Missing Mandatory Fields"),
+			)
+
+	def _validate_all_batches_qc_done(self):
+		"""GRN: block submit until every batch has an Accept/Reject decision (batch-wise readings)."""
+		if (self.reference_type or "").strip() != "GRN":
+			return
+
+		import json
+
+		def _parse(value):
+			try:
+				data = json.loads(value or "[]")
+				return data if isinstance(data, list) else []
+			except Exception:
+				return []
+
+		batch_rows = _parse(self.batch_qc_json)
+		if not batch_rows:
+			return
+
+		# Key each line by (purchase_receipt_item + batch_no) so the same batch on two
+		# GRN rows (different pack sizes) is validated independently. Fall back to
+		# batch_no alone for readings rows saved before the composite-key change.
+		def _key(row):
+			pri = row.get("purchase_receipt_item") or ""
+			return "%s::%s" % (pri, row.get("batch_no"))
+
+		status_by_batch = {}
+		for row in _parse(self.batch_readings_json):
+			k = row.get("key") or _key(row)
+			status_by_batch[k] = (row.get("status") or "").strip()
+			# also index by batch_no for back-compat with pre-change readings
+			status_by_batch.setdefault(row.get("batch_no"), (row.get("status") or "").strip())
+
+		pending = [
+			str(row.get("batch_no"))
+			for row in batch_rows
+			if status_by_batch.get(_key(row)) not in ("Accepted", "Rejected")
+			and status_by_batch.get(row.get("batch_no")) not in ("Accepted", "Rejected")
+		]
+		if pending:
+			frappe.throw(
+				_(
+					"Accept/Reject readings are pending for {0} batch(es): {1}. "
+					"Complete all batches before submit."
+				).format(len(pending), ", ".join(pending))
+			)
 
 	def on_cancel(self):
 		self.ignore_linked_doctypes = ["Serial and Batch Bundle"]
@@ -50,14 +140,31 @@ class PratapQualityInspection(Document):
 		self._set_finished_qty()
 		self._set_readings_from_template()
 		self._inspect_and_set_status()
+		self._validate_rework_raw_materials()
 		self._sync_accepted_qc_to_grn()
 		self._sync_density_to_grn_item()
+
+	def _validate_rework_raw_materials(self):
+		"""When status is Rework and "Raw Material Required" is checked (default), at least
+		one raw material row must be added. Uncheck it to submit without raw materials."""
+		if (self.status or "").strip() != "Rework":
+			return
+		if not self.get("custom_raw_material_required"):
+			return
+		if not (self.get("raw_materials") or []):
+			frappe.throw(
+				_(
+					"Add at least one row in <b>Raw Materials</b> for a Rework QC, or uncheck "
+					"<b>Raw Material Required</b> to proceed without it."
+				),
+				title=_("Raw Materials Required"),
+			)
 
 	def _sync_accepted_qc_to_grn(self):
 		if not self.name:
 			return
 
-		if (self.status or "").strip() != "Accepted":
+		if (self.status or "").strip() not in QC_GRN_OK_STATUSES:
 			return
 
 		from pratap_dev.purchase_receipt import link_pratap_qc_to_grn_item
@@ -139,7 +246,7 @@ class PratapQualityInspection(Document):
 		if self.reference_doctype != "Purchase Receipt" or not self.reference_name:
 			return
 
-		if (self.status or "").strip() != "Accepted":
+		if (self.status or "").strip() not in QC_GRN_OK_STATUSES:
 			return
 
 		if not frappe.db.exists("Purchase Receipt", self.reference_name):
@@ -253,7 +360,7 @@ class PratapQualityInspection(Document):
 		if not self.quality_inspection_template:
 			return
 
-		parameters = get_template_details(self.quality_inspection_template)
+		parameters = get_template_parameters(self.quality_inspection_template)
 		self.set("readings", [])
 		for parameter in parameters:
 			row = self.append("readings", {})
@@ -275,7 +382,7 @@ class PratapQualityInspection(Document):
 		if not self.quality_inspection_template:
 			return
 
-		parameters = get_template_details(self.quality_inspection_template)
+		parameters = get_template_parameters(self.quality_inspection_template)
 		for parameter in parameters:
 			row = self.append("readings", {})
 			row.update(parameter)
@@ -286,6 +393,11 @@ class PratapQualityInspection(Document):
 
 	def _create_stock_entry(self):
 		if self.stock_entry:
+			return
+
+		# "Basic Testing" is a tracking-only inspection: never create a Manufacture Stock
+		# Entry and never auto-submit the Work Order, even when Accepted and submitted.
+		if (self.inspection_type or "").strip() == "Basic Testing":
 			return
 
 		if (self.status or "").strip() != "Accepted":
@@ -304,6 +416,10 @@ class PratapQualityInspection(Document):
 		if qty <= 0:
 			return
 
+		# A Manufacture stock entry needs a submitted Work Order, so auto-submit the
+		# linked WO (if still draft) once the QC is Accepted.
+		self._submit_linked_work_order()
+
 		stock_entry_data = self.make_stock_entry(
 			work_order_id=self.reference_name,
 			purpose="Manufacture",
@@ -314,6 +430,22 @@ class PratapQualityInspection(Document):
 		stock_entry.submit()
 		self._set_batch_custom_density()
 		self.db_set("stock_entry", stock_entry.name, update_modified=False)
+
+	def _submit_linked_work_order(self):
+		"""Auto-submit the linked Work Order if it is still in draft.
+
+		Only reached from the Accepted QC path in _create_stock_entry, so we submit
+		exactly when a Manufacture stock entry is about to be created against the WO.
+		"""
+		if not self.reference_name:
+			return
+
+		wo_docstatus = frappe.db.get_value("Work Order", self.reference_name, "docstatus")
+		if wo_docstatus != 0:
+			return
+
+		work_order = frappe.get_doc("Work Order", self.reference_name)
+		work_order.submit()
 
 	def _set_batch_custom_density(self):
 		batch_name = frappe.db.get_value(
@@ -350,6 +482,15 @@ class PratapQualityInspection(Document):
 
 	def _inspect_and_set_status(self):
 		if not self.readings:
+			return
+
+		if (self.reference_type or "").strip() == "GRN":
+			# GRN QC: per-parameter readings are auto-accepted & manual-inspected; the real
+			# accept/reject is driven by the Batch-wise Readings (per-batch status), so the
+			# parent status is left untouched here (client rolls it up, incl. partial).
+			for reading in self.readings:
+				reading.manual_inspection = 1
+				reading.status = "Accepted"
 			return
 
 		if self.status == "Rework":
@@ -467,8 +608,13 @@ class PratapQualityInspection(Document):
 				frappe.throw(f"Row #{reading.idx}: Status is mandatory.")
 
 	def _validate_status_for_submit(self):
+		# The status-must-be-Accepted gate applies only to GRN inspections.
+		if (self.reference_type or "").strip() != "GRN":
+			return
+
 		status = (self.status or "").strip()
-		if status == "Accepted":
+		# Accepted and partial outcomes (some accepted, some rejected batches) are submittable.
+		if status in ("Accepted", "Partially Accepted", "Partially Rejected"):
 			return
 
 		if status == "Rejected":
@@ -476,7 +622,8 @@ class PratapQualityInspection(Document):
 
 		frappe.throw(
 			_(
-				"Status must be Accepted before submit. For GRN QC, set all readings to Accepted or update Status to Accepted."
+				"Status must be Accepted (or Partially Accepted/Rejected) before submit. "
+				"For GRN QC, add readings for every batch."
 			)
 		)
 
@@ -485,7 +632,10 @@ class PratapQualityInspection(Document):
 		if (self.reference_type or "").strip() != "GRN":
 			return
 
-		from pratap_dev.purchase_receipt_batch_qc import parse_batch_qc_json
+		from pratap_dev.purchase_receipt_batch_qc import (
+			apply_density_to_batch_qc_rows,
+			parse_batch_qc_json,
+		)
 
 		rows = parse_batch_qc_json(self.batch_qc_json)
 		if not rows:
@@ -498,10 +648,11 @@ class PratapQualityInspection(Document):
 				standard_pkg_qty = frappe.utils.flt(batch.get("standard_pkg_qty")) or 1
 				no_of_unit = frappe.utils.flt(batch.get("no_of_unit"))
 				if not no_of_unit and standard_pkg_qty:
-					no_of_unit = batch_qty / standard_pkg_qty
+					no_of_unit = frappe.utils.flt(batch_qty / standard_pkg_qty, 3)
 				rows.append(
 					{
 						"batch_no": batch.get("batch_no"),
+						"purchase_receipt_item": batch.get("purchase_receipt_item"),
 						"batch_qty": batch_qty,
 						"standard_pkg_qty": standard_pkg_qty,
 						"no_of_unit": no_of_unit,
@@ -509,39 +660,72 @@ class PratapQualityInspection(Document):
 						"rejected_unit": no_of_unit,
 						"accepted_qty": 0,
 						"rejected_qty": batch_qty,
+						"density": frappe.utils.flt(batch.get("density")),
 					}
 				)
 
 		if rows:
 			import json
 
+			# Freeze density-converted qtys from each batch's own (GRN-fetched) density.
+			apply_density_to_batch_qc_rows(rows)
 			self.batch_qc_json = json.dumps(rows)
 
 	def _update_grn_item(self):
 		from pratap_dev.purchase_receipt_batch_qc import parse_batch_qc_json, update_grn_from_batch_qc
 
 		grn_doc = frappe.get_doc("Purchase Receipt", self.reference_name)
-		item_row = _get_grn_item_row(
+		# A QC covers every GRN row of the item, so write results back to each row.
+		item_rows = _get_grn_item_rows(
 			grn_doc, self.production_item, self.get("purchase_receipt_item")
 		)
-		if not item_row:
+		if not item_rows:
 			return
 
 		batch_rows = parse_batch_qc_json(self.batch_qc_json)
+
 		if batch_rows:
-			update_grn_from_batch_qc(
-				grn_doc, item_row, batch_rows, custom_density=self.custom_density
-			)
+			# Route each batch's accept/reject decision to the GRN row that owns it.
+			# Prefer the exact owning row (purchase_receipt_item) so the SAME batch on
+			# two GRN rows (e.g. pack 500 and pack 250) is written back to each row
+			# independently. Fall back to a batch_no map for legacy rows.
+			item_rows_by_name = {r.name: r for r in item_rows}
+			rows_by_batch = _map_grn_batches_to_rows(item_rows)
+			grouped = {}
+			for batch_row in batch_rows:
+				owner = item_rows_by_name.get(batch_row.get("purchase_receipt_item"))
+				if not owner:
+					owner = rows_by_batch.get(batch_row.get("batch_no")) or item_rows[0]
+				grouped.setdefault(owner.name, (owner, []))[1].append(batch_row)
+
+			for owner, owner_batch_rows in grouped.values():
+				# Density is per-batch (fetched from the GRN row); use the row's own value.
+				owner_density = _first_row_density(owner_batch_rows)
+				update_grn_from_batch_qc(
+					grn_doc, owner, owner_batch_rows, custom_density=owner_density
+				)
+				self._apply_grn_item_qc_meta(owner, owner_density)
 		else:
-			self._update_batch_custom_density(grn_doc, item_row)
+			# No batch breakdown: legacy single-density path applies one conversion
+			# factor to the whole GRN item row.
+			for item_row in item_rows:
+				self._update_batch_custom_density(grn_doc, item_row)
+				density = frappe.utils.flt(self.custom_density)
+				if density > 0:
+					item_row.conversion_factor = 1.0 / density
+				self._apply_grn_item_qc_meta(item_row, density)
 
-		if frappe.utils.flt(self.reference_qty):
-			conversion_factor = frappe.utils.flt(self.density_qty) / frappe.utils.flt(self.reference_qty)
-			item_row.conversion_factor = conversion_factor
-
-		item_row.custom_density = self.custom_density
-		item_row.custom_pratap_quality_inspection = self.name
 		grn_doc.save(ignore_permissions=True)
+
+	def _apply_grn_item_qc_meta(self, item_row, density):
+		# Store QC meta only. conversion_factor is owned by the batch path
+		# (update_grn_from_batch_qc sets it to 1) and by the no-batch caller above,
+		# so this must not overwrite it.
+		density = frappe.utils.flt(density)
+		if density > 0:
+			item_row.custom_density = density
+
+		item_row.custom_pratap_quality_inspection = self.name
 
 	def _update_batch_custom_density(self, grn_doc, item_row=None):
 		item = item_row or (grn_doc.items[0] if grn_doc.items else None)
@@ -600,8 +784,11 @@ class PratapQualityInspection(Document):
 		# ERPNext requires fg_completed_qty to match finished item qty.
 		stock_entry.fg_completed_qty = finished_qty or reference_qty
 
-		if work_order.bom_no:
-			stock_entry.inspection_required = frappe.db.get_value("BOM", work_order.bom_no, "inspection_required")
+		# The Pratap Quality Inspection IS the quality gate for this stock entry (it is
+		# only created once the QC is Accepted), so never inherit BOM.inspection_required
+		# here — doing so makes ERPNext demand a separate native Quality Inspection and
+		# blocks submit with "Quality Inspection required".
+		stock_entry.inspection_required = 0
 
 		if purpose == "Material Transfer for Manufacture":
 			stock_entry.to_warehouse = wip_warehouse
@@ -677,7 +864,12 @@ class PratapQualityInspection(Document):
 	
 @frappe.whitelist()
 def get_grn_batch_list(purchase_receipt, item_code=None, purchase_receipt_item=None):
-	"""Return batch rows from GRN item serial_and_batch_bundle (or legacy batch_no)."""
+	"""Return batch rows from GRN item serial_and_batch_bundle (or legacy batch_no).
+
+	A GRN QC covers EVERY GRN row of the same item (their qtys are summed into one
+	QC), so batches are collected from all matching rows — not just the linked row —
+	otherwise batches sitting on the other rows would be silently dropped from QC.
+	"""
 	if not purchase_receipt:
 		return []
 
@@ -685,16 +877,62 @@ def get_grn_batch_list(purchase_receipt, item_code=None, purchase_receipt_item=N
 		frappe.throw(_("Purchase Receipt {0} does not exist.").format(purchase_receipt))
 
 	pr = frappe.get_doc("Purchase Receipt", purchase_receipt)
-	item_row = _get_grn_item_row(pr, item_code, purchase_receipt_item)
-	if not item_row:
+	item_rows = _get_grn_item_rows(pr, item_code, purchase_receipt_item)
+	if not item_rows:
 		return []
 
+	batches = []
+	for item_row in item_rows:
+		batches.extend(_batches_for_grn_item_row(item_row))
+
+	return batches
+
+
+def _first_row_density(batch_rows):
+	"""First non-zero density among a GRN row's batch QC rows (they share one row density)."""
+	for row in batch_rows or []:
+		density = frappe.utils.flt(row.get("density"))
+		if density > 0:
+			return density
+	return 0
+
+
+def _batches_for_grn_item_row(item_row):
+	"""Batch rows (batch_no/qty/pkg/units/density) for a single GRN item row.
+
+	Density is fetched from the GRN item row's own density field, so every batch of
+	that row carries the row's density into the QC table.
+	"""
 	standard_pkg_qty = frappe.utils.flt(item_row.get("custom_packing_qty")) or 1
+	purchase_receipt_item = item_row.name
+	row_density = frappe.utils.flt(item_row.get("custom_density"))
+
+	# True No of Unit per batch from the GRN row's pack breakdown (handles a batch
+	# received in multiple pack sizes, where qty / single pkg would be wrong).
+	units_by_batch = {}
+	raw_pkgs = item_row.get("custom_batch_packages_json")
+	if raw_pkgs:
+		import json as _json
+
+		try:
+			for pr in _json.loads(raw_pkgs) or []:
+				bn = (pr.get("batch_no") or "").strip()
+				if bn:
+					units_by_batch[bn] = units_by_batch.get(bn, 0.0) + frappe.utils.flt(
+						pr.get("no_of_unit")
+					)
+		except (ValueError, TypeError):
+			units_by_batch = {}
+
+	def _units_for(batch_no, qty):
+		if batch_no in units_by_batch:
+			return units_by_batch[batch_no]
+		return frappe.utils.flt(qty / standard_pkg_qty, 3) if standard_pkg_qty else 0
 
 	batches = []
-	seen_batches = {}
 
 	if item_row.get("serial_and_batch_bundle"):
+		seen_batches = {}
 		entries = frappe.get_all(
 			"Serial and Batch Entry",
 			filters={"parent": item_row.serial_and_batch_bundle, "batch_no": ["is", "set"]},
@@ -717,7 +955,9 @@ def get_grn_batch_list(purchase_receipt, item_code=None, purchase_receipt_item=N
 					"batch_no": batch_no,
 					"batch_qty": qty,
 					"standard_pkg_qty": standard_pkg_qty,
-					"no_of_unit": qty / standard_pkg_qty if standard_pkg_qty else 0,
+					"no_of_unit": _units_for(batch_no, qty),
+					"purchase_receipt_item": purchase_receipt_item,
+					"density": row_density,
 				}
 			)
 
@@ -728,7 +968,9 @@ def get_grn_batch_list(purchase_receipt, item_code=None, purchase_receipt_item=N
 				"batch_no": item_row.batch_no,
 				"batch_qty": batch_qty,
 				"standard_pkg_qty": standard_pkg_qty,
-				"no_of_unit": batch_qty / standard_pkg_qty if standard_pkg_qty else 0,
+				"no_of_unit": _units_for(item_row.batch_no, batch_qty),
+				"purchase_receipt_item": purchase_receipt_item,
+				"density": row_density,
 			}
 		)
 
@@ -751,6 +993,50 @@ def _get_grn_item_row(purchase_receipt_doc, item_code=None, purchase_receipt_ite
 				return row
 
 	return items[0]
+
+
+def _get_grn_item_rows(purchase_receipt_doc, item_code=None, purchase_receipt_item=None):
+	"""All GRN rows a QC spans: every row of the item (GRN QC is item-level).
+
+	Falls back to the single linked row / first row when no item_code is given.
+	"""
+	items = purchase_receipt_doc.get("items") or []
+	if not items:
+		return []
+
+	if item_code:
+		rows = [row for row in items if row.item_code == item_code]
+		if rows:
+			return rows
+
+	if purchase_receipt_item:
+		rows = [row for row in items if row.name == purchase_receipt_item]
+		if rows:
+			return rows
+
+	return [items[0]]
+
+
+def _map_grn_batches_to_rows(item_rows):
+	"""batch_no -> owning GRN item row, scanning accepted & rejected bundles (and legacy batch_no)."""
+	mapping = {}
+	for row in item_rows:
+		for field in ("serial_and_batch_bundle", "rejected_serial_and_batch_bundle"):
+			bundle = row.get(field)
+			if not bundle:
+				continue
+			entries = frappe.get_all(
+				"Serial and Batch Entry",
+				filters={"parent": bundle, "batch_no": ["is", "set"]},
+				fields=["batch_no"],
+			)
+			for entry in entries:
+				mapping.setdefault(entry.batch_no, row)
+
+		if row.get("batch_no"):
+			mapping.setdefault(row.batch_no, row)
+
+	return mapping
 
 
 @frappe.whitelist()
@@ -805,3 +1091,34 @@ def _parse_float(value):
 		return float(str(value).replace(",", ""))
 	except (TypeError, ValueError):
 		return 0.0
+
+
+@frappe.whitelist()
+@frappe.validate_and_sanitize_search_inputs
+def item_group_filtered_item_query(doctype, txt, searchfield, start, page_len, filters):
+	"""Link query for the Raw Materials item_code, filtered by the selected Item Group
+	(and its descendants) via the 'Filter' field — mirrors the BOM's item-group filter."""
+	filters = filters or {}
+	if isinstance(filters, str):
+		import json as _json
+		filters = _json.loads(filters)
+
+	conditions = ["disabled = 0"]
+	values = {"txt": "%%%s%%" % (txt or ""), "start": start, "page_len": page_len}
+
+	item_group = filters.get("item_group_filter")
+	if item_group and frappe.db.exists("Item Group", item_group):
+		groups = (frappe.db.get_descendants("Item Group", item_group) or []) + [item_group]
+		conditions.append("item_group in %(groups)s")
+		values["groups"] = tuple(groups)
+
+	conditions.append("(name like %(txt)s or item_name like %(txt)s)")
+	return frappe.db.sql(
+		"""
+		SELECT name, item_name FROM `tabItem`
+		WHERE {conditions}
+		ORDER BY (name like %(txt)s) DESC, name ASC
+		LIMIT %(start)s, %(page_len)s
+		""".format(conditions=" AND ".join(conditions)),
+		values,
+	)

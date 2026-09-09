@@ -132,6 +132,11 @@ app_include_js = ["/assets/pratap_dev/js/last_buying_rates.js"]
 
 override_doctype_class = {
 	"Purchase Receipt": "pratap_dev.purchase_receipt.PratapPurchaseReceipt",
+	# Allow supplier-variant items (RFQ rename) to satisfy the MR item link on POs.
+	"Purchase Order": "pratap_dev.purchase_order_variant.PratapPurchaseOrder",
+	# Preserve Required Items row names when qty changes on a submitted WO (editable
+	# qty after submit) so Update doesn't fail with "Work Order Item ... not found".
+	"Work Order": "pratap_dev.work_order_class.PratapWorkOrder",
 }
 
 # Document Events
@@ -248,6 +253,12 @@ fixtures = [
 		"dt": "Custom Field",
 		"filters": [["module", "=", "pratap"]],
 	},
+	# Ship the BOM English->Marathi translation Client Script with the app so the
+	# fix deploys everywhere (Client Scripts are otherwise per-site DB records).
+	{
+		"dt": "Client Script",
+		"filters": [["name", "=", "English to Marathi in BOM"]],
+	},
 ]
 
 before_migrate = ["pratap_dev.fixture_export.setup_fixture_import"]
@@ -259,22 +270,47 @@ after_migrate = ["pratap_dev.purchase_order_grn.disable_purchase_after_save_mess
 
 override_whitelisted_methods = {
 	"get_last_buying_rate": "pratap_dev.purchase_order_grn.get_last_buying_rate",
+	# RFQ supplier portal: persist Std Pkg Qty / No of Unit onto the created SQ.
+	"erpnext.buying.doctype.request_for_quotation.request_for_quotation.create_supplier_quotation": "pratap_dev.supplier_quotation_portal.create_supplier_quotation",
 }
 
 doctype_js = {
     "Opportunity": "public/js/opportunity_override.js",
-    "Work Order": "public/js/work_order_override.js",
+    "Pratap Quality Inspection": "public/js/pratap_quality_inspection.js",
+    "Item": "public/js/item.js",
+    "Work Order": [
+        "public/js/work_order_override.js",
+        "public/js/work_order_bom_item.js",
+        "public/js/work_order_alternate_repack.js",
+        "public/js/work_order_batch_sheet.js",
+        "public/js/work_order_transfer.js",
+        "public/js/work_order_time_log.js",
+    ],
     "Purchase Order": "public/js/purchase_order_grn.js",
     "Supplier Quotation": "public/js/supplier_quotation.js",
-    "Purchase Receipt": "public/js/pratap_quality_inspection_reference_override.js",
+    "Purchase Receipt": [
+        "public/js/pratap_quality_inspection_reference_override.js",
+        "public/js/purchase_receipt_batch_entry.js",
+        "public/js/purchase_receipt_dates.js",
+    ],
     "Purchase Invoice": "public/js/pratap_quality_inspection_reference_override.js",
     "Delivery Note": "public/js/pratap_quality_inspection_reference_override.js",
     "Sales Invoice": "public/js/pratap_quality_inspection_reference_override.js",
     "Material Request": "public/js/material_request.js",
+    "BOM": [
+        "public/js/bom.js",
+        "public/js/bom_batch_sheet.js",
+    ],
+    "Batch": "public/js/batch.js",
+    "Stock Entry": [
+        "public/js/stock_entry_batch_entry.js",
+        "public/js/stock_entry_bundle_details.js",
+    ],
 }
 
 doctype_list_js = {
-    "Pratap Quality Inspection": "public/js/pratap_quality_inspection_list.js"
+    "Pratap Quality Inspection": "public/js/pratap_quality_inspection_list.js",
+    "Purchase Receipt": "public/js/purchase_receipt_list.js",
 }
 
 doc_events = {
@@ -306,12 +342,65 @@ doc_events = {
         "before_save": "pratap_dev.calculation.tsa_table_cal_by_weight"
     },
     "Stock Entry": {
-        "before_submit": "pratap_dev.stock_entry_validation.validate_manufacture_batch_with_work_order"
+        "before_validate": "pratap_dev.stock_entry_validation.disable_inspection_required",
+        "before_submit": [
+            "pratap_dev.stock_entry_validation.validate_manufacture_batch_with_work_order",
+            "pratap_dev.stock_entry_validation.prevent_over_transfer_for_manufacture",
+        ],
+        "on_submit": "pratap_dev.batch_package_hooks.stock_entry_on_submit",
+        "on_cancel": "pratap_dev.batch_package_hooks.stock_entry_on_cancel",
     },
     "Pratap Quality Inspection": {
         "on_update": "pratap_dev.purchase_receipt.link_pratap_qc_to_grn_item",
     },
+    "Batch": {
+        "validate": "pratap_dev.batch_hooks.set_batch_no_of_unit",
+    },
+    "Work Order": {
+        "before_validate": "pratap_dev.work_order_bom_item.set_bom_item",
+        "validate": [
+            "pratap_dev.work_order_instruction.set_operation_instructions",
+            "pratap_dev.bom_batch_sheet.sync_work_order_batch_sheet",
+            "pratap_dev.work_order_material_request.set_mr_qty",
+        ],
+        # validate does not fire when saving a SUBMITTED doc, so recompute MR Qty here too
+        # — otherwise MR Qty (and the Start gate) never refreshes on a submitted Work Order
+        # even after material reaches the source warehouse. The fields it writes
+        # (available_qty_at_source_warehouse, custom_qty_amount) are allow_on_submit.
+        "before_update_after_submit": "pratap_dev.work_order_material_request.set_mr_qty",
+    },
+    "BOM": {
+        "validate": [
+            "pratap_dev.bom_custom.validate_bom_total_qty",
+            "pratap_dev.bom_batch_sheet.validate_bom_effective_date",
+        ],
+    },
     "Custom Field": {
         "on_update": "pratap_dev.fixture_export.export_custom_field_on_save",
+    },
+    "Material Request": {
+        # Compute the Purchase MR pipeline columns (Pending PR for GRN / Pending for GRN
+        # QC / total stock / Required Qty for PR) server-side so they always update on save,
+        # not only when the client script runs. before_update_after_submit keeps them fresh
+        # on submitted MRs (fields are allow_on_submit).
+        "validate": "pratap_dev.material_request_stock.update_pipeline_fields",
+        "before_update_after_submit": "pratap_dev.material_request_stock.update_pipeline_fields",
+    },
+    "Request for Quotation": {
+        "validate": "pratap_dev.rfq_supplier_fields.set_supplier_fields",
+    },
+    "Supplier Quotation": {
+        "validate": "pratap_dev.supplier_quotation_po.set_required_date_from_rfq",
+    },
+    "Purchase Receipt": {
+        "validate": [
+            "pratap_dev.purchase_receipt.set_item_fields",
+            "pratap_dev.purchase_receipt.validate_supplier_invoice_date",
+        ],
+        "on_submit": "pratap_dev.batch_package_hooks.purchase_receipt_on_submit",
+        "on_cancel": "pratap_dev.batch_package_hooks.purchase_receipt_on_cancel",
+    },
+    "Purchase Invoice": {
+        "validate": "pratap_dev.purchase_invoice.set_grn_group_id_from_receipt",
     },
 }

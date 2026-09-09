@@ -27,7 +27,9 @@
   "supplier_address",
   "vehicle_fitness_certificate",
   "puc",
-  "insurance"
+  "insurance",
+  "items_section",
+  "items"
  ],
  "fields": [
   {
@@ -173,6 +175,17 @@
    "in_list_view": 1,
    "label": "Insurance",
    "options": "\nValid\nInvalid"
+  },
+  {
+   "fieldname": "items_section",
+   "fieldtype": "Section Break",
+   "label": "Items"
+  },
+  {
+   "fieldname": "items",
+   "fieldtype": "Table",
+   "label": "Items",
+   "options": "Gate Pass Item"
   }
  ],
  "grid_page_length": 50,

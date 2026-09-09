@@ -17,6 +17,8 @@
   "column_break_4",
   "min_value",
   "max_value",
+  "qc_method",
+  "specifications",
   "formula_based_criteria",
   "acceptance_formula",
   "section_break_3",
@@ -212,6 +214,22 @@
    "fieldtype": "Data",
    "in_list_view": 1,
    "label": "Observe Value"
+  },
+  {
+   "columns": 1,
+   "fieldname": "qc_method",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "QC Method",
+   "read_only": 1
+  },
+  {
+   "columns": 2,
+   "fieldname": "specifications",
+   "fieldtype": "Small Text",
+   "in_list_view": 1,
+   "label": "Specifications",
+   "read_only": 1
   }
  ],
  "istable": 1,

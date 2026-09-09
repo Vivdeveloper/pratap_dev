@@ -12,6 +12,7 @@ frappe.ui.form.on("Pratap Quality Inspection", {
 		set_reference_name_query(frm);
 		set_cancel_all_ignore_doctypes(frm);
 		handle_status_values(frm);
+		apply_reading_table_mode(frm);
 		toggle_supplier_coa(frm);
 		if (frm.doc.reference_type === "GRN" && frm.doc.reference_name) {
 			load_grn_batch_details(frm);
@@ -40,6 +41,7 @@ frappe.ui.form.on("Pratap Quality Inspection", {
 			frm.set_value("reference_name", "");
 		}
 		handle_status_values(frm);
+		apply_reading_table_mode(frm);
 		toggle_supplier_coa(frm);
 		if (frm.doc.reference_type !== "GRN") {
 			frm.set_value("batch_qc_json", "");
@@ -79,25 +81,62 @@ frappe.ui.form.on("Pratap Quality Inspection", {
 		}
 		if (!frm.doc.quality_inspection_template) {
 			frm.call("get_item_specification_details").then(() => {
+				persist_reading_specs(frm);
 				frm.refresh_field("readings");
+				apply_reading_table_mode(frm);
+				render_batch_readings_matrix(frm);
 			});
 		}
 	},
 
 	quality_inspection_template(frm) {
 		frm.call("get_item_specification_details").then(() => {
+			persist_reading_specs(frm);
 			frm.refresh_field("readings");
+			apply_reading_table_mode(frm);
+			render_batch_readings_matrix(frm);
 		});
 	},
 
+	readings_add(frm) {
+		apply_reading_table_mode(frm);
+		render_batch_readings_matrix(frm);
+	},
+
+	readings_remove(frm) {
+		render_batch_readings_matrix(frm);
+	},
+
+	validate(frm) {
+		warn_incomplete_batch_readings(frm);
+	},
+
 	before_submit(frm) {
-		if ((frm.doc.status || "").trim() !== "Accepted") {
-			frappe.throw({
-				title: __("Cannot Submit"),
-				message: __(
-					"Status must be Accepted before submit. Complete readings and set Status to Accepted."
-				),
-			});
+		// GRN: every batch must have its readings added (Accept/Reject) before submit.
+		if (frm.doc.reference_type === "GRN") {
+			const pending = bread_pending_batches(frm);
+			if (pending.length) {
+				frappe.throw({
+					title: __("Incomplete Batch Readings"),
+					message: __(
+						"Accept/Reject readings are pending for {0} batch(es): {1}. Complete all batches before submit.",
+						[pending.length, pending.join(", ")]
+					),
+				});
+			}
+		}
+
+		// Status-must-be-Accepted check applies only to GRN inspections.
+		if (frm.doc.reference_type === "GRN") {
+			const status = (frm.doc.status || "").trim();
+			if (!["Accepted", "Partially Accepted", "Partially Rejected"].includes(status)) {
+				frappe.throw({
+					title: __("Cannot Submit"),
+					message: __(
+						"Status must be Accepted (or Partially Accepted/Rejected) before submit. Complete all batch readings."
+					),
+				});
+			}
 		}
 		if (flt(frm.doc.inspected_qty) <= 0) {
 			frappe.throw({
@@ -207,8 +246,26 @@ function update_reading_row_status(frm, cdt, cdn) {
 	update_document_status_from_readings(frm);
 }
 
+// Persist template-fetched acceptance limits onto each reading row so they are
+// committed to the model — not just displayed. Without this the fetched min/max
+// can show once and then vanish when the row is edited / the grid re-renders.
+function persist_reading_specs(frm) {
+    (frm.doc.readings || []).forEach((row) => {
+        ["min_value", "max_value"].forEach((field) => {
+            const val = row[field];
+            if (val !== undefined && val !== null && val !== "") {
+                frappe.model.set_value(row.doctype, row.name, field, flt(val));
+            }
+        });
+    });
+}
+
 function update_document_status_from_readings(frm) {
 	if (frm.doc.docstatus >= 1 || frm.doc.status === "Rework") {
+		return;
+	}
+	// GRN parent status is driven by the Batch-wise Readings roll-up, not per-parameter readings.
+	if (frm.doc.reference_type === "GRN") {
 		return;
 	}
 
@@ -400,9 +457,38 @@ function fetch_reference_item_details(frm) {
 
 function handle_status_values(frm){
 	if (frm.doc.reference_type == "GRN") {
-		frm.set_df_property("status", "options", ["Pending", "Accepted", "Rejected"]);
-
+		frm.set_df_property("status", "options", [
+			"Pending",
+			"Accepted",
+			"Partially Accepted",
+			"Partially Rejected",
+			"Rejected",
+		]);
 	}
+}
+
+// GRN: hide the raw Readings table and auto-tick Manual Inspection + Status Accepted on
+// each reading row (batch-wise readings drive QC). WO / others: show the Readings table.
+function apply_reading_table_mode(frm) {
+	const is_grn = frm.doc.reference_type === "GRN";
+	frm.toggle_display("readings", !is_grn);
+	// GRN uses per-batch density in the Batch QC Details table, so hide the
+	// doc-level Density and Density Qty fields.
+	frm.toggle_display("custom_density", !is_grn);
+	frm.toggle_display("density_qty", !is_grn);
+
+	if (!is_grn || frm.doc.docstatus !== 0) {
+		return;
+	}
+
+	(frm.doc.readings || []).forEach((row) => {
+		if (!cint(row.manual_inspection)) {
+			frappe.model.set_value(row.doctype, row.name, "manual_inspection", 1);
+		}
+		if ((row.status || "").trim() !== "Accepted") {
+			frappe.model.set_value(row.doctype, row.name, "status", "Accepted");
+		}
+	});
 }
 
 function toggle_supplier_coa(frm) {
@@ -439,13 +525,19 @@ function clear_grn_batch_html(frm) {
 	}
 }
 
+// A QC line is identified by (GRN row + batch), NOT batch_no alone, so the SAME
+// batch received on two GRN rows (e.g. pack 500 and pack 250) stays independent.
+function qc_row_key(row) {
+	return `${row.purchase_receipt_item || ""}::${row.batch_no || ""}`;
+}
+
 function parse_batch_qc_json(value) {
 	if (!value) {
 		return {};
 	}
 	try {
 		const parsed = JSON.parse(value);
-		return Array.isArray(parsed) ? Object.fromEntries(parsed.map((row) => [row.batch_no, row])) : {};
+		return Array.isArray(parsed) ? Object.fromEntries(parsed.map((row) => [qc_row_key(row), row])) : {};
 	} catch {
 		return {};
 	}
@@ -467,8 +559,11 @@ function serialize_batch_qc_rows(rows) {
 	return JSON.stringify(
 		(rows || []).map((row) => {
 			const normalized = normalize_grn_batch_row(row);
+			const density = flt(normalized.density);
 			return {
 				batch_no: normalized.batch_no,
+				// keep the owning GRN row so the same batch on two rows stays separate
+				purchase_receipt_item: normalized.purchase_receipt_item,
 				batch_qty: normalized.batch_qty,
 				standard_pkg_qty: normalized.standard_pkg_qty,
 				no_of_unit: normalized.no_of_unit,
@@ -476,9 +571,23 @@ function serialize_batch_qc_rows(rows) {
 				rejected_unit: normalized.rejected_unit,
 				accepted_qty: normalized.accepted_qty,
 				rejected_qty: normalized.rejected_qty,
+				// Per-batch density and the density-converted accepted/rejected qty.
+				density,
+				accepted_density_qty: batch_qty_by_density(normalized.accepted_qty, density),
+				rejected_density_qty: batch_qty_by_density(normalized.rejected_qty, density),
 			};
 		})
 	);
+}
+
+// Qty ÷ density; falls back to the raw qty when density is 0 (nothing to convert by).
+function batch_qty_by_density(qty, density) {
+	const d = flt(density);
+	return d ? flt(qty) / d : flt(qty);
+}
+
+function format_batch_qty_by_density(qty, density) {
+	return format_batch_display(batch_qty_by_density(qty, density));
 }
 
 function get_row_batch_units(row) {
@@ -517,12 +626,23 @@ function normalize_grn_batch_row(row, saved = {}) {
 		accepted_unit = standard_pkg_qty ? flt(row.accepted_qty) / standard_pkg_qty : 0;
 	}
 
+	// User-edited (saved) density wins over the GRN-fetched default, mirroring how
+	// accepted_unit prefers the saved value — otherwise a reload overwrites edits.
+	let density = 0;
+	if (saved.density !== null && saved.density !== undefined && saved.density !== "") {
+		density = flt(saved.density);
+	} else if (row.density !== null && row.density !== undefined && row.density !== "") {
+		density = flt(row.density);
+	}
+
 	const normalized = {
 		batch_no: row.batch_no,
+		purchase_receipt_item: row.purchase_receipt_item ?? saved.purchase_receipt_item,
 		batch_qty,
 		standard_pkg_qty,
 		no_of_unit,
 		accepted_unit,
+		density,
 	};
 
 	return sync_row_from_accepted_unit(normalized).row;
@@ -589,7 +709,7 @@ function load_grn_batch_details(frm) {
 			const saved_rows = parse_batch_qc_json(frm.doc.batch_qc_json);
 			const batches = response.message || [];
 
-			frm._grn_batch_rows = batches.map((row) => normalize_grn_batch_row(row, saved_rows[row.batch_no] || {}));
+			frm._grn_batch_rows = batches.map((row) => normalize_grn_batch_row(row, saved_rows[qc_row_key(row)] || {}));
 
 			render_grn_batch_html(frm);
 		});
@@ -603,6 +723,7 @@ function render_grn_batch_html(frm) {
 
 	if (frm.doc.reference_type !== "GRN") {
 		clear_grn_batch_html(frm);
+		render_batch_readings_matrix(frm);
 		return;
 	}
 
@@ -613,6 +734,7 @@ function render_grn_batch_html(frm) {
 			: __("Select a GRN reference to load batch details.");
 		$wrapper.html(`<div class="grn-batch-empty text-muted">${message}</div>`);
 		ensure_grn_batch_styles();
+		render_batch_readings_matrix(frm);
 		return;
 	}
 
@@ -623,9 +745,13 @@ function render_grn_batch_html(frm) {
 			const no_of_unit = format_batch_display(get_row_batch_units(row));
 			const accepted_unit = format_batch_input(row.accepted_unit);
 			const rejected_unit = format_batch_display(row.rejected_unit);
-			const accepted_qty = format_batch_display(row.accepted_qty);
-			const rejected_qty = format_batch_display(calc_rejected_qty(row));
 			const batch_qty = format_batch_display(row.batch_qty);
+			const row_density = flt(row.density);
+			const density_input = format_batch_input(row_density);
+			// Accepted/Rejected Qty are shown divided by this batch's own density
+			// (raw qty when density is 0 — nothing to convert by).
+			const accepted_qty = format_batch_qty_by_density(row.accepted_qty, row_density);
+			const rejected_qty = format_batch_qty_by_density(calc_rejected_qty(row), row_density);
 
 			if (is_read_only) {
 				return `<tr data-batch-index="${index}">
@@ -638,6 +764,7 @@ function render_grn_batch_html(frm) {
 					<td class="grn-batch-col-qty">${no_of_unit}</td>
 					<td class="grn-batch-col-qty grn-batch-col-accepted">${format_batch_display(row.accepted_unit)}</td>
 					<td class="grn-batch-col-qty grn-batch-col-rejected">${rejected_unit}</td>
+					<td class="grn-batch-col-qty grn-batch-col-density">${format_batch_display(row_density)}</td>
 					<td class="grn-batch-col-qty grn-batch-col-accepted">${accepted_qty}</td>
 					<td class="grn-batch-col-qty grn-batch-col-rejected">${rejected_qty}</td>
 				</tr>`;
@@ -659,6 +786,10 @@ function render_grn_batch_html(frm) {
 				<td class="grn-batch-col-qty grn-batch-col-rejected">
 					<span class="grn-batch-rejected-unit-display" data-batch-index="${index}">${rejected_unit}</span>
 				</td>
+				<td class="grn-batch-col-input grn-batch-col-density">
+					<input type="number" class="grn-batch-input grn-batch-density"
+						data-batch-index="${index}" min="0" step="any" value="${density_input}" placeholder="0">
+				</td>
 				<td class="grn-batch-col-qty grn-batch-col-accepted">
 					<span class="grn-batch-accepted-qty-display" data-batch-index="${index}">${accepted_qty}</span>
 				</td>
@@ -670,6 +801,15 @@ function render_grn_batch_html(frm) {
 		.join("");
 
 	const totals = get_grn_batch_totals(rows);
+	// Accepted/Rejected Qty totals use the per-batch density-divided values (match the rows).
+	const total_accepted_density = (rows || []).reduce(
+		(sum, row) => sum + batch_qty_by_density(row.accepted_qty, flt(row.density)),
+		0
+	);
+	const total_rejected_density = (rows || []).reduce(
+		(sum, row) => sum + batch_qty_by_density(calc_rejected_qty(row), flt(row.density)),
+		0
+	);
 
 	const item_label = frm.doc.production_item
 		? frappe.utils.escape_html(frm.doc.production_item)
@@ -695,6 +835,7 @@ function render_grn_batch_html(frm) {
 							<th class="grn-batch-col-qty">${__("No of Unit")}</th>
 							<th class="grn-batch-col-input grn-batch-col-accepted">${__("Accepted Unit")}</th>
 							<th class="grn-batch-col-input grn-batch-col-rejected">${__("Rejected Unit")}</th>
+							<th class="grn-batch-col-input grn-batch-col-density">${__("Density")}</th>
 							<th class="grn-batch-col-input grn-batch-col-accepted">${__("Accepted Qty")}</th>
 							<th class="grn-batch-col-input grn-batch-col-rejected">${__("Rejected Qty")}</th>
 						</tr>
@@ -708,8 +849,9 @@ function render_grn_batch_html(frm) {
 							<td class="grn-batch-col-qty grn-batch-total-no-of-unit">${format_batch_display(totals.no_of_unit)}</td>
 							<td class="grn-batch-col-qty grn-batch-col-accepted grn-batch-total-accepted-unit">${format_batch_display(totals.accepted_unit)}</td>
 							<td class="grn-batch-col-qty grn-batch-col-rejected grn-batch-total-rejected-unit">${format_batch_display(totals.rejected_unit)}</td>
-							<td class="grn-batch-col-qty grn-batch-col-accepted grn-batch-total-accepted-qty">${format_batch_display(totals.accepted_qty)}</td>
-							<td class="grn-batch-col-qty grn-batch-col-rejected grn-batch-total-rejected-qty">${format_batch_display(totals.rejected_qty)}</td>
+							<td class="grn-batch-col-qty grn-batch-col-density"></td>
+							<td class="grn-batch-col-qty grn-batch-col-accepted grn-batch-total-accepted-qty">${format_batch_display(total_accepted_density)}</td>
+							<td class="grn-batch-col-qty grn-batch-col-rejected grn-batch-total-rejected-qty">${format_batch_display(total_rejected_density)}</td>
 						</tr>
 					</tfoot>
 				</table>
@@ -723,6 +865,7 @@ function render_grn_batch_html(frm) {
 
 	expand_batch_html_full_width(frm);
 	ensure_grn_batch_styles();
+	render_batch_readings_matrix(frm);
 }
 
 function bind_grn_batch_html_events(frm, $wrapper) {
@@ -731,10 +874,43 @@ function bind_grn_batch_html_events(frm, $wrapper) {
 		.on("input blur", ".grn-batch-accepted-unit", function () {
 			sync_grn_batch_row_inputs(frm, $wrapper, $(this));
 		});
+	$wrapper
+		.off("input blur", ".grn-batch-density")
+		.on("input blur", ".grn-batch-density", function () {
+			sync_grn_batch_density_input(frm, $wrapper, $(this));
+		});
 }
 
 function calc_rejected_qty(row) {
 	return flt(row.rejected_qty);
+}
+
+function refresh_grn_batch_row_qty_cells(frm, $wrapper, index, row) {
+	const density = flt(row.density);
+	$wrapper
+		.find(`.grn-batch-accepted-qty-display[data-batch-index="${index}"]`)
+		.text(format_batch_qty_by_density(row.accepted_qty, density));
+	$wrapper
+		.find(`.grn-batch-rejected-display[data-batch-index="${index}"]`)
+		.text(format_batch_qty_by_density(calc_rejected_qty(row), density));
+}
+
+function refresh_grn_batch_qty_totals(frm, $wrapper) {
+	const rows = frm._grn_batch_rows || [];
+	const totals = get_grn_batch_totals(rows);
+	const total_accepted_density = rows.reduce(
+		(sum, r) => sum + batch_qty_by_density(r.accepted_qty, flt(r.density)),
+		0
+	);
+	const total_rejected_density = rows.reduce(
+		(sum, r) => sum + batch_qty_by_density(calc_rejected_qty(r), flt(r.density)),
+		0
+	);
+	$wrapper.find(".grn-batch-total-no-of-unit").text(format_batch_display(totals.no_of_unit));
+	$wrapper.find(".grn-batch-total-accepted-unit").text(format_batch_display(totals.accepted_unit));
+	$wrapper.find(".grn-batch-total-rejected-unit").text(format_batch_display(totals.rejected_unit));
+	$wrapper.find(".grn-batch-total-accepted-qty").text(format_batch_display(total_accepted_density));
+	$wrapper.find(".grn-batch-total-rejected-qty").text(format_batch_display(total_rejected_density));
 }
 
 function sync_grn_batch_row_inputs(frm, $wrapper, $changed_input) {
@@ -752,12 +928,7 @@ function sync_grn_batch_row_inputs(frm, $wrapper, $changed_input) {
 	$wrapper
 		.find(`.grn-batch-rejected-unit-display[data-batch-index="${index}"]`)
 		.text(format_batch_display(synced_row.rejected_unit));
-	$wrapper
-		.find(`.grn-batch-accepted-qty-display[data-batch-index="${index}"]`)
-		.text(format_batch_display(synced_row.accepted_qty));
-	$wrapper
-		.find(`.grn-batch-rejected-display[data-batch-index="${index}"]`)
-		.text(format_batch_display(synced_row.rejected_qty));
+	refresh_grn_batch_row_qty_cells(frm, $wrapper, index, synced_row);
 
 	if (capped) {
 		$changed_input.addClass("grn-batch-input-capped");
@@ -765,14 +936,21 @@ function sync_grn_batch_row_inputs(frm, $wrapper, $changed_input) {
 	}
 
 	frm._grn_batch_rows[index] = synced_row;
+	refresh_grn_batch_qty_totals(frm, $wrapper);
+	frm.set_value("batch_qc_json", serialize_batch_qc_rows(frm._grn_batch_rows));
+}
 
-	const totals = get_grn_batch_totals(frm._grn_batch_rows);
-	$wrapper.find(".grn-batch-total-no-of-unit").text(format_batch_display(totals.no_of_unit));
-	$wrapper.find(".grn-batch-total-accepted-unit").text(format_batch_display(totals.accepted_unit));
-	$wrapper.find(".grn-batch-total-rejected-unit").text(format_batch_display(totals.rejected_unit));
-	$wrapper.find(".grn-batch-total-accepted-qty").text(format_batch_display(totals.accepted_qty));
-	$wrapper.find(".grn-batch-total-rejected-qty").text(format_batch_display(totals.rejected_qty));
+// Per-batch density edit: recompute that row's Accepted/Rejected Qty (÷ density) and totals.
+function sync_grn_batch_density_input(frm, $wrapper, $changed_input) {
+	const index = parseInt($changed_input.attr("data-batch-index"), 10);
+	const row = frm._grn_batch_rows?.[index];
+	if (!row) {
+		return;
+	}
 
+	row.density = flt($changed_input.val());
+	refresh_grn_batch_row_qty_cells(frm, $wrapper, index, row);
+	refresh_grn_batch_qty_totals(frm, $wrapper);
 	frm.set_value("batch_qc_json", serialize_batch_qc_rows(frm._grn_batch_rows));
 }
 
@@ -1010,6 +1188,791 @@ function ensure_grn_batch_styles() {
 			border: 1px dashed var(--border-color, #d1d8dd);
 			border-radius: var(--border-radius, 8px);
 			background: var(--subtle-fg, #f7fafc);
+		}
+	`;
+}
+
+// ---------------------------------------------------------------------------
+// Batch-wise Readings matrix
+// Rows = parameters (readings), Columns = batches (from Batch QC Details).
+// Each cell writes the observed value into the parameter row's reading_<col>
+// field AND is mirrored into batch_readings_json. Status is a manual dropdown
+// per batch column. Manual Inspection stays on the parameter row and applies
+// to every batch in that row.
+// ---------------------------------------------------------------------------
+
+const BATCH_READINGS_MAX = 10; // reading_1 .. reading_10
+
+// Batch-wise readings identify each line by a COMPOSITE key (GRN row + batch),
+// NOT batch_no alone — so the same batch received on two rows with different pack
+// sizes (e.g. 885 pack 500 and 885 pack 250) stays independent: accepting one no
+// longer closes the other.
+function get_batch_readings_columns(frm) {
+	return (frm._grn_batch_rows || [])
+		.filter((row) => row.batch_no)
+		.slice(0, BATCH_READINGS_MAX)
+		.map((row) => qc_row_key(row));
+}
+
+// Row (from _grn_batch_rows) for a given composite key.
+function bread_row_for_key(frm, key) {
+	return (frm._grn_batch_rows || []).find((r) => qc_row_key(r) === key);
+}
+
+// Human label for a composite key: "885 (500)" — batch no + pack size.
+function bread_label(frm, key) {
+	const row = bread_row_for_key(frm, key);
+	if (!row) return key;
+	const pkg = flt(row.standard_pkg_qty);
+	return pkg ? `${row.batch_no} (${format_batch_display(pkg)})` : `${row.batch_no}`;
+}
+
+function parse_batch_readings_rows(value) {
+	if (!value) {
+		return [];
+	}
+	try {
+		const parsed = JSON.parse(value);
+		return Array.isArray(parsed) ? parsed : [];
+	} catch {
+		return [];
+	}
+}
+
+function parse_batch_readings_map(value) {
+	// Key by the row's composite key when present; fall back to batch_no for rows
+	// saved before the composite-key change.
+	return Object.fromEntries(
+		parse_batch_readings_rows(value).map((row) => [row.key || row.batch_no, row])
+	);
+}
+
+function get_reading_criteria_text(reading) {
+	if (cint(reading.formula_based_criteria)) {
+		return __("Formula based");
+	}
+	if (cint(reading.numeric)) {
+		const has_min = ![undefined, null, ""].includes(reading.min_value);
+		const has_max = ![undefined, null, ""].includes(reading.max_value);
+		if (!has_min && !has_max) {
+			return "";
+		}
+		return `${__("Min")} <b>${flt(reading.min_value)}</b> · ${__("Max")} <b>${flt(
+			reading.max_value
+		)}</b>`;
+	}
+	const value = (reading.value || "").trim();
+	return value ? `${__("Expected")}: <b>${frappe.utils.escape_html(value)}</b>` : "";
+}
+
+// Numeric pass rule: value within [min, max]. A bound of 0 means "no limit"
+// (e.g. Max 0 => no upper bound), matching how Batch QC criteria are configured.
+function bread_param_status(reading, value) {
+	const v = (value === null || value === undefined ? "" : String(value)).trim();
+
+	if (cint(reading.numeric)) {
+		if (!v) return ""; // not entered yet
+		const parsed = flt(v);
+		const min_value = flt(reading.min_value);
+		const max_value = flt(reading.max_value);
+		const ok_min = min_value === 0 || parsed >= min_value;
+		const ok_max = max_value === 0 || parsed <= max_value;
+		return ok_min && ok_max ? "Accepted" : "Rejected";
+	}
+
+	if (cint(reading.formula_based_criteria)) {
+		// Formula cannot be evaluated client-side; accept once a value is present.
+		return v ? "Accepted" : "";
+	}
+
+	// Text/value based
+	const expected = (reading.value || "").trim();
+	if (!v) return "";
+	if (!expected) return "Accepted";
+	return v.toLowerCase() === expected.toLowerCase() ? "Accepted" : "Rejected";
+}
+
+// Batch status from all its parameter readings:
+// any Rejected -> Rejected, any blank -> Pending, else Accepted.
+function bread_batch_status(frm, col) {
+	const readings = frm.doc.readings || [];
+	const field = `reading_${col + 1}`;
+	let has_blank = false;
+	for (const reading of readings) {
+		const status = bread_param_status(reading, reading[field]);
+		if (status === "Rejected") return "Rejected";
+		if (status === "") has_blank = true;
+	}
+	return has_blank ? "Pending" : "Accepted";
+}
+
+function bread_collect_values(frm, col) {
+	const readings = frm.doc.readings || [];
+	const field = `reading_${col + 1}`;
+	const values = {};
+	readings.forEach((reading) => {
+		values[reading.specification || reading.name] = reading[field] || "";
+	});
+	return values;
+}
+
+function bread_get_rows(frm) {
+	return parse_batch_readings_rows(frm.doc.batch_readings_json);
+}
+
+// Merge a patch for one batch line (composite key) into batch_readings_json,
+// keeping line order. Each row carries { key, batch_no, status, added, values }.
+function bread_upsert(frm, key, patch) {
+	const batches = get_batch_readings_columns(frm);
+	const map = parse_batch_readings_map(frm.doc.batch_readings_json);
+	const row_for = (k) => {
+		const r = bread_row_for_key(frm, k);
+		return { key: k, batch_no: r ? r.batch_no : k, status: "", added: false, values: {} };
+	};
+	map[key] = Object.assign(row_for(key), map[key] || {}, patch, { key: key });
+	const rows = batches.map((k) => map[k] || row_for(k));
+	frm.set_value("batch_readings_json", JSON.stringify(rows));
+}
+
+function bread_added_batches(frm) {
+	const map = parse_batch_readings_map(frm.doc.batch_readings_json);
+	return get_batch_readings_columns(frm).filter((b) => map[b] && map[b].added);
+}
+
+function bread_pending_batches(frm) {
+	const map = parse_batch_readings_map(frm.doc.batch_readings_json);
+	return get_batch_readings_columns(frm).filter(
+		(b) => !(map[b] && map[b].added) || !["Accepted", "Rejected"].includes((map[b].status || "").trim())
+	);
+}
+
+// Roll batch statuses up to the document (top) status automatically.
+function bread_roll_up_parent_status(frm) {
+	if (frm.doc.docstatus >= 1 || (frm.doc.status || "").trim() === "Rework") {
+		return;
+	}
+	const batches = get_batch_readings_columns(frm);
+	if (!batches.length) return;
+
+	const map = parse_batch_readings_map(frm.doc.batch_readings_json);
+	const statuses = batches.map((b) => (map[b] && map[b].added ? (map[b].status || "").trim() : ""));
+
+	// Every batch must be added (Accepted/Rejected) before a final status is known.
+	const all_added = statuses.length > 0 && statuses.every((s) => s === "Accepted" || s === "Rejected");
+
+	let parent_status = "Pending";
+	if (all_added) {
+		const has_rejected = statuses.some((s) => s === "Rejected");
+		const has_accepted = statuses.some((s) => s === "Accepted");
+		if (has_rejected && has_accepted) {
+			parent_status = "Partially Rejected"; // mix of accepted + rejected batches
+		} else if (has_rejected) {
+			parent_status = "Rejected";
+		} else {
+			parent_status = "Accepted";
+		}
+	}
+
+	if ((frm.doc.status || "").trim() !== parent_status) {
+		frm.set_value("status", parent_status);
+	}
+}
+
+// Save-time warning: list batches whose readings have not been added yet.
+function warn_incomplete_batch_readings(frm) {
+	if (frm.doc.reference_type !== "GRN" || frm.doc.docstatus >= 1) {
+		return;
+	}
+	const batches = get_batch_readings_columns(frm);
+	if (!batches.length || !(frm.doc.readings || []).length) {
+		return;
+	}
+	const pending = bread_pending_batches(frm);
+	if (pending.length) {
+		frappe.msgprint({
+			title: __("Incomplete Batch Readings"),
+			indicator: "orange",
+			message: __("Readings not added for {0} of {1} batch(es): {2}. Please add readings for every batch.", [
+				pending.length,
+				batches.length,
+				pending.map((k) => bread_label(frm, k)).join(", "),
+			]),
+		});
+	}
+}
+
+function render_batch_readings_matrix(frm) {
+	const field = frm.fields_dict.batch_readings_html;
+	if (!field?.$wrapper) {
+		return;
+	}
+	const $wrapper = field.$wrapper;
+
+	if (frm.doc.reference_type !== "GRN") {
+		$wrapper.empty();
+		return;
+	}
+
+	const batches = get_batch_readings_columns(frm);
+	const readings = frm.doc.readings || [];
+
+	if (!batches.length || !readings.length) {
+		const message = !batches.length
+			? __("Add batches in Batch QC Details to enter batch-wise readings.")
+			: __("Select a Quality Inspection Template to load parameters.");
+		$wrapper.html(`<div class="grn-batch-empty text-muted">${message}</div>`);
+		ensure_grn_batch_styles();
+		ensure_batch_readings_styles();
+		return;
+	}
+
+	const map = parse_batch_readings_map(frm.doc.batch_readings_json);
+	const is_read_only = frm.doc.docstatus === 1;
+
+	// Batch quantity from Batch QC Details rows (composite key -> batch_qty).
+	const batch_qty_map = {};
+	(frm._grn_batch_rows || []).forEach((r) => {
+		batch_qty_map[qc_row_key(r)] = flt(r.batch_qty);
+	});
+
+	// Default selected batch -> first batch that has not been added yet.
+	if (!frm._bread_selected || !batches.includes(frm._bread_selected)) {
+		frm._bread_selected = batches.find((b) => !(map[b] && map[b].added)) || batches[0];
+	}
+	const selected = frm._bread_selected;
+	const col = batches.indexOf(selected);
+
+	// --- Batch selector dropdown ---
+	const options = batches
+		.map((b) => {
+			const entry = map[b];
+			let tag = " •"; // pending
+			if (entry && entry.added) {
+				tag = entry.status === "Rejected" ? "  ✗ Rejected" : entry.status === "Accepted" ? "  ✓ Accepted" : "  • Pending";
+			}
+			return `<option value="${frappe.utils.escape_html(b)}"${b === selected ? " selected" : ""}>${frappe.utils.escape_html(
+				bread_label(frm, b)
+			)}${tag}</option>`;
+		})
+		.join("");
+
+	const dropdown_html = `
+		<div class="bread-picker">
+			<label class="bread-picker-label">${__("Select Batch")}</label>
+			<select class="bread-batch-select" ${is_read_only ? "disabled" : ""}>${options}</select>
+			${is_read_only ? "" : `<button class="btn btn-primary btn-sm bread-add-btn">${__("Add / Update Batch")}</button>`}
+		</div>`;
+
+	// --- Entry table for the selected batch ---
+	const entry_rows = readings
+		.map((reading, rIdx) => {
+			const reading_field = `reading_${col + 1}`;
+			const cell_val = frappe.utils.escape_html(reading[reading_field] || "");
+			const name = frappe.utils.escape_html(reading.specification || __("(unnamed)"));
+			const is_numeric = cint(reading.numeric);
+			const type_label = cint(reading.formula_based_criteria) ? __("Formula") : is_numeric ? __("Numeric") : __("Text");
+			const type_badge = `<span class="bread-type-badge ${is_numeric ? "bread-type-numeric" : "bread-type-text"}">${type_label}</span>`;
+			const criteria = get_reading_criteria_text(reading);
+			const criteria_html = criteria
+				? `<span class="bread-param-criteria">${criteria}</span>`
+				: `<span class="bread-param-criteria text-muted">${__("No criteria")}</span>`;
+			const input_html = is_read_only
+				? `<span class="bread-readonly-value">${cell_val || "—"}</span>`
+				: `<input type="text" class="bread-input bread-entry-input" data-row="${rIdx}" value="${cell_val}" placeholder="${__(
+						"Enter value"
+				  )}">`;
+			return `<tr>
+				<td class="bread-entry-param"><span class="bread-param-name">${name}</span> ${type_badge}</td>
+				<td class="bread-entry-criteria">${criteria_html}</td>
+				<td class="bread-entry-value">${input_html}</td>
+			</tr>`;
+		})
+		.join("");
+
+	const entry_html = `
+		<div class="bread-entry-card">
+			<div class="bread-entry-head">
+				<span class="bread-card-batch-label">${__("Readings for Batch")}</span>
+				<span class="grn-batch-badge">${frappe.utils.escape_html(bread_label(frm, selected))}</span>
+			</div>
+			<table class="bread-entry-table">
+				<thead><tr>
+					<th>${__("Parameter")}</th>
+					<th>${__("Criteria")}</th>
+					<th>${__("Observed Value")}</th>
+				</tr></thead>
+				<tbody>${entry_rows}</tbody>
+			</table>
+		</div>`;
+
+	// --- Summary ("niche") table of all batches ---
+	const summary_rows = batches
+		.map((b, i) => {
+			const entry = map[b];
+			const added = !!(entry && entry.added);
+			const status = (entry && entry.status) || "";
+			const status_cell = added ? batch_status_badge(status) : `<span class="bread-status-badge bread-badge-pending">${__("Not Added")}</span>`;
+			const actions = is_read_only
+				? ""
+				: `<button class="btn btn-xs btn-default bread-edit-btn" data-batch="${frappe.utils.escape_html(b)}">${__("Edit")}</button>
+				   ${added ? `<button class="btn btn-xs btn-default bread-remove-btn" data-batch="${frappe.utils.escape_html(b)}">${__("Clear")}</button>` : ""}`;
+			return `<tr class="${added ? "" : "bread-row-pending"}">
+				<td class="grn-batch-col-index">${i + 1}</td>
+				<td><span class="grn-batch-badge">${frappe.utils.escape_html(bread_label(frm, b))}</span></td>
+				<td class="grn-batch-col-qty">${format_batch_display(batch_qty_map[b])}</td>
+				<td>${status_cell}</td>
+				<td class="bread-summary-actions">${actions}</td>
+			</tr>`;
+		})
+		.join("");
+
+	const added_count = bread_added_batches(frm).length;
+	const summary_html = `
+		<div class="bread-summary-card">
+			<div class="grn-batch-qc-header">
+				<span class="grn-batch-qc-title">${__("Batch Readings Status")}</span>
+				<span class="grn-batch-qc-subtitle">${added_count} / ${batches.length} ${__("added")}</span>
+			</div>
+			<table class="grn-batch-table bread-summary-table">
+				<thead><tr>
+					<th class="grn-batch-col-index">#</th>
+					<th>${__("Batch No")}</th>
+					<th class="grn-batch-col-qty">${__("Batch Qty")}</th>
+					<th>${__("Status")}</th>
+					<th>${__("Action")}</th>
+				</tr></thead>
+				<tbody>${summary_rows}</tbody>
+			</table>
+		</div>`;
+
+	const subtitle = `${readings.length} ${__("parameter(s)")} · ${batches.length} ${__("batch(es)")}`;
+
+	$wrapper.html(`
+		<div class="grn-batch-qc-wrapper bread-wrapper">
+			<div class="grn-batch-qc-header">
+				<span class="grn-batch-qc-title">${__("Batch-wise Readings")}</span>
+				<span class="grn-batch-qc-subtitle">${subtitle}</span>
+			</div>
+			<div class="bread-body">
+				${dropdown_html}
+				${entry_html}
+				${summary_html}
+			</div>
+		</div>
+	`);
+
+	if (!is_read_only) {
+		bind_batch_readings_events(frm, $wrapper);
+	}
+
+	expand_batch_readings_full_width(frm);
+	ensure_grn_batch_styles();
+	ensure_batch_readings_styles();
+}
+
+function batch_status_badge(status) {
+	if (!status) {
+		return `<span class="text-muted">—</span>`;
+	}
+	let cls = "bread-badge-pending";
+	if (status === "Accepted") cls = "bread-badge-accepted";
+	else if (status === "Rejected") cls = "bread-badge-rejected";
+	return `<span class="bread-status-badge ${cls}">${__(status)}</span>`;
+}
+
+function bind_batch_readings_events(frm, $wrapper) {
+	// Switch selected batch
+	$wrapper
+		.off("change", ".bread-batch-select")
+		.on("change", ".bread-batch-select", function () {
+			frm._bread_selected = $(this).val();
+			render_batch_readings_matrix(frm);
+		});
+
+	// Live-write observed values into the parameter row's reading_<col> field
+	$wrapper
+		.off("change", ".bread-entry-input")
+		.on("change", ".bread-entry-input", function () {
+			const rIdx = parseInt($(this).attr("data-row"), 10);
+			set_batch_reading_value(frm, rIdx, $(this).val());
+		});
+
+	// Add / update the selected batch into the summary table
+	$wrapper
+		.off("click", ".bread-add-btn")
+		.on("click", ".bread-add-btn", function () {
+			add_or_update_batch(frm);
+		});
+
+	// Edit an existing batch -> select it
+	$wrapper
+		.off("click", ".bread-edit-btn")
+		.on("click", ".bread-edit-btn", function () {
+			frm._bread_selected = $(this).attr("data-batch");
+			render_batch_readings_matrix(frm);
+		});
+
+	// Clear a batch's readings
+	$wrapper
+		.off("click", ".bread-remove-btn")
+		.on("click", ".bread-remove-btn", function () {
+			remove_batch_readings(frm, $(this).attr("data-batch"));
+		});
+}
+
+function set_batch_reading_value(frm, rIdx, value) {
+	const batches = get_batch_readings_columns(frm);
+	const col = batches.indexOf(frm._bread_selected);
+	const reading = (frm.doc.readings || [])[rIdx];
+	if (col < 0 || !reading) {
+		return;
+	}
+	frappe.model.set_value(reading.doctype, reading.name, `reading_${col + 1}`, value);
+}
+
+// When a batch line's reading status is decided, auto-fill THAT line's Batch QC
+// Details units/qty. Keyed by the composite line key, so the same batch on two
+// rows (different pack sizes) is updated independently — no more closing the other.
+// Accepted -> all units accepted (rejected 0); Rejected -> all units rejected.
+function sync_batch_qc_from_status(frm, key, status) {
+	if (status !== "Accepted" && status !== "Rejected") {
+		return;
+	}
+	const rows = frm._grn_batch_rows || [];
+	const idx = rows.findIndex((r) => qc_row_key(r) === key);
+	if (idx < 0) {
+		return;
+	}
+	const row = rows[idx];
+	const units = get_row_batch_units(row);
+	row.accepted_unit = status === "Accepted" ? units : 0;
+	const { row: synced } = sync_row_from_accepted_unit(row);
+	frm._grn_batch_rows[idx] = synced;
+	frm.set_value("batch_qc_json", serialize_batch_qc_rows(frm._grn_batch_rows));
+	render_grn_batch_html(frm);
+}
+
+function add_or_update_batch(frm) {
+	const batches = get_batch_readings_columns(frm);
+	const selected = frm._bread_selected;
+	const col = batches.indexOf(selected);
+	if (col < 0) {
+		return;
+	}
+
+	const status = bread_batch_status(frm, col);
+	bread_upsert(frm, selected, {
+		status: status,
+		added: true,
+		values: bread_collect_values(frm, col),
+	});
+	// Auto-fill Batch QC Details (Accepted/Rejected units & qty) for this batch.
+	sync_batch_qc_from_status(frm, selected, status);
+	bread_roll_up_parent_status(frm);
+
+	// Move to the next batch that still needs readings.
+	const next = bread_pending_batches(frm)[0];
+	frm._bread_selected = next || selected;
+
+	render_batch_readings_matrix(frm);
+	frappe.show_alert({
+		message: __("Batch {0} saved ({1})", [bread_label(frm, selected), status]),
+		indicator: status === "Rejected" ? "red" : status === "Accepted" ? "green" : "orange",
+	});
+}
+
+function remove_batch_readings(frm, batch_no) {
+	const batches = get_batch_readings_columns(frm);
+	const col = batches.indexOf(batch_no);
+	if (col >= 0) {
+		(frm.doc.readings || []).forEach((reading) => {
+			frappe.model.set_value(reading.doctype, reading.name, `reading_${col + 1}`, "");
+		});
+	}
+	bread_upsert(frm, batch_no, { status: "", added: false, values: {} });
+	bread_roll_up_parent_status(frm);
+	frm._bread_selected = batch_no;
+	render_batch_readings_matrix(frm);
+}
+
+function expand_batch_readings_full_width(frm) {
+	const field = frm.fields_dict.batch_readings_html;
+	if (!field?.$wrapper || frm.doc.reference_type !== "GRN") {
+		return;
+	}
+	const $section = field.$wrapper.closest(".form-section");
+	if (!$section.length) {
+		return;
+	}
+	$section.find("> .section-body > .form-column").addClass("col-sm-12").removeClass("col-sm-6");
+	$section.find(".column-break").hide();
+}
+
+function ensure_batch_readings_styles() {
+	let style = document.getElementById("batch-readings-styles");
+	if (!style) {
+		style = document.createElement("style");
+		style.id = "batch-readings-styles";
+		document.head.appendChild(style);
+	}
+
+	style.textContent = `
+		.bread-cards {
+			display: grid;
+			grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+			gap: 12px;
+			padding: 12px;
+		}
+		.bread-card {
+			border: 1px solid var(--border-color, #d1d8dd);
+			border-radius: var(--border-radius, 8px);
+			background: var(--card-bg, #fff);
+			display: flex;
+			flex-direction: column;
+			overflow: hidden;
+		}
+		.bread-card.bread-card-accepted {
+			border-color: rgba(34, 197, 94, 0.5);
+		}
+		.bread-card.bread-card-rejected {
+			border-color: rgba(239, 68, 68, 0.5);
+		}
+		.bread-card-head {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			padding: 10px 12px;
+			background: var(--subtle-fg, #f7fafc);
+			border-bottom: 1px solid var(--border-color, #d1d8dd);
+		}
+		.bread-card-batch-label {
+			font-size: 11px;
+			font-weight: 600;
+			text-transform: uppercase;
+			letter-spacing: 0.03em;
+			color: var(--text-muted, #6c7680);
+		}
+		.bread-card-body {
+			padding: 4px 12px;
+		}
+		.bread-param-block {
+			padding: 9px 0;
+			border-bottom: 1px solid var(--border-color, #eef1f4);
+		}
+		.bread-param-block:last-child {
+			border-bottom: none;
+		}
+		.bread-param-top {
+			display: flex;
+			align-items: center;
+			flex-wrap: wrap;
+			gap: 6px;
+			margin-bottom: 6px;
+		}
+		.bread-param-name {
+			font-weight: 600;
+			font-size: 13px;
+			color: var(--text-color, #1f272e);
+		}
+		.bread-type-badge {
+			display: inline-block;
+			padding: 1px 7px;
+			border-radius: 4px;
+			font-size: 10px;
+			font-weight: 600;
+			text-transform: uppercase;
+			letter-spacing: 0.02em;
+		}
+		.bread-type-numeric {
+			background: rgba(36, 144, 239, 0.12);
+			color: #1d6fc0;
+		}
+		.bread-type-text {
+			background: rgba(124, 58, 237, 0.12);
+			color: #6d28d9;
+		}
+		.bread-manual-check {
+			display: inline-flex;
+			align-items: center;
+			gap: 4px;
+			margin: 0;
+			padding: 1px 7px;
+			border-radius: 4px;
+			background: rgba(245, 158, 11, 0.12);
+			color: #b45309;
+			font-size: 10px;
+			font-weight: 600;
+			text-transform: uppercase;
+			letter-spacing: 0.02em;
+			cursor: pointer;
+			user-select: none;
+		}
+		.bread-manual-check input {
+			margin: 0;
+			cursor: pointer;
+		}
+		.bread-param-bottom {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 10px;
+		}
+		.bread-param-criteria {
+			font-size: 12px;
+			color: var(--text-muted, #6c7680);
+			white-space: nowrap;
+			font-variant-numeric: tabular-nums;
+		}
+		.bread-param-criteria b {
+			color: var(--text-color, #1f272e);
+		}
+		.bread-input {
+			width: 130px;
+			flex: 0 0 130px;
+			height: 30px;
+			padding: 4px 10px;
+			border: 1px solid var(--border-color, #d1d8dd);
+			border-radius: var(--border-radius-sm, 5px);
+			background: var(--control-bg, #fff);
+			color: var(--text-color, #1f272e);
+			font-size: 13px;
+			text-align: right;
+			transition: border-color 0.15s, box-shadow 0.15s;
+		}
+		.bread-input:focus {
+			outline: none;
+			border-color: var(--primary, #2490ef);
+			box-shadow: 0 0 0 2px rgba(36, 144, 239, 0.15);
+		}
+		.bread-readonly-value {
+			min-width: 130px;
+			text-align: right;
+			font-weight: 600;
+			color: var(--text-color, #1f272e);
+			font-variant-numeric: tabular-nums;
+		}
+		.bread-card-foot {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 10px;
+			padding: 10px 12px;
+			background: var(--subtle-fg, #f7fafc);
+			border-top: 1px solid var(--border-color, #d1d8dd);
+			margin-top: auto;
+		}
+		.bread-card-foot-label {
+			font-size: 12px;
+			font-weight: 600;
+			color: var(--text-color, #1f272e);
+		}
+		.bread-status-select {
+			width: 150px;
+			height: 30px;
+			padding: 3px 8px;
+			border: 1px solid var(--border-color, #d1d8dd);
+			border-radius: var(--border-radius-sm, 5px);
+			background: var(--control-bg, #fff);
+			color: var(--text-color, #1f272e);
+			font-size: 12px;
+		}
+		.bread-status-badge {
+			display: inline-block;
+			padding: 2px 12px;
+			border-radius: 10px;
+			font-size: 12px;
+			font-weight: 600;
+		}
+		.bread-badge-accepted {
+			background: rgba(34, 197, 94, 0.12);
+			color: #15803d;
+		}
+		.bread-badge-rejected {
+			background: rgba(239, 68, 68, 0.12);
+			color: #b91c1c;
+		}
+		.bread-badge-pending {
+			background: rgba(245, 158, 11, 0.12);
+			color: #b45309;
+		}
+		.bread-body {
+			padding: 12px;
+			display: flex;
+			flex-direction: column;
+			gap: 14px;
+		}
+		.bread-picker {
+			display: flex;
+			align-items: center;
+			gap: 10px;
+			flex-wrap: wrap;
+		}
+		.bread-picker-label {
+			font-size: 12px;
+			font-weight: 600;
+			text-transform: uppercase;
+			letter-spacing: 0.03em;
+			color: var(--text-muted, #6c7680);
+			margin: 0;
+		}
+		.bread-batch-select {
+			min-width: 220px;
+			height: 32px;
+			padding: 4px 10px;
+			border: 1px solid var(--border-color, #d1d8dd);
+			border-radius: var(--border-radius-sm, 5px);
+			background: var(--control-bg, #fff);
+			color: var(--text-color, #1f272e);
+			font-size: 13px;
+		}
+		.bread-entry-card,
+		.bread-summary-card {
+			border: 1px solid var(--border-color, #d1d8dd);
+			border-radius: var(--border-radius, 8px);
+			background: var(--card-bg, #fff);
+			overflow: hidden;
+		}
+		.bread-entry-head {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			padding: 10px 12px;
+			background: var(--subtle-fg, #f7fafc);
+			border-bottom: 1px solid var(--border-color, #d1d8dd);
+		}
+		.bread-entry-table,
+		.bread-summary-table {
+			width: 100%;
+			border-collapse: collapse;
+			font-size: 13px;
+		}
+		.bread-entry-table th,
+		.bread-entry-table td {
+			padding: 8px 12px;
+			border-bottom: 1px solid var(--border-color, #eef1f4);
+			text-align: left;
+			vertical-align: middle;
+		}
+		.bread-entry-table thead th {
+			background: var(--subtle-fg, #f7fafc);
+			font-size: 10px;
+			text-transform: uppercase;
+			letter-spacing: 0.02em;
+			color: var(--text-muted, #6c7680);
+		}
+		.bread-entry-value {
+			text-align: right;
+			width: 180px;
+		}
+		.bread-entry-value .bread-input {
+			width: 150px;
+		}
+		.bread-row-pending td {
+			background: rgba(245, 158, 11, 0.05);
+		}
+		.bread-summary-actions {
+			display: flex;
+			gap: 6px;
 		}
 	`;
 }

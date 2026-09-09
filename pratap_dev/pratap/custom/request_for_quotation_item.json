@@ -1,0 +1,37 @@
+{
+ "custom_fields": [
+  {
+   "dt": "Request for Quotation Item",
+   "fieldname": "custom_packing_qty",
+   "fieldtype": "Data",
+   "insert_after": "schedule_date",
+   "label": "Standard Pkg Qty",
+   "columns": 1,
+   "in_list_view": 1,
+   "translatable": 1
+  },
+  {
+   "dt": "Request for Quotation Item",
+   "fieldname": "custom_total_qty",
+   "fieldtype": "Data",
+   "insert_after": "custom_packing_qty",
+   "label": "No of Unit",
+   "columns": 1,
+   "in_list_view": 1,
+   "translatable": 1
+  }
+ ],
+ "custom_perms": [],
+ "doctype": "Request for Quotation Item",
+ "links": [],
+ "property_setters": [
+  {
+   "doc_type": "Request for Quotation Item",
+   "doctype_or_field": "DocType",
+   "property": "field_order",
+   "property_type": "Data",
+   "value": "[\"item_code\", \"supplier_part_no\", \"column_break_3\", \"item_name\", \"schedule_date\", \"custom_packing_qty\", \"custom_total_qty\", \"section_break_5\", \"description\", \"item_group\", \"brand\", \"image_section\", \"image\", \"image_view\", \"quantity\", \"qty\", \"stock_uom\", \"col_break2\", \"uom\", \"conversion_factor\", \"stock_qty\", \"warehouse_and_reference\", \"warehouse\", \"col_break4\", \"material_request\", \"material_request_item\", \"section_break_24\", \"project_name\", \"section_break_23\", \"page_break\"]"
+  }
+ ],
+ "sync_on_migrate": 1
+}

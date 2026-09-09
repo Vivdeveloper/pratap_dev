@@ -3,11 +3,45 @@
 
 import frappe
 from frappe import _
-from frappe.utils import flt
+from frappe.utils import flt, getdate, today
 
 from erpnext.stock.doctype.purchase_receipt.purchase_receipt import PurchaseReceipt
 
 from pratap_dev.purchase_receipt_batch import _set_batch_from_insert_batch_number
+
+
+def set_item_fields(doc, method=None):
+	"""Mirror the FIRST item's code and name from the Items child table into header
+	fields (custom_item_code / custom_item_name), so they can be shown as columns in the
+	Purchase Receipt (GRN) list view.
+
+	Only the first item row is used; if there are no items, the fields stay blank.
+	"""
+	items = doc.get("items") or []
+	first = items[0] if items else None
+
+	if first and first.item_code:
+		doc.custom_item_code = first.item_code
+		doc.custom_item_name = first.item_name or frappe.db.get_value(
+			"Item", first.item_code, "item_name"
+		)
+	else:
+		doc.custom_item_code = None
+		doc.custom_item_name = None
+
+def validate_supplier_invoice_date(doc, method=None):
+	"""Supplier Invoice Date on the GRN can be today or in the past, never the future.
+
+	Mirrors the Gate Pass rule. Backs the client-side datepicker restriction (which
+	greys out future dates) so a future date can't slip through via import/API.
+	"""
+	invoice_date = doc.get("custom_supplier_invoice_date")
+	if invoice_date and getdate(invoice_date) > getdate(today()):
+		frappe.throw(_("Supplier Invoice Date cannot be a future date."))
+
+
+# GRN QC outcomes that let the GRN proceed (fully accepted, or partial across batches).
+QC_GRN_OK_STATUSES = {"Accepted", "Partially Accepted", "Partially Rejected"}
 
 
 class PratapPurchaseReceipt(PurchaseReceipt):
@@ -29,6 +63,23 @@ class PratapPurchaseReceipt(PurchaseReceipt):
 
     def before_submit(self):
         self._validate_pratap_quality_inspection_on_items()
+
+    def on_submit(self):
+        super().on_submit()
+        # GRN QC lifecycle: Draft -> QC Pending -> Submitted.
+        if self.meta.has_field("custom_qc_status"):
+            self.db_set("custom_qc_status", "Submitted", update_modified=False)
+        if self.is_return:
+            # Return PRs (purchase returns / debit-note source) must not spawn a grouped PI.
+            return
+        create_grouped_purchase_invoice_if_ready(self)
+        create_rejection_documents_if_any(self)
+
+    def on_cancel(self):
+        super().on_cancel()
+        # Back to Draft so a re-amended GRN starts the QC lifecycle fresh.
+        if self.meta.has_field("custom_qc_status"):
+            self.db_set("custom_qc_status", "Draft", update_modified=False)
 
     def on_update(self):
         if self.items:
@@ -94,6 +145,12 @@ class PratapPurchaseReceipt(PurchaseReceipt):
             qc_name = row.get("custom_pratap_quality_inspection")
             if not qc_name:
                 continue
+            # Only seed the row's density when it doesn't already carry one. On submit
+            # the per-batch GRN QC path (Pratap QC -> _update_grn_item) writes each row's
+            # real per-batch density directly; this doc-level sync runs again during that
+            # grn_doc.save() and must not clobber it back to the QC's doc-level default.
+            if flt(row.get("custom_density")):
+                continue
             density = frappe.db.get_value("Pratap Quality Inspection", qc_name, "custom_density")
             if density not in (None, ""):
                 row.custom_density = flt(density)
@@ -125,15 +182,360 @@ class PratapPurchaseReceipt(PurchaseReceipt):
         batch.insert()
         return batch.name
 
+def _ensure_due_date_not_before_bill_date(target, bill_date):
+    """Keep due_date >= supplier invoice (bill) date on an auto-created invoice.
+
+    With no payment terms template the due date defaults to the posting date. When the
+    supplier invoice date is later than posting (a future-dated bill), ERPNext's
+    validate_due_date then fails with "Due Date cannot be before Posting / Supplier
+    Invoice Date". Push the due date out to the bill date so the document can save.
+    """
+    if not bill_date or not target.meta.has_field("due_date"):
+        return
+
+    current_due = target.get("due_date") or target.get("posting_date")
+    if not current_due or getdate(bill_date) > getdate(current_due):
+        target.due_date = bill_date
+
+
+def create_grouped_purchase_invoice_if_ready(grn):
+    """Create one combined Purchase Invoice once every GRN in the group is submitted.
+
+    GRNs created together from a Purchase Order share `custom_grn_group_id`. When the
+    last GRN of a group is submitted, all items across the group's GRNs are accumulated
+    into a single draft Purchase Invoice (idempotent: only one PI per group).
+    """
+    group_id = grn.get("custom_grn_group_id")
+    if not group_id:
+        return
+
+    if not grn.meta.has_field("custom_grn_group_id"):
+        return
+
+    # Idempotency: a (non-return) PI for this group must not already exist.
+    # (is_return=0 so the clubbed debit note for rejected qty is not mistaken for it.)
+    if frappe.db.exists(
+        "Purchase Invoice", {"custom_grn_group_id": group_id, "is_return": 0, "docstatus": ["<", 2]}
+    ):
+        return
+
+    # Only real receiving GRNs (is_return=0); return PRs also carry the group id.
+    group_grns = frappe.get_all(
+        "Purchase Receipt",
+        filters={"custom_grn_group_id": group_id, "is_return": 0, "docstatus": ["<", 2]},
+        fields=["name", "docstatus"],
+        order_by="creation asc",
+    )
+
+    grn_names = []
+    for row in group_grns:
+        # `grn` is being submitted in this transaction; treat it as submitted.
+        effective_docstatus = 1 if row.name == grn.name else row.docstatus
+        if effective_docstatus != 1:
+            # At least one GRN in the group is still a draft — wait for it.
+            return
+        grn_names.append(row.name)
+
+    if not grn_names:
+        return
+
+    from erpnext.stock.doctype.purchase_receipt.purchase_receipt import make_purchase_invoice
+
+    target = None
+    for name in grn_names:
+        target = make_purchase_invoice(name, target_doc=target)
+
+    if not target or not target.get("items"):
+        return
+
+    if target.meta.has_field("custom_grn_group_id"):
+        target.custom_grn_group_id = group_id
+
+    bill_no = grn.get("custom_supplier_invoice_no")
+    bill_date = grn.get("custom_supplier_invoice_date")
+    if bill_no and target.meta.has_field("bill_no"):
+        target.bill_no = bill_no
+    if bill_date and target.meta.has_field("bill_date"):
+        target.bill_date = bill_date
+    _ensure_due_date_not_before_bill_date(target, bill_date)
+
+    target.flags.ignore_permissions = True
+    target.save()
+
+    frappe.msgprint(
+        _("Purchase Invoice {0} created from {1} grouped GRN(s).").format(
+            frappe.utils.get_link_to_form("Purchase Invoice", target.name), len(grn_names)
+        ),
+        indicator="green",
+        alert=True,
+    )
+
+
+def create_rejection_documents_if_any(grn):
+    """On GRN submit, handle rejected quantity.
+
+    Behaviour depends on whether the GRN belongs to a Purchase Order group
+    (`custom_grn_group_id`, shared by GRNs made together from one PO):
+
+    * Grouped: wait until every GRN in the group is submitted, then create the
+      per-GRN Purchase Returns and ONE clubbed draft Debit Note across the whole
+      group (mirrors the accepted-side grouped Purchase Invoice).
+    * Not grouped: create a Purchase Return + its own draft Debit Note for this GRN.
+
+    Idempotent: re-running will not create duplicates.
+    """
+    if grn.get("is_return"):
+        return
+
+    group_id = grn.get("custom_grn_group_id")
+    if group_id and grn.meta.has_field("custom_grn_group_id"):
+        _create_grouped_rejection_documents_if_ready(grn, group_id)
+        return
+
+    _create_rejection_documents_for_grn(grn)
+
+
+def _create_rejection_documents_for_grn(grn):
+    """Single-GRN rejection flow: submitted Purchase Return + its own draft Debit Note."""
+    total_rejected = sum(flt(row.get("rejected_qty")) for row in (grn.get("items") or []))
+    if total_rejected <= 0:
+        return
+
+    return_pr = _create_submitted_purchase_return(grn)
+    if not return_pr:
+        return
+
+    _create_draft_debit_note(grn, return_pr)
+
+
+def _create_grouped_rejection_documents_if_ready(grn, group_id):
+    """When every GRN of a PO group is submitted, create the per-GRN Purchase Returns
+    and ONE clubbed draft Debit Note (Purchase Invoice return) across the group.
+    """
+    # Only real receiving GRNs (is_return=0); return PRs also carry the group id.
+    group_grns = frappe.get_all(
+        "Purchase Receipt",
+        filters={"custom_grn_group_id": group_id, "is_return": 0, "docstatus": ["<", 2]},
+        fields=["name", "docstatus"],
+        order_by="creation asc",
+    )
+
+    for row in group_grns:
+        # `grn` is being submitted in this transaction; treat it as submitted.
+        effective_docstatus = 1 if row.name == grn.name else row.docstatus
+        if effective_docstatus != 1:
+            # A GRN in the group is still a draft — wait for the whole group.
+            return
+
+    # Ensure a submitted Purchase Return exists for every rejected GRN in the group.
+    return_prs = []
+    for row in group_grns:
+        grn_doc = grn if row.name == grn.name else frappe.get_doc("Purchase Receipt", row.name)
+        total_rejected = sum(flt(i.get("rejected_qty")) for i in (grn_doc.get("items") or []))
+        if total_rejected <= 0:
+            continue
+        return_pr = _create_submitted_purchase_return(grn_doc)
+        if return_pr:
+            return_prs.append(return_pr)
+
+    if not return_prs:
+        return
+
+    # Idempotency: only one clubbed debit note (is_return PI) per group.
+    if frappe.db.exists(
+        "Purchase Invoice",
+        {"custom_grn_group_id": group_id, "is_return": 1, "docstatus": ["<", 2]},
+    ):
+        return
+
+    _create_grouped_draft_debit_note(grn, group_id, return_prs)
+
+
+def _create_grouped_draft_debit_note(grn, group_id, return_prs):
+    """Create ONE draft Debit Note accumulating items from all the group's Purchase Returns."""
+    from erpnext.stock.doctype.purchase_receipt.purchase_receipt import make_purchase_invoice
+
+    try:
+        target = None
+        for return_pr in return_prs:
+            target = make_purchase_invoice(return_pr.name, target_doc=target)
+
+        if not target or not target.get("items"):
+            return
+
+        # Debit note spans multiple return PRs; header return_against stays empty
+        # (each item links back via its own purchase_receipt).
+        target.is_return = 1
+        if target.meta.has_field("custom_grn_group_id"):
+            target.custom_grn_group_id = group_id
+
+        _copy_grn_reference_fields(grn, target)
+        target.flags.ignore_permissions = True
+        target.save()  # leave in Draft
+
+        frappe.msgprint(
+            _("Debit Note {0} created in Draft (clubbed from {1} rejected GRN(s)).").format(
+                frappe.utils.get_link_to_form("Purchase Invoice", target.name), len(return_prs)
+            ),
+            indicator="orange",
+            alert=True,
+        )
+    except Exception:
+        frappe.log_error(
+            title="Pratap: Clubbed Debit Note creation failed",
+            message=frappe.get_traceback(),
+        )
+        frappe.msgprint(
+            _(
+                "Purchase Returns were submitted, but the clubbed draft Debit Note could not be "
+                "created automatically. Please create it manually."
+            ),
+            indicator="red",
+            alert=True,
+        )
+
+
+def _create_submitted_purchase_return(grn):
+    """Create and submit a Purchase Return for the GRN's rejected-warehouse qty."""
+    existing = frappe.db.get_value(
+        "Purchase Receipt",
+        {"return_against": grn.name, "is_return": 1, "docstatus": ["<", 2]},
+        "name",
+    )
+    if existing:
+        return frappe.get_doc("Purchase Receipt", existing)
+
+    from erpnext.stock.doctype.purchase_receipt.purchase_receipt import (
+        make_purchase_return_against_rejected_warehouse,
+    )
+
+    return_doc = make_purchase_return_against_rejected_warehouse(grn.name)
+    return_doc.set("items", [row for row in return_doc.items if flt(row.qty) != 0])
+    if not return_doc.items:
+        return None
+
+    _copy_grn_reference_fields(grn, return_doc)
+    return_doc.flags.ignore_permissions = True
+    return_doc.save()
+    return_doc.submit()
+
+    frappe.msgprint(
+        _("Purchase Return {0} created and submitted for rejected quantity.").format(
+            frappe.utils.get_link_to_form("Purchase Receipt", return_doc.name)
+        ),
+        indicator="orange",
+        alert=True,
+    )
+    return return_doc
+
+
+def _create_draft_debit_note(grn, return_pr):
+    """Create a draft Debit Note (Purchase Invoice Return) from the submitted return."""
+    # A debit note made from a return PR links back via its item's `purchase_receipt`
+    # (its header `return_against` stays empty), so detect duplicates through the item.
+    existing = frappe.db.get_value(
+        "Purchase Invoice Item",
+        {"purchase_receipt": return_pr.name, "docstatus": ["<", 2]},
+        "parent",
+    )
+    if existing:
+        return
+
+    from erpnext.stock.doctype.purchase_receipt.purchase_receipt import make_purchase_invoice
+
+    try:
+        debit_note = make_purchase_invoice(return_pr.name)
+        if not debit_note.get("is_return"):
+            debit_note.is_return = 1
+            debit_note.return_against = return_pr.name
+
+        _copy_grn_reference_fields(grn, debit_note)
+        debit_note.flags.ignore_permissions = True
+        debit_note.save()  # leave in Draft
+
+        frappe.msgprint(
+            _("Debit Note {0} created in Draft for rejected quantity.").format(
+                frappe.utils.get_link_to_form("Purchase Invoice", debit_note.name)
+            ),
+            indicator="orange",
+            alert=True,
+        )
+    except Exception:
+        frappe.log_error(
+            title="Pratap: Debit Note creation failed",
+            message=frappe.get_traceback(),
+        )
+        frappe.msgprint(
+            _(
+                "Purchase Return {0} was submitted, but the draft Debit Note could not be "
+                "created automatically. Please create it manually."
+            ).format(frappe.utils.get_link_to_form("Purchase Receipt", return_pr.name)),
+            indicator="red",
+            alert=True,
+        )
+
+
+def _copy_grn_reference_fields(grn, target):
+    """Copy GRN group id and supplier invoice no/date onto a return/debit-note document."""
+    group_id = grn.get("custom_grn_group_id")
+    if group_id and target.meta.has_field("custom_grn_group_id"):
+        target.custom_grn_group_id = group_id
+
+    bill_no = grn.get("custom_supplier_invoice_no")
+    bill_date = grn.get("custom_supplier_invoice_date")
+
+    if bill_no and target.meta.has_field("bill_no"):
+        target.bill_no = bill_no
+    if bill_date and target.meta.has_field("bill_date"):
+        target.bill_date = bill_date
+
+    # Mirror onto the document's own supplier-invoice fields when they exist (e.g. return PR).
+    if bill_no and target.meta.has_field("custom_supplier_invoice_no"):
+        target.custom_supplier_invoice_no = bill_no
+    if bill_date and target.meta.has_field("custom_supplier_invoice_date"):
+        target.custom_supplier_invoice_date = bill_date
+
+    _ensure_due_date_not_before_bill_date(target, bill_date)
+
+
+def _get_grn_item_qc_map(grn_name):
+    """Return {item_code: qc_name} for the latest non-cancelled QC of each item on this GRN.
+
+    Lets one QC cover multiple GRN rows of the SAME item (a single QC per item).
+    """
+    qcs = frappe.get_all(
+        "Pratap Quality Inspection",
+        filters={
+            "reference_doctype": "Purchase Receipt",
+            "reference_name": grn_name,
+            "reference_type": "GRN",
+            "docstatus": ["<", 2],
+        },
+        fields=["name", "production_item"],
+        order_by="creation desc",
+    )
+    item_map = {}
+    for qc in qcs:
+        if qc.production_item and qc.production_item not in item_map:
+            item_map[qc.production_item] = qc.name
+    return item_map
+
+
 def _get_grn_qc_submit_errors(grn_doc):
-    """Collect QC validation messages for every QC-required GRN line."""
+    """Collect QC validation messages for every QC-required GRN line.
+
+    A QC is matched by item_code (one QC can cover multiple rows of the same item),
+    so only one QC per item is required even when the item spans several GRN rows.
+    """
     errors = []
+    item_qc_map = _get_grn_item_qc_map(grn_doc.name)
 
     for row in grn_doc.get("items") or []:
         if not _grn_item_needs_qc(row):
             continue
 
-        qc_name = row.get("custom_pratap_quality_inspection")
+        # The row's own link, else any QC for this item on the GRN.
+        qc_name = row.get("custom_pratap_quality_inspection") or item_qc_map.get(row.item_code)
         item_label = row.item_code or row.item_name or row.idx
 
         if not qc_name:
@@ -167,10 +569,8 @@ def _get_pratap_qc_row_error(qc_name, row, grn_name):
             "Row {0}: Pratap Quality Inspection {1} is for item {2}, not {3}."
         ).format(row.idx, qc_name, qc.production_item, row.item_code)
 
-    if qc.get("purchase_receipt_item") and qc.purchase_receipt_item != row.name:
-        return _(
-            "Row {0}: Pratap Quality Inspection {1} is linked to a different GRN item row."
-        ).format(row.idx, qc_name)
+    # Note: no purchase_receipt_item == row.name check here — one QC may cover several
+    # GRN rows of the same item, so matching by item_code (above) is sufficient.
 
     submitting_qc = frappe.flags.get("submitting_pratap_qc") == qc_name
 
@@ -179,9 +579,10 @@ def _get_pratap_qc_row_error(qc_name, row, grn_name):
             "Row {0} ({1}): Submit Pratap Quality Inspection {2} before submitting GRN."
         ).format(row.idx, row.item_code or row.item_name, qc_name)
 
-    if (qc.status or "").strip() != "Accepted":
+    if (qc.status or "").strip() not in QC_GRN_OK_STATUSES:
         return _(
-            "Row {0} ({1}): Pratap Quality Inspection {2} must have status Accepted."
+            "Row {0} ({1}): Pratap Quality Inspection {2} must have status Accepted "
+            "(or Partially Accepted/Rejected)."
         ).format(row.idx, row.item_code or row.item_name, qc_name)
 
     return None
@@ -198,7 +599,7 @@ def link_pratap_qc_to_grn_item(doc, method=None):
     if not _is_grn_incoming_pratap_qc(doc):
         return
 
-    if (doc.status or "").strip() != "Accepted":
+    if (doc.status or "").strip() not in QC_GRN_OK_STATUSES:
         return
 
     if not doc.name:
@@ -209,7 +610,15 @@ def link_pratap_qc_to_grn_item(doc, method=None):
         return
 
     values = {"custom_pratap_quality_inspection": doc.name}
-    if doc.get("custom_density") not in (None, ""):
+    # Don't clobber a per-batch density already written on the row by the GRN QC
+    # submit flow (_update_grn_item). This function runs again from _submit_linked_grn
+    # AFTER _update_grn_item, and it only targets the first matching row — so without
+    # this guard it overwrites that row's correct per-batch density with the doc-level
+    # default. Only seed the doc-level density when the row has none yet.
+    existing_density = frappe.db.get_value(
+        "Purchase Receipt Item", target_row_name, "custom_density"
+    )
+    if doc.get("custom_density") not in (None, "") and not flt(existing_density):
         values["custom_density"] = flt(doc.custom_density)
 
     frappe.db.set_value(
@@ -239,13 +648,17 @@ def sync_grn_item_density_from_pratap_qc(grn_name, item_code, qc_name, purchase_
         )
 
     if row_name:
-        frappe.db.set_value(
-            "Purchase Receipt Item",
-            row_name,
-            "custom_density",
-            flt(density),
-            update_modified=False,
-        )
+        # Only seed doc-level density when the row has none; never overwrite a
+        # per-batch density set by the GRN QC submit flow (_update_grn_item).
+        existing_density = frappe.db.get_value("Purchase Receipt Item", row_name, "custom_density")
+        if not flt(existing_density):
+            frappe.db.set_value(
+                "Purchase Receipt Item",
+                row_name,
+                "custom_density",
+                flt(density),
+                update_modified=False,
+            )
 
 
 def clear_pratap_qc_from_grn_item(doc, remove_reference=False):
@@ -306,7 +719,7 @@ def grn_ready_for_submit_after_qc(purchase_receipt):
             ["docstatus", "status"],
             as_dict=True,
         )
-        if not qc or qc.docstatus != 1 or (qc.status or "").strip() != "Accepted":
+        if not qc or qc.docstatus != 1 or (qc.status or "").strip() not in QC_GRN_OK_STATUSES:
             return False
 
     return needs_qc
@@ -380,11 +793,13 @@ def get_grn_qc_submit_status(purchase_receipt):
         return {"can_submit": True, "pending_items": [], "message": ""}
 
     pending_items = []
+    item_qc_map = _get_grn_item_qc_map(grn.name)
     for row in grn.items:
         if not _grn_item_needs_qc(row):
             continue
 
-        qc_name = row.get("custom_pratap_quality_inspection")
+        # Match by the row's own link, else any QC for this item on the GRN.
+        qc_name = row.get("custom_pratap_quality_inspection") or item_qc_map.get(row.item_code)
         error = None
         if not qc_name:
             error = True
@@ -426,6 +841,94 @@ def get_grn_qc_submit_status(purchase_receipt):
 
 
 @frappe.whitelist()
+def send_grn_for_qc(purchase_receipt):
+    """One-click "Send for QC": auto-create + save a draft Pratap QC for each
+    QC-required GRN item (one per item, matching the picker's de-dup), link each to
+    its GRN line, and move the GRN to the "QC Pending" state.
+
+    The QCs then appear in the Pratap Quality Inspection list; filling and submitting
+    a QC still auto-submits the GRN (existing logic), which flips it to "Submitted".
+    """
+    if not frappe.db.exists("Purchase Receipt", purchase_receipt):
+        frappe.throw(_("Purchase Receipt {0} does not exist.").format(purchase_receipt))
+
+    grn = frappe.get_doc("Purchase Receipt", purchase_receipt)
+    if grn.docstatus != 0:
+        frappe.throw(_("Send for QC is only available on a draft GRN."))
+
+    status = get_pratap_qc_status_for_grn(purchase_receipt)
+    if status.get("skip"):
+        frappe.throw(_("Quality Inspection is disabled for this GRN."))
+
+    items_need_create = status.get("items_need_create") or []
+    existing_open = [qc["name"] for qc in status.get("open_qcs", [])]
+
+    if not items_need_create and not existing_open:
+        frappe.throw(_("No items on this GRN require Quality Inspection."))
+
+    created = []
+    for entry in items_need_create:
+        created.append(_create_grn_pratap_qc(grn, entry))
+
+    # Mark the GRN as QC Pending (stays a draft until the QC is submitted).
+    if grn.meta.has_field("custom_qc_status"):
+        frappe.db.set_value(
+            "Purchase Receipt", purchase_receipt, "custom_qc_status", "QC Pending",
+            update_modified=False,
+        )
+
+    frappe.db.commit()
+
+    all_qcs = created + [name for name in existing_open if name not in created]
+    return {"qcs": all_qcs, "created": created}
+
+
+def _create_grn_pratap_qc(grn, entry):
+    """Create + insert a draft Pratap QC for one GRN item and link it to the row."""
+    item_code = entry.get("item_code")
+    qc = frappe.new_doc("Pratap Quality Inspection")
+    meta = qc.meta
+
+    def _set(fieldname, value):
+        if meta.has_field(fieldname):
+            qc.set(fieldname, value)
+
+    sales_uom = entry.get("uom") or entry.get("stock_uom") or ""
+    purchase_uom = frappe.db.get_value("Item", item_code, "purchase_uom") if item_code else None
+    reference_qty = flt(entry.get("received_qty")) or flt(entry.get("qty"))
+
+    _set("inspection_type", "Incoming")
+    _set("reference_type", "GRN")
+    _set("reference_doctype", "Purchase Receipt")
+    _set("reference_name", grn.name)
+    _set("work_order", entry.get("work_order") or "")
+    _set("company", grn.company)
+    _set("purchase_receipt_item", entry.get("name") or "")
+    _set("production_item", item_code or "")
+    _set("item_name", entry.get("item_name") or "")
+    _set("reference_qty", reference_qty)
+    # Default the inspected qty to the received qty so the draft QC saves; the
+    # inspector adjusts the actual readings while filling it.
+    _set("inspected_qty", reference_qty)
+    _set("sales_uom", sales_uom)
+    _set("purchase_uom", purchase_uom or "")
+    _set("status", "Pending")
+    if purchase_uom and sales_uom and purchase_uom.lower() == sales_uom.lower():
+        _set("custom_density", 1)
+
+    qc.insert(ignore_permissions=True)
+
+    # Link the created QC back to its GRN line (draft GRN -> direct row update).
+    if entry.get("name"):
+        frappe.db.set_value(
+            "Purchase Receipt Item", entry["name"],
+            "custom_pratap_quality_inspection", qc.name,
+            update_modified=False,
+        )
+    return qc.name
+
+
+@frappe.whitelist()
 def get_pratap_qc_status_for_grn(purchase_receipt):
     """QC button context for GRN: which items need new QC vs open existing draft."""
     if not frappe.db.exists("Purchase Receipt", purchase_receipt):
@@ -457,11 +960,24 @@ def get_pratap_qc_status_for_grn(purchase_receipt):
         if qc.production_item and qc.production_item not in qc_by_item:
             qc_by_item[qc.production_item] = qc
 
+    # De-duplicate "needs QC" entries by item_code: if the same item spans multiple GRN
+    # rows, only ONE QC is created for it (qtys are summed across those rows).
     items_need_create = []
+    need_create_by_item = {}
     open_qcs = []
     view_qcs = []
     seen_open = set()
     seen_view = set()
+
+    def _add_needs_create(row):
+        existing = need_create_by_item.get(row.item_code)
+        if existing:
+            existing["qty"] = flt(existing.get("qty")) + flt(row.qty)
+            existing["received_qty"] = flt(existing.get("received_qty")) + flt(row.get("received_qty"))
+            return
+        entry = _grn_item_row_for_qc(row)
+        need_create_by_item[row.item_code] = entry
+        items_need_create.append(entry)
 
     for row in doc.items:
         if not _grn_item_needs_qc(row):
@@ -483,11 +999,11 @@ def get_pratap_qc_status_for_grn(purchase_receipt):
             qc = qc_by_item[row.item_code]
 
         if not qc:
-            items_need_create.append(_grn_item_row_for_qc(row))
+            _add_needs_create(row)
             continue
 
         if qc.docstatus == 2:
-            items_need_create.append(_grn_item_row_for_qc(row))
+            _add_needs_create(row)
             continue
 
         if qc.docstatus == 0:

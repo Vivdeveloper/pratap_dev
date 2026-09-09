@@ -38,15 +38,23 @@
   "batch_qc_json",
   "section_break_2",
   "inspected_qty",
+  "sample_issued_by",
   "column_break_1",
   "inspector",
   "remarks",
   "amended_from",
   "section_break_lbwt",
   "quality_inspection_template",
+  "batch_readings_section",
+  "batch_readings_html",
+  "batch_readings_json",
+  "readings_section",
   "readings",
   "section_break_kcls",
-  "raw_materials"
+  "custom_raw_material_required",
+  "custom_item_group_filter",
+  "raw_materials",
+  "custom_rework_transfer_data"
  ],
  "fields": [
   {
@@ -115,7 +123,7 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Status",
-   "options": "Pending\nAccepted\nRejected\nRework"
+   "options": "Pending\nAccepted\nPartially Accepted\nPartially Rejected\nRejected\nRework"
   },
   {
    "fieldname": "column_break_1",
@@ -126,7 +134,8 @@
    "fieldtype": "Link",
    "in_standard_filter": 1,
    "label": "Inspector",
-   "options": "User"
+   "options": "User",
+   "reqd": 0
   },
   {
    "fieldname": "remarks",
@@ -168,7 +177,7 @@
    "fieldname": "inspection_type",
    "fieldtype": "Select",
    "label": "Inspection Type",
-   "options": "\nIncoming\nOutgoing\nIn Process",
+   "options": "\nIncoming\nOutgoing\nIn Process\nBasic Testing",
    "reqd": 1
   },
   {
@@ -202,10 +211,34 @@
    "read_only": 1
   },
   {
+   "fieldname": "readings_section",
+   "fieldtype": "Section Break",
+   "label": "Readings"
+  },
+  {
    "fieldname": "readings",
    "fieldtype": "Table",
    "label": "Readings",
    "options": "Pratap Quality Inspection Reading"
+  },
+  {
+   "depends_on": "eval:doc.reference_type == \"GRN\"",
+   "fieldname": "batch_readings_section",
+   "fieldtype": "Section Break",
+   "label": "Batch-wise Readings"
+  },
+  {
+   "depends_on": "eval:doc.reference_type == \"GRN\"",
+   "fieldname": "batch_readings_html",
+   "fieldtype": "HTML",
+   "label": "Batch Readings"
+  },
+  {
+   "fieldname": "batch_readings_json",
+   "fieldtype": "Long Text",
+   "hidden": 1,
+   "label": "Batch Readings JSON",
+   "no_copy": 1
   },
   {
    "fetch_from": "production_item.stock_uom",
@@ -268,6 +301,21 @@
    "fieldtype": "Section Break"
   },
   {
+   "default": "1",
+   "depends_on": "eval:doc.status == \"Rework\"",
+   "fieldname": "custom_raw_material_required",
+   "fieldtype": "Check",
+   "label": "Raw Material Required"
+  },
+  {
+   "depends_on": "eval:doc.status == \"Rework\"",
+   "description": "Select an Item Group to filter the Item Code list in the Raw Materials table below.",
+   "fieldname": "custom_item_group_filter",
+   "fieldtype": "Link",
+   "label": "Filter",
+   "options": "Item Group"
+  },
+  {
    "depends_on": "eval:doc.status == \"Rework\"",
    "fieldname": "raw_materials",
    "fieldtype": "Table",
@@ -315,6 +363,21 @@
   {
    "fieldname": "section_break_ipcj",
    "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "sample_issued_by",
+   "fieldtype": "Link",
+   "options": "User",
+   "label": "Sample Issued By",
+   "reqd": 0
+  },
+  {
+   "fieldname": "custom_rework_transfer_data",
+   "fieldtype": "Long Text",
+   "label": "Rework Transfer Data",
+   "hidden": 1,
+   "no_copy": 1,
+   "read_only": 1
   }
  ],
  "grid_page_length": 50,
