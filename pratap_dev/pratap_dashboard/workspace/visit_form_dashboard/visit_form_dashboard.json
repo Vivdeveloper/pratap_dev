@@ -1,0 +1,59 @@
+{
+ "charts": [
+  {
+   "chart_name": "Sample Request Trend",
+   "label": "Sample Request Trend"
+  }
+ ],
+ "content": "[{\"id\":\"pMZj1a_ZIM\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\">Visit Form Dashboard</span>\",\"col\":12}},{\"id\":\"_lO-mIAKmY\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Total Sample Requests\",\"col\":4}},{\"id\":\"EYvTdQnViS\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Pending Sample Requests\",\"col\":4}},{\"id\":\"0vB56dSEMO\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Dispatched Samples\",\"col\":4}},{\"id\":\"KjpXNThmQV\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Total Product Trials\",\"col\":4}},{\"id\":\"BDzsKdGNjK\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Ongoing Trials\",\"col\":4}},{\"id\":\"loMmWbIh_q\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Completed Trials\",\"col\":4}},{\"id\":\"RCAI5rydh_\",\"type\":\"chart\",\"data\":{\"chart_name\":\"Sample Request Trend\",\"col\":12}}]",
+ "creation": "2026-09-09 10:51:35.118681",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "for_user": "",
+ "hide_custom": 0,
+ "icon": "image-view",
+ "idx": 0,
+ "indicator_color": "green",
+ "is_hidden": 0,
+ "label": "Visit Form Dashboard",
+ "links": [],
+ "modified": "2026-09-09 11:20:15.894636",
+ "modified_by": "Administrator",
+ "module": "Pratap Dashboard",
+ "name": "Visit Form Dashboard",
+ "number_cards": [
+  {
+   "label": "Total Sample Requests",
+   "number_card_name": "Total Sample Requests"
+  },
+  {
+   "label": "Dispatched Samples",
+   "number_card_name": "Dispatched Samples"
+  },
+  {
+   "label": "Total Product Trials",
+   "number_card_name": "Total Product Trials"
+  },
+  {
+   "label": "Pending Sample Requests",
+   "number_card_name": "Pending Sample Requests"
+  },
+  {
+   "label": "Ongoing Trials",
+   "number_card_name": "Ongoing Trials"
+  },
+  {
+   "label": "Completed Trials",
+   "number_card_name": "Completed Trials"
+  }
+ ],
+ "owner": "Administrator",
+ "parent_page": "",
+ "public": 1,
+ "quick_lists": [],
+ "roles": [],
+ "sequence_id": 2.0,
+ "shortcuts": [],
+ "title": "Visit Form Dashboard"
+}

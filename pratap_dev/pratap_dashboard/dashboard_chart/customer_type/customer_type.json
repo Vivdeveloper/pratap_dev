@@ -1,0 +1,40 @@
+{
+ "based_on": "",
+ "chart_name": "Customer Type",
+ "chart_type": "Report",
+ "creation": "2026-09-09 10:29:04.972555",
+ "currency": "",
+ "docstatus": 0,
+ "doctype": "Dashboard Chart",
+ "document_type": "Customer",
+ "dynamic_filters_json": "{}",
+ "filters_json": "{}",
+ "group_by_type": "Count",
+ "idx": 0,
+ "is_public": 1,
+ "is_standard": 1,
+ "modified": "2026-09-09 10:29:55.461480",
+ "modified_by": "Administrator",
+ "module": "Pratap Dashboard",
+ "name": "Customer Type",
+ "number_of_groups": 0,
+ "owner": "Administrator",
+ "parent_document_type": "",
+ "report_name": "Customer Type",
+ "roles": [],
+ "show_values_over_chart": 0,
+ "source": "",
+ "time_interval": "Yearly",
+ "timeseries": 0,
+ "timespan": "Last Year",
+ "type": "Donut",
+ "use_report_chart": 0,
+ "value_based_on": "",
+ "x_field": "customer_type",
+ "y_axis": [
+  {
+   "color": "#29CD42",
+   "y_field": "customer_count"
+  }
+ ]
+}

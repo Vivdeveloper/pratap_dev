@@ -1,0 +1,59 @@
+{
+ "charts": [
+  {
+   "chart_name": "Customer Type",
+   "label": "Customer Type"
+  },
+  {
+   "chart_name": "Customers by Territory",
+   "label": "Customers by Territory"
+  },
+  {
+   "chart_name": "Customers by Group",
+   "label": "Customers by Group"
+  },
+  {
+   "chart_name": "Customer Growth",
+   "label": "Customer Growth"
+  }
+ ],
+ "content": "[{\"id\":\"d4Evqb3DnW\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\">Customer Dashboard</span>\",\"col\":12}},{\"id\":\"C-uYsPKScK\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Total Customers\",\"col\":4}},{\"id\":\"z9SbRHckDy\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Active Customers\",\"col\":4}},{\"id\":\"U1XAxKc7NC\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"New This Month\",\"col\":4}},{\"id\":\"f4X3SLWBMB\",\"type\":\"chart\",\"data\":{\"chart_name\":\"Customer Growth\",\"col\":12}},{\"id\":\"qlKJalG3A0\",\"type\":\"chart\",\"data\":{\"chart_name\":\"Customer Type\",\"col\":6}},{\"id\":\"W6xXIiVLMu\",\"type\":\"chart\",\"data\":{\"chart_name\":\"Customers by Group\",\"col\":6}},{\"id\":\"jaPm6wkNCK\",\"type\":\"chart\",\"data\":{\"chart_name\":\"Customers by Territory\",\"col\":12}}]",
+ "creation": "2026-09-09 09:49:11.092574",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "for_user": "",
+ "hide_custom": 0,
+ "icon": "customer",
+ "idx": 0,
+ "indicator_color": "green",
+ "is_hidden": 0,
+ "label": "Customer Dashboard",
+ "links": [],
+ "modified": "2026-09-09 10:51:41.395235",
+ "modified_by": "Administrator",
+ "module": "Pratap Dashboard",
+ "name": "Customer Dashboard",
+ "number_cards": [
+  {
+   "label": "Total Customers",
+   "number_card_name": "Total Customers"
+  },
+  {
+   "label": "New This Month",
+   "number_card_name": "New This Month"
+  },
+  {
+   "label": "Active Customers",
+   "number_card_name": "Active Customers"
+  }
+ ],
+ "owner": "Administrator",
+ "parent_page": "",
+ "public": 1,
+ "quick_lists": [],
+ "roles": [],
+ "sequence_id": 1.0,
+ "shortcuts": [],
+ "title": "Customer Dashboard"
+}
