@@ -1,0 +1,40 @@
+{
+ "chart_name": "Top Opportunity by Created By",
+ "chart_type": "Report",
+ "creation": "2026-09-12 11:22:41.422733",
+ "currency": "",
+ "docstatus": 0,
+ "doctype": "Dashboard Chart",
+ "dynamic_filters_json": "{}",
+ "filters_json": "{\"from_date\":\"2026-04-01\",\"to_date\":\"2027-03-31\",\"date_based_on\":\"Opportunity Date\",\"limit\":10,\"company\":\"Pratap Texchem Private Limited\"}",
+ "group_by_type": "Count",
+ "idx": 0,
+ "is_public": 1,
+ "is_standard": 1,
+ "modified": "2026-09-12 11:25:04.667966",
+ "modified_by": "Administrator",
+ "module": "Pratap Dashboard",
+ "name": "Top Opportunity by Created By",
+ "number_of_groups": 0,
+ "owner": "Administrator",
+ "report_name": "Top Opportunity by Created By",
+ "roles": [],
+ "show_values_over_chart": 0,
+ "time_interval": "Yearly",
+ "timeseries": 0,
+ "timespan": "Last Year",
+ "type": "Line",
+ "use_report_chart": 0,
+ "x_field": "full_name",
+ "y_axis": [
+  {
+   "y_field": "opportunity_count"
+  },
+  {
+   "y_field": "total_amount"
+  },
+  {
+   "y_field": "average_amount"
+  }
+ ]
+}

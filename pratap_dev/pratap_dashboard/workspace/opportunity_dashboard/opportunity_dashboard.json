@@ -1,0 +1,71 @@
+{
+ "charts": [
+  {
+   "chart_name": "Packing Material Wise Opportunity",
+   "label": "Packing Material Wise Opportunity"
+  },
+  {
+   "chart_name": "Top Opportunity by Created By",
+   "label": "Top Opportunity by Created By"
+  },
+  {
+   "chart_name": "Status wise Opportunity",
+   "label": "Status wise Opportunity"
+  },
+  {
+   "chart_name": "Territory Wise Opportunity",
+   "label": "Territory Wise Opportunity"
+  },
+  {
+   "chart_name": "Trial wise Opportunity",
+   "label": "Trial wise Opportunity"
+  },
+  {
+   "chart_name": "Region Wise Opportunity",
+   "label": "Region Wise Opportunity"
+  },
+  {
+   "chart_name": "Item Code Wise Opportunity",
+   "label": "Item Code Wise Opportunity"
+  },
+  {
+   "chart_name": "Top Opportunity by Customers",
+   "label": "Top Opportunity by Customers"
+  },
+  {
+   "chart_name": "Country Wise Opportunity",
+   "label": "Country Wise Opportunity"
+  }
+ ],
+ "content": "[{\"id\":\"2_9UM_lxct\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\">Opportunity Dashboard</span>\",\"col\":12}},{\"id\":\"fuc0zLzoIq\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Total Opportunity\",\"col\":12}},{\"id\":\"B47UeWvTx-\",\"type\":\"chart\",\"data\":{\"chart_name\":\"Top Opportunity by Customers\",\"col\":12}},{\"id\":\"iffScPlbjH\",\"type\":\"chart\",\"data\":{\"chart_name\":\"Trial wise Opportunity\",\"col\":6}},{\"id\":\"k8OpV4yO59\",\"type\":\"chart\",\"data\":{\"chart_name\":\"Status wise Opportunity\",\"col\":6}},{\"id\":\"A89OM53gZF\",\"type\":\"chart\",\"data\":{\"chart_name\":\"Top Opportunity by Created By\",\"col\":12}},{\"id\":\"J5JU3VZ1I4\",\"type\":\"chart\",\"data\":{\"chart_name\":\"Territory Wise Opportunity\",\"col\":12}},{\"id\":\"yoP0OYfcqi\",\"type\":\"chart\",\"data\":{\"chart_name\":\"Item Code Wise Opportunity\",\"col\":12}},{\"id\":\"kLtFJFxiRH\",\"type\":\"chart\",\"data\":{\"chart_name\":\"Country Wise Opportunity\",\"col\":6}},{\"id\":\"0oxlJrsSlF\",\"type\":\"chart\",\"data\":{\"chart_name\":\"Region Wise Opportunity\",\"col\":6}},{\"id\":\"KUNdmqX-MY\",\"type\":\"chart\",\"data\":{\"chart_name\":\"Packing Material Wise Opportunity\",\"col\":12}}]",
+ "creation": "2026-09-12 10:46:18.368258",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "for_user": "",
+ "hide_custom": 0,
+ "icon": "dashboard-list",
+ "idx": 0,
+ "indicator_color": "green",
+ "is_hidden": 0,
+ "label": "Opportunity Dashboard",
+ "links": [],
+ "modified": "2026-09-12 12:37:29.249810",
+ "modified_by": "Administrator",
+ "module": "Pratap Dashboard",
+ "name": "Opportunity Dashboard",
+ "number_cards": [
+  {
+   "label": "Total Opportunity",
+   "number_card_name": "Total Opportunity"
+  }
+ ],
+ "owner": "Administrator",
+ "parent_page": "",
+ "public": 1,
+ "quick_lists": [],
+ "roles": [],
+ "sequence_id": 4.0,
+ "shortcuts": [],
+ "title": "Opportunity Dashboard"
+}
