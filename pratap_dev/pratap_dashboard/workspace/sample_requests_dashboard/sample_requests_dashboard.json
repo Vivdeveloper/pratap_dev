@@ -1,0 +1,47 @@
+{
+ "charts": [
+  {
+   "chart_name": "Sample Request Trend",
+   "label": "Sample Request Trend"
+  }
+ ],
+ "content": "[{\"id\":\"Nj7T-AyNLn\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\">Sample Requests Dashboard</span>\",\"col\":12}},{\"id\":\"pDO0-xd3-H\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Total Sample Requests\",\"col\":4}},{\"id\":\"hjWqtd8Kmb\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Pending Sample Requests\",\"col\":4}},{\"id\":\"y2ISmi_PGE\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Dispatched Samples\",\"col\":4}},{\"id\":\"ayK5KyQwYB\",\"type\":\"chart\",\"data\":{\"chart_name\":\"Sample Request Trend\",\"col\":12}}]",
+ "creation": "2026-09-12 10:23:18.369288",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "for_user": "",
+ "hide_custom": 0,
+ "icon": "dashboard-list",
+ "idx": 0,
+ "indicator_color": "green",
+ "is_hidden": 0,
+ "label": "Sample Requests Dashboard",
+ "links": [],
+ "modified": "2026-09-12 10:30:45.615497",
+ "modified_by": "Administrator",
+ "module": "Pratap Dashboard",
+ "name": "Sample Requests Dashboard",
+ "number_cards": [
+  {
+   "label": "Total Sample Requests",
+   "number_card_name": "Total Sample Requests"
+  },
+  {
+   "label": "Pending Sample Requests",
+   "number_card_name": "Pending Sample Requests"
+  },
+  {
+   "label": "Dispatched Samples",
+   "number_card_name": "Dispatched Samples"
+  }
+ ],
+ "owner": "Administrator",
+ "parent_page": "",
+ "public": 1,
+ "quick_lists": [],
+ "roles": [],
+ "sequence_id": 2.0,
+ "shortcuts": [],
+ "title": "Sample Requests Dashboard"
+}
