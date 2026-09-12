@@ -1,0 +1,120 @@
+// Copyright (c) 2026, saurabh@exacuer.com and contributors
+// For license information, please see license.txt
+
+frappe.query_reports["Trial wise Opportunity"] = {
+	filters: [
+		{
+			fieldname: "from_date",
+			label: __("From Date"),
+			fieldtype: "Date",
+			default: erpnext.utils.get_fiscal_year(frappe.datetime.get_today(), true)[1],
+			reqd: 1,
+		},
+		{
+			fieldname: "to_date",
+			label: __("To Date"),
+			fieldtype: "Date",
+			default: erpnext.utils.get_fiscal_year(frappe.datetime.get_today(), true)[2],
+			reqd: 1,
+		},
+		{
+			fieldname: "date_based_on",
+			label: __("Date Based On"),
+			fieldtype: "Select",
+			options: ["Opportunity Date", "Expected Closing Date", "Document Creation"],
+			default: "Opportunity Date",
+			reqd: 1,
+		},
+		{
+			fieldname: "company",
+			label: __("Company"),
+			fieldtype: "Link",
+			options: "Company",
+			default: frappe.defaults.get_user_default("Company"),
+		},
+		{
+			fieldname: "custom_trial",
+			label: __("Trial"),
+			fieldtype: "Select",
+			options: ["", "Yes", "No"],
+		},
+		{
+			fieldname: "custom_select_field",
+			label: __("Status"),
+			fieldtype: "Select",
+			options: ["", "Interested", "Not Interested"],
+		},
+		{
+			fieldname: "opportunity_status",
+			label: __("Opportunity Status"),
+			fieldtype: "Select",
+			options: ["", "Open", "Quotation", "Converted", "Lost", "Replied", "Closed"],
+		},
+		{
+			fieldname: "customer",
+			label: __("Customer"),
+			fieldtype: "Link",
+			options: "Customer",
+		},
+		{
+			fieldname: "customer_group",
+			label: __("Customer Group"),
+			fieldtype: "Link",
+			options: "Customer Group",
+		},
+		{
+			fieldname: "created_by",
+			label: __("Created By"),
+			fieldtype: "Link",
+			options: "User",
+		},
+		{
+			fieldname: "opportunity_owner",
+			label: __("Opportunity Owner"),
+			fieldtype: "Link",
+			options: "User",
+		},
+		{
+			fieldname: "opportunity_type",
+			label: __("Opportunity Type"),
+			fieldtype: "Link",
+			options: "Opportunity Type",
+		},
+		{
+			fieldname: "source",
+			label: __("Source"),
+			fieldtype: "Link",
+			options: "Lead Source",
+		},
+		{
+			fieldname: "sales_stage",
+			label: __("Sales Stage"),
+			fieldtype: "Link",
+			options: "Sales Stage",
+		},
+		{
+			fieldname: "territory",
+			label: __("Territory"),
+			fieldtype: "Link",
+			options: "Territory",
+		},
+		{
+			fieldname: "industry",
+			label: __("Industry"),
+			fieldtype: "Link",
+			options: "Industry Type",
+		},
+		{
+			fieldname: "market_segment",
+			label: __("Market Segment"),
+			fieldtype: "Link",
+			options: "Market Segment",
+		},
+		{
+			fieldname: "campaign",
+			label: __("Campaign"),
+			fieldtype: "Link",
+			options: "Campaign",
+		},
+	],
+};
