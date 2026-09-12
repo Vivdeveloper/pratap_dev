@@ -37,6 +37,12 @@ frappe.ui.form.on("Work Order", {
         populate_wo_instructions(frm);
         },
 
+    // WIP warehouse follows the production item's "Processing Location"
+    // (Item.custom_job_work_warehouse) — fetch it as soon as the item is picked.
+    production_item(frm) {
+        set_wip_from_item(frm);
+    },
+
     // When the item / BOM / qty changes, ERPNext re-fetches Required Items from the BOM
     // asynchronously. Re-scan the rows after a short delay so the instruction columns
     // fill in. (Stock counts are intentionally NOT auto-fetched here — button-only.)
@@ -50,6 +56,23 @@ frappe.ui.form.on("Work Order", {
         populate_wo_instructions(frm, 1000);
     },
 });
+
+// WIP warehouse follows the production item's "Processing Location"
+// (Item.custom_job_work_warehouse). Fetched from the item master so it's never picked by
+// hand. The server (before_validate) enforces the same, covering programmatic creation.
+function set_wip_from_item(frm) {
+    if (!frm.doc.production_item) {
+        return;
+    }
+    frappe.db
+        .get_value("Item", frm.doc.production_item, "custom_job_work_warehouse")
+        .then((r) => {
+            const loc = r && r.message && r.message.custom_job_work_warehouse;
+            if (loc) {
+                frm.set_value("wip_warehouse", loc);
+            }
+        });
+}
 
 // Copy the Operation Instruction columns from the BOM onto the Required Items rows.
 // The server sets these on validate too; doing it here as well means they show up as
