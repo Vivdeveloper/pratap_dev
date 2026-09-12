@@ -159,17 +159,18 @@ function render_pr_bifurcation(frm) {
 		return;
 	}
 
-	const required = [];
-	const fulfilled = [];
-	(frm.doc.items || []).forEach((row) => {
-		if (!row.item_code) {
-			return;
+	// "Required for PR" = the live Items rows (fulfilled ones are removed from the child
+	// table on save so they don't move forward). "Already Fulfilled" is read from the
+	// snapshot the server stored when it removed them — so they still show below.
+	const required = (frm.doc.items || []).filter((row) => row.item_code);
+	let fulfilled = [];
+	if (frm.doc.custom_fulfilled_items_json) {
+		try {
+			fulfilled = JSON.parse(frm.doc.custom_fulfilled_items_json) || [];
+		} catch (e) {
+			fulfilled = [];
 		}
-		const expected = flt(row.custom_expected_qty);
-		const stock = flt(row.custom_total_stock_qty);
-		const is_fulfilled = expected > 0 && stock + 1e-9 >= expected;
-		(is_fulfilled ? fulfilled : required).push(row);
-	});
+	}
 
 	const cell = "padding:6px 10px;border-top:1px solid var(--border-color,#d1d8dd);";
 	const rows_html = (rows) =>

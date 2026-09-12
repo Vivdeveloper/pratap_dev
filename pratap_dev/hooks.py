@@ -311,6 +311,7 @@ doctype_js = {
 doctype_list_js = {
     "Pratap Quality Inspection": "public/js/pratap_quality_inspection_list.js",
     "Purchase Receipt": "public/js/purchase_receipt_list.js",
+    "Item": "public/js/item_list.js",
 }
 
 doc_events = {
@@ -383,7 +384,12 @@ doc_events = {
         # QC / total stock / Required Qty for PR) server-side so they always update on save,
         # not only when the client script runs. before_update_after_submit keeps them fresh
         # on submitted MRs (fields are allow_on_submit).
-        "validate": "pratap_dev.material_request_stock.update_pipeline_fields",
+        "validate": [
+            "pratap_dev.material_request_stock.update_pipeline_fields",
+            # runs AFTER pipeline fields are computed: removes already-fulfilled items from
+            # the Items table (snapshotting them for the "Already Fulfilled" box below).
+            "pratap_dev.material_request_stock.move_fulfilled_items",
+        ],
         "before_update_after_submit": "pratap_dev.material_request_stock.update_pipeline_fields",
     },
     "Request for Quotation": {
