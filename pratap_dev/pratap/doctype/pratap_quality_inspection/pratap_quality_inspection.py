@@ -138,11 +138,22 @@ class PratapQualityInspection(Document):
 		self._set_raw_material_required_qty()
 		self._set_density_qty()
 		self._set_finished_qty()
+		self._set_rework_and_total_batch_qty()
 		self._set_readings_from_template()
 		self._inspect_and_set_status()
 		self._validate_rework_raw_materials()
 		self._sync_accepted_qc_to_grn()
 		self._sync_density_to_grn_item()
+
+	def _set_rework_and_total_batch_qty(self):
+		"""Rework Material Transferred Qty = total qty of all rework material transfers done
+		for this Work Order (rework-tagged Stock Entries). Total Batch Qty = Batch Qty
+		(reference_qty, fetched from the WO qty) + that rework qty. Both are display fields."""
+		rework_qty = 0.0
+		if (self.reference_type or "").strip() == "Work Order" and self.reference_name:
+			rework_qty = _wo_rework_transferred_total(self.reference_name)
+		self.custom_rework_transferred_qty = rework_qty
+		self.custom_total_batch_qty = frappe.utils.flt(self.reference_qty) + frappe.utils.flt(rework_qty)
 
 	def _validate_rework_raw_materials(self):
 		"""When status is Rework and "Raw Material Required" is checked (default), at least
@@ -1037,6 +1048,33 @@ def _map_grn_batches_to_rows(item_rows):
 			mapping.setdefault(row.batch_no, row)
 
 	return mapping
+
+
+def _wo_rework_transferred_total(work_order):
+	"""Total qty across ALL rework material transfers (rework-tagged, submitted Material
+	Transfer for Manufacture Stock Entries) for a Work Order — every item, every rework QC."""
+	if not work_order:
+		return 0.0
+	v = frappe.db.sql(
+		"""
+		SELECT SUM(sed.qty) FROM `tabStock Entry Detail` sed
+		INNER JOIN `tabStock Entry` se ON se.name = sed.parent
+		WHERE se.work_order = %(wo)s AND se.purpose = 'Material Transfer for Manufacture'
+		  AND se.docstatus = 1 AND IFNULL(se.custom_rework_qc, '') != ''
+		""",
+		{"wo": work_order},
+	)
+	return frappe.utils.flt(v[0][0]) if v and v[0][0] else 0.0
+
+
+@frappe.whitelist()
+def get_wo_rework_transferred_total(work_order):
+	"""Live figures for the QC form to preview before save: the rework-transferred total for
+	the Work Order, the WO's own qty (Batch Qty), and their sum (Total Batch Qty). Returning
+	wo_qty here means the preview never depends on the async-fetched reference_qty timing."""
+	rework = _wo_rework_transferred_total(work_order)
+	wo_qty = frappe.utils.flt(frappe.db.get_value("Work Order", work_order, "qty")) if work_order else 0.0
+	return {"rework": rework, "wo_qty": wo_qty, "total": wo_qty + rework}
 
 
 @frappe.whitelist()

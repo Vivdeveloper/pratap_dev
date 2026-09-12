@@ -27,6 +27,9 @@ frappe.ui.form.on("Pratap Quality Inspection", {
 	},
 
 	refresh(frm) {
+		// Live-preview Rework Material Transferred Qty + Total Batch Qty (also on a new,
+		// unsaved QC). The authoritative values are recomputed server-side on save.
+		set_rework_totals(frm);
 		// "Rework Material Transfer" — for a rework QC linked to a Work Order, transfer the
 		// per-row Transfer Qty from the WO source warehouse to WIP, auto-provisioning any
 		// shortfall (creates a Rework Material Transfer MR + moves stock into the source).
@@ -39,7 +42,39 @@ frappe.ui.form.on("Pratap Quality Inspection", {
 		}
 		frm.add_custom_button(__("Rework Material Transfer"), () => rework_material_transfer(frm));
 	},
+
+	// Reference (Work Order) picked/changed -> refresh the rework total (and thus Total Batch Qty).
+	reference_name(frm) {
+		set_rework_totals(frm);
+	},
+
+	// Batch Qty (fetched from the WO) landed/changed -> keep Total Batch Qty in sync.
+	reference_qty(frm) {
+		frm.set_value(
+			"custom_total_batch_qty",
+			flt(frm.doc.reference_qty) + flt(frm.doc.custom_rework_transferred_qty)
+		);
+	},
 });
+
+// Sum of all rework material transfers for the linked Work Order -> Rework Material
+// Transferred Qty; Total Batch Qty = Batch Qty + that sum. Read-only display fields.
+function set_rework_totals(frm) {
+	if ((frm.doc.reference_type || "") !== "Work Order" || !frm.doc.reference_name) {
+		return;
+	}
+	frappe.call({
+		method: "pratap_dev.pratap.doctype.pratap_quality_inspection.pratap_quality_inspection.get_wo_rework_transferred_total",
+		args: { work_order: frm.doc.reference_name },
+		callback: (r) => {
+			const m = r.message || {};
+			// Use the server's wo_qty for the total so it doesn't depend on reference_qty
+			// (Batch Qty) having finished its async fetch yet.
+			frm.set_value("custom_rework_transferred_qty", flt(m.rework));
+			frm.set_value("custom_total_batch_qty", flt(m.total));
+		},
+	});
+}
 
 frappe.ui.form.on("Pratap Quality Inspection Raw Material", {
 	item_code(frm, cdt, cdn) {

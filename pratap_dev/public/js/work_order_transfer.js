@@ -448,9 +448,9 @@ function wire_item_block(frm, dialog, ctx, $body, it) {
 // Time logging is only allowed AFTER the item is fully transferred. Before that (and
 // once finished), Start/Stop/Finish are all disabled. When full and not finished, the
 // Start/Stop sequence applies. The active (enabled) colored button stays bright.
-//   not full OR finished -> Start, Stop, Finish all disabled
-//   timer running        -> Start disabled, Stop enabled
-//   not running          -> Start enabled, Stop disabled (no two in a row)
+//   not full OR finished    -> Start, Stop, Finish all disabled
+//   timer running (started) -> Start disabled, Stop + Finish enabled
+//   not running (stopped)   -> Start enabled, Stop + Finish disabled (Finish only from Start)
 function apply_timer_buttons($item, running, finished) {
 	const full = $item.attr("data-full") === "1";
 	if (!full || finished) {
@@ -459,7 +459,9 @@ function apply_timer_buttons($item, running, finished) {
 	}
 	$item.find(".wo-tr-start").prop("disabled", !!running);
 	$item.find(".wo-tr-stop").prop("disabled", !running);
-	$item.find(".wo-tr-finish").prop("disabled", false);
+	// Finish is allowed ONLY while the batch is in the started (running) state — i.e. the
+	// last action was Start, not Stop. After a Stop the operator must Start again to Finish.
+	$item.find(".wo-tr-finish").prop("disabled", !running);
 }
 
 // Directional two-way calc, capped at 3 decimals.
@@ -571,8 +573,8 @@ function apply_batch_gate(dialog, ctx) {
 			: "";
 		$item.find(".wo-tr-transfer").prop("disabled", !canTransfer).attr("title", title);
 		// Timer: disabled before Start Batch or while the QC gate is closed. Otherwise
-		// Finish is always allowed; Start/Stop are limited to the one open item AND blocked
-		// while rework is pending.
+		// Finish is allowed only from the started (running) state; Start/Stop are limited to
+		// the one open item AND blocked while rework is pending.
 		if (!started || qcBlocked) {
 			$item.find(".wo-tr-start, .wo-tr-stop, .wo-tr-finish").prop("disabled", true);
 		} else {
@@ -880,7 +882,8 @@ function apply_rework_timer($item, transferred, running, finished) {
 	}
 	$item.find(".wo-rw-start").prop("disabled", !!running);
 	$item.find(".wo-rw-stop").prop("disabled", !running);
-	$item.find(".wo-rw-finish").prop("disabled", false);
+	// Finish only while running (last action was Start), never from the stopped state.
+	$item.find(".wo-rw-finish").prop("disabled", !running);
 }
 
 function rework_log($item, log) {
@@ -962,7 +965,9 @@ function wire_rework(frm, dialog, ctx) {
 						$item.find(".wo-rw-total").text(fmt_dur(res.duration_mins));
 					}
 					// Now transferred -> the timer becomes usable for this rework item.
-					apply_rework_timer($item, true, false, "Finish —" in (res.addition_log || ""));
+					// (Use .includes — the `in` operator throws a TypeError on a string, which
+					// previously aborted this callback so Start/Stop only lit up after a refresh.)
+					apply_rework_timer($item, true, false, (res.addition_log || "").includes("Finish —"));
 					// Sync ctx + re-gate the main tab (rework progress affects the main block).
 					const rit = find_rw_item(ctx, qc, item);
 					if (rit) rit.transfers = res.transfers || [];
