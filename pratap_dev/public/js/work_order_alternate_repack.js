@@ -23,7 +23,10 @@ pratap_dev.toggle_pick_alt_button = function (frm) {
 	if (!field) return;
 
 	field.$wrapper.find(".pratap-pick-alt-btn").remove();
-	if (selected.length && frm.doc.docstatus === 0) {
+	// Available on draft AND submitted Work Orders (alternate-batch repack commonly happens
+	// after submit) — it only creates a separate Repack Stock Entry, never edits the WO.
+	// Hidden only on cancelled (docstatus 2).
+	if (selected.length && frm.doc.docstatus !== 2) {
 		$(
 			`<button class="btn btn-xs btn-primary pratap-pick-alt-btn" style="margin-top:6px;">
 				${__("Pick Alternate Batches")} (${selected.length})
