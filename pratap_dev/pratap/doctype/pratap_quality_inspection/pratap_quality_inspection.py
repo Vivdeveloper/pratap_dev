@@ -134,11 +134,12 @@ class PratapQualityInspection(Document):
 		self._ensure_density_for_grn()
 		self._set_density_for_same_uom()
 		self._validate_inspected_qty()
+		# Compute Total Batch Qty (Batch Qty + rework) FIRST — the calcs below key off it.
+		self._set_rework_and_total_batch_qty()
 		self._validate_total_raw_material_percentage()
 		self._set_raw_material_required_qty()
 		self._set_density_qty()
 		self._set_finished_qty()
-		self._set_rework_and_total_batch_qty()
 		self._set_readings_from_template()
 		self._inspect_and_set_status()
 		self._validate_rework_raw_materials()
@@ -317,24 +318,26 @@ class PratapQualityInspection(Document):
 		if frappe.utils.flt(self.inspected_qty) <= 0:
 			frappe.throw(_("Inspected Qty must be greater than 0."))
 
-	def _set_density_qty(self):
-		reference_qty = frappe.utils.flt(self.reference_qty)
-		custom_density = frappe.utils.flt(self.custom_density)
+	def _batch_calc_qty(self):
+		"""Qty basis for the QC calcs (density qty / yield / raw-material required): the Total
+		Batch Qty (Batch Qty + rework transferred) when available, else the plain Batch Qty."""
+		return frappe.utils.flt(self.get("custom_total_batch_qty")) or frappe.utils.flt(self.reference_qty)
 
-		if custom_density > 0:
-			# (batch_qty - inspected_qty - process_loss%reference_qty)/ custom_density
-			self.density_qty = reference_qty / custom_density
-		else:
-			self.density_qty = 0
+	def _set_density_qty(self):
+		reference_qty = self._batch_calc_qty()
+		# Blank/0 density is treated as 1 so Density Qty = Total Batch Qty (not 0) until a real
+		# density is entered — matches the client preview and the submit-time density default.
+		custom_density = frappe.utils.flt(self.custom_density) or 1
+		self.density_qty = reference_qty / custom_density
 
 	def _set_finished_qty(self):
-		batch_qty = frappe.utils.flt(self.reference_qty)
+		batch_qty = self._batch_calc_qty()
 		inspected_qty = frappe.utils.flt(self.inspected_qty)
 		process_loss = frappe.utils.flt(self.process_loss)
 		if self.reference_type == "Work Order":
-			custom_density = frappe.utils.flt(self.custom_density)
-			if custom_density <= 0:
-				return
+			# Blank/0 density treated as 1 (matches Density Qty + submit default), so Yield
+			# computes off the Total Batch Qty instead of staying 0.
+			custom_density = frappe.utils.flt(self.custom_density) or 1
 			self.finished_qty = (
 				(batch_qty - inspected_qty - (batch_qty * process_loss / 100)) / custom_density
 			)
@@ -345,7 +348,7 @@ class PratapQualityInspection(Document):
 
 
 	def _set_raw_material_required_qty(self):
-		reference_qty = frappe.utils.flt(self.reference_qty)
+		reference_qty = self._batch_calc_qty()
 		for row in self.raw_materials or []:
 			percentage = frappe.utils.flt(row.mat_req_in_pecentage)
 			row.total_req_qty = reference_qty * (percentage / 100.0)

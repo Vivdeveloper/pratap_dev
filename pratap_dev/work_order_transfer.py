@@ -76,21 +76,23 @@ def get_wo_transfer_context(work_order):
 		"batch_started_at": str(wo.get("custom_batch_started_at") or "") or None,
 		"rework_qcs": _wo_rework_qcs(wo),
 		"basic_testing_qcs": _accepted_basic_testing_qcs(wo.name),
-		"in_process_qcs": _in_process_qcs(wo.name),
+		"in_process_qcs": _in_process_qcs(wo),
 		"qc_gate": _qc_gate(wo.name),
 	}
 
 
-def _in_process_qcs(work_order):
-	"""Pratap QCs of inspection type "In Process" linked to this Work Order, newest first
-	— shown in the popup's In Process QC tab (created by the "Final QC" button, which mirrors
-	the form's "Create Pratap QC")."""
+def _in_process_qcs(wo):
+	""""In Process" (inspection type) Pratap QCs for this Work Order shown in the Final QC tab,
+	newest first — each with its Raw Materials rendered as material-transfer + Start/Stop/Finish
+	rows (same UI as Rework). Rework-status ones are excluded here because they render in the
+	Rework section of the In Process QC tab (avoids showing the same QC twice)."""
 	names = frappe.get_all(
 		"Pratap Quality Inspection",
 		filters={
 			"reference_type": "Work Order",
-			"reference_name": work_order,
+			"reference_name": wo.name,
 			"inspection_type": "In Process",
+			"status": ["!=", "Rework"],
 			"docstatus": ["<", 2],
 		},
 		pluck="name",
@@ -108,6 +110,8 @@ def _in_process_qcs(work_order):
 				"inspector": qc.get("inspector") or "",
 				"reference_qty": flt(qc.get("reference_qty")),
 				"finished_qty": flt(qc.get("finished_qty")),
+				"rework_notes": qc.get("rework_notes") or "",
+				"items": _qc_transfer_items(wo, qc),
 			}
 		)
 	return out
@@ -189,16 +193,18 @@ def _assert_no_pending_rework(work_order):
 
 
 def _accepted_basic_testing_qcs(work_order):
-	"""Basic Testing QCs for the Work Order shown in the 3rd tab (newest first). Both
-	Accepted and Rejected are shown for tracking — but note only Accepted unblocks
-	material transfer (see _qc_gate); Rejected is display-only."""
+	"""ALL Basic Testing (inspection type) QCs for the Work Order shown in the In Process QC
+	tab (newest first) — every status, so the operator sees the full Basic Testing history.
+	Rework-status ones are excluded here because they render in the Rework section of the same
+	tab (with their material-transfer UI). Only an Accepted latest unblocks material transfer
+	(see _qc_gate); this list is display-only."""
 	names = frappe.get_all(
 		"Pratap Quality Inspection",
 		filters={
 			"reference_type": "Work Order",
 			"reference_name": work_order,
 			"inspection_type": "Basic Testing",
-			"status": ["in", ["Accepted", "Rejected"]],
+			"status": ["!=", "Rework"],
 			"docstatus": ["<", 2],
 		},
 		pluck="name",
@@ -1055,6 +1061,38 @@ def _rework_item_transfers(work_order, qc_name, item_code):
 	return out
 
 
+def _qc_transfer_items(wo, qc):
+	"""Transfer-ready items (from a QC's Raw Materials): per item its available batches, the
+	transfers already made against this QC, and the Start/Stop/Finish timer state. Shared by
+	the Rework section and the Final QC tab so both offer the same material-transfer UI."""
+	data = _rework_data(qc.name)
+	items = []
+	for rm in (qc.get("raw_materials") or []):
+		if not rm.item_code:
+			continue
+		src = rm.get("source_warehouse") or wo.source_warehouse
+		has_batch = bool(frappe.db.get_value("Item", rm.item_code, "has_batch_no"))
+		d = data.get(rm.item_code, {})
+		log = d.get("addition_log") or ""
+		items.append(
+			{
+				"item_code": rm.item_code,
+				"item_name": rm.item_name or frappe.db.get_value("Item", rm.item_code, "item_name"),
+				"uom": rm.uom or frappe.db.get_value("Item", rm.item_code, "stock_uom"),
+				"required_qty": flt(rm.get("total_req_qty"), 3),
+				"source_warehouse": src,
+				"has_batch": has_batch,
+				"batches": _available_batches(rm.item_code, src) if has_batch else [],
+				"transfers": _rework_item_transfers(wo.name, qc.name, rm.item_code),
+				"duration_mins": flt(d.get("duration_mins"), 3),
+				"timer_running": bool(d.get("addition_start")),
+				"finished": "Finish —" in log,
+				"addition_log": log,
+			}
+		)
+	return items
+
+
 def _wo_rework_qcs(wo):
 	"""Rework Pratap QCs for this Work Order. Each shows ONLY the items added to that QC's
 	Raw Materials table (not the whole WO), the QC's Rework Notes on top, and per-item a
@@ -1073,31 +1111,6 @@ def _wo_rework_qcs(wo):
 	out = []
 	for name in names:
 		qc = frappe.get_doc("Pratap Quality Inspection", name)
-		data = _rework_data(name)
-		items = []
-		for rm in (qc.get("raw_materials") or []):
-			if not rm.item_code:
-				continue
-			src = rm.get("source_warehouse") or wo.source_warehouse
-			has_batch = bool(frappe.db.get_value("Item", rm.item_code, "has_batch_no"))
-			d = data.get(rm.item_code, {})
-			log = d.get("addition_log") or ""
-			items.append(
-				{
-					"item_code": rm.item_code,
-					"item_name": rm.item_name or frappe.db.get_value("Item", rm.item_code, "item_name"),
-					"uom": rm.uom or frappe.db.get_value("Item", rm.item_code, "stock_uom"),
-					"required_qty": flt(rm.get("total_req_qty"), 3),
-					"source_warehouse": src,
-					"has_batch": has_batch,
-					"batches": _available_batches(rm.item_code, src) if has_batch else [],
-					"transfers": _rework_item_transfers(wo.name, name, rm.item_code),
-					"duration_mins": flt(d.get("duration_mins"), 3),
-					"timer_running": bool(d.get("addition_start")),
-					"finished": "Finish —" in log,
-					"addition_log": log,
-				}
-			)
 		out.append(
 			{
 				"name": name,
@@ -1105,7 +1118,7 @@ def _wo_rework_qcs(wo):
 				"status": qc.status,
 				"inspection_date": str(qc.inspection_date or ""),
 				"rework_notes": qc.get("rework_notes") or "",
-				"items": items,
+				"items": _qc_transfer_items(wo, qc),
 			}
 		)
 	return out
@@ -1151,12 +1164,21 @@ def _make_rework_transfer(wo, item_code, src, lines, qc):
 
 
 def _validate_rework_qc(qc, wo_name):
+	"""A QC is transferable from the popup when it belongs to this Work Order and is either a
+	Rework QC or an In Process (inspection type) QC — the Final QC tab now offers the same
+	material-transfer + timer as the Rework section."""
 	info = frappe.db.get_value(
 		"Pratap Quality Inspection", qc,
-		["reference_type", "reference_name", "status", "docstatus"], as_dict=True,
+		["reference_type", "reference_name", "status", "inspection_type", "docstatus"], as_dict=True,
 	)
-	if not info or info.reference_type != "Work Order" or info.reference_name != wo_name or info.status != "Rework":
-		frappe.throw(_("This is not a rework QC for this Work Order."))
+	ok = (
+		info
+		and info.reference_type == "Work Order"
+		and info.reference_name == wo_name
+		and (info.status == "Rework" or info.inspection_type == "In Process")
+	)
+	if not ok:
+		frappe.throw(_("This QC is not a transferable In Process / rework QC for this Work Order."))
 
 
 @frappe.whitelist()
