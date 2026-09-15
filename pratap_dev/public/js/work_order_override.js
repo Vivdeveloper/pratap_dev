@@ -9,20 +9,10 @@ frappe.ui.form.on("Work Order", {
         if (frm.doc.custom_rework_qc) {
             handle_rework_consumption(frm);
         }
-        // Show "Create Pratap QC" for both draft and submitted Work Orders
-        // (no longer hidden once the Work Order is submitted).
-        frm.add_custom_button(__("Create Pratap QC"), () => {
-            frappe.new_doc("Pratap Quality Inspection", {
-                inspection_type: "In Process",
-                reference_type: "Work Order",
-                reference_doctype: "Work Order",
-                reference_name: frm.doc.name,
-                company: frm.doc.company,
-                production_item: frm.doc.production_item,
-                item_name: frm.doc.item_name,
-                reference_qty: frm.doc.qty,
-            });
-        });
+        // Hide "Create Pratap QC" and ERPNext's "Create Pick List" buttons on the Work Order
+        // (QC is handled from the transfer popup; pick list isn't used here). ERPNext adds
+        // Pick List in its own refresh (after ours), so this also re-runs on a short retry.
+        hide_wo_buttons(frm);
 
         add_material_request_button(frm);
 
@@ -122,6 +112,18 @@ const WO_STOCK_WAREHOUSES = [
     ["Plant 2 WIP RM", "custom_plant_2_wip_rm"],
     ["Main Store RM", "custom_main_store_rm"],
 ];
+
+// Remove the "Create Pratap QC" (custom) and "Create Pick List" (ERPNext core) buttons.
+// ERPNext adds Pick List in its own refresh, which runs after ours, so re-run on a short
+// retry to catch it.
+function hide_wo_buttons(frm) {
+    const strip = () => {
+        frm.remove_custom_button(__("Create Pratap QC"));
+        frm.remove_custom_button(__("Create Pick List"));
+    };
+    strip();
+    setTimeout(strip, 400);
+}
 
 // Gate the standard "Start" button: it may only be used once EVERY required item has
 // MR Qty 0 (nothing left to procure — enough stock at the source warehouse). Otherwise

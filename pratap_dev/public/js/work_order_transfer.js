@@ -867,9 +867,9 @@ function rework_collect($item) {
 	return rows;
 }
 
-function rework_add_row($item) {
+function rework_add_row($item, prefill) {
 	const opts = $item.find(".wo-rw-batchopts").html();
-	$item.find(".wo-rw-rows").append(
+	const $tr = $(
 		`<tr>
 			<td><select class="form-control input-xs wo-rwb-batch"><option value="">${__("Select…")}</option>${opts}</select></td>
 			<td><input type="number" class="form-control input-xs wo-rwb-pkg" min="0" step="any"></td>
@@ -878,6 +878,15 @@ function rework_add_row($item) {
 			<td><button class="btn btn-xs btn-default wo-rwb-del">✕</button></td>
 		</tr>`
 	);
+	$item.find(".wo-rw-rows").append($tr);
+	// Prefill from the batch + qty captured on the QC's Raw Materials, so the operator can
+	// just click Material Transfer.
+	if (prefill && prefill.batch_no) {
+		$tr.find(".wo-rwb-batch").val(prefill.batch_no);
+		$tr.find(".wo-rwb-pkg").val(prefill.std_pkg || "");
+		$tr.find(".wo-rwb-units").val(prefill.units || "");
+		$tr.find(".wo-rwb-qty").val(prefill.qty || "");
+	}
 }
 
 // Like the main tab: the timer is only usable AFTER the rework item has been transferred
@@ -913,14 +922,14 @@ function wire_rework(frm, dialog, ctx) {
 		return { $item: $i, qc: $i.attr("data-qc"), item: $i.attr("data-item") };
 	};
 
-	// Seed one empty batch row per transfer item + initial timer state — for BOTH the Rework
-	// section and the Final QC (In Process) items (they share the .wo-rw-* markup).
-	$body.find(".wo-rw-item").each(function () {
-		rework_add_row($(this));
-	});
+	// Seed a batch row per transfer item + initial timer state — for BOTH the Rework section
+	// and the Final QC (In Process) items (they share the .wo-rw-* markup). When the QC saved
+	// a batch + qty on its Raw Materials, prefill that row so the operator just clicks
+	// Material Transfer; otherwise seed an empty row.
 	[...(ctx.rework_qcs || []), ...(ctx.in_process_qcs || [])].forEach((qc) => {
 		(qc.items || []).forEach((it) => {
 			const $i = $body.find(`.wo-rw-item[data-qc="${qc.name}"][data-item="${it.item_code}"]`);
+			rework_add_row($i, it.prefill);
 			apply_rework_timer($i, (it.transfers || []).length > 0, it.timer_running, it.finished);
 		});
 	});

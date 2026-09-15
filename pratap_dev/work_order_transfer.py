@@ -1074,6 +1074,27 @@ def _qc_transfer_items(wo, qc):
 		has_batch = bool(frappe.db.get_value("Item", rm.item_code, "has_batch_no"))
 		d = data.get(rm.item_code, {})
 		log = d.get("addition_log") or ""
+		batches = _available_batches(rm.item_code, src) if has_batch else []
+
+		# Prefill the transfer row from the batch + qty the QC captured in its Raw Materials
+		# (custom_batch + transfer/req qty), so the operator can just click Material Transfer.
+		# Only offered before the item has actually been transferred.
+		prefill = None
+		batch_no = rm.get("custom_batch")
+		qty = flt(rm.get("custom_transfer_qty")) or flt(rm.get("total_req_qty"))
+		if batch_no and qty > 0 and not _rework_item_transfers(wo.name, qc.name, rm.item_code):
+			std_pkg = flt(frappe.db.get_value("Batch", batch_no, "custom_standard_pkg_qty"))
+			if not std_pkg:
+				match = next((b for b in batches if b.get("batch_no") == batch_no), None)
+				std_pkg = flt(match.get("std_pkg")) if match else 0
+			std_pkg = std_pkg or 1
+			prefill = {
+				"batch_no": batch_no,
+				"std_pkg": std_pkg,
+				"units": flt(qty / std_pkg, 3) if std_pkg else 0,
+				"qty": flt(qty, 3),
+			}
+
 		items.append(
 			{
 				"item_code": rm.item_code,
@@ -1082,8 +1103,9 @@ def _qc_transfer_items(wo, qc):
 				"required_qty": flt(rm.get("total_req_qty"), 3),
 				"source_warehouse": src,
 				"has_batch": has_batch,
-				"batches": _available_batches(rm.item_code, src) if has_batch else [],
+				"batches": batches,
 				"transfers": _rework_item_transfers(wo.name, qc.name, rm.item_code),
+				"prefill": prefill,
 				"duration_mins": flt(d.get("duration_mins"), 3),
 				"timer_running": bool(d.get("addition_start")),
 				"finished": "Finish —" in log,
