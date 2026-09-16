@@ -163,10 +163,10 @@ def get_columns():
 			"width": 200,
 		},
 		{
-			"fieldname": "average_amount",
-			"label": _("Average Amount"),
-			"fieldtype": "Currency",
-			"width": 160,
+			"fieldname": "total_qty",
+			"label": _("Total Qty"),
+			"fieldtype": "Float",
+			"width": 140,
 		},
 	]
 
@@ -232,10 +232,12 @@ def get_data(filters):
 		query = query.where(Opportunity.name.isin(matching_opportunities))
 
 	rows = query.run(as_dict=True)
+	qty_map = get_total_qty_map(filters, matching_opportunities)
 	data = []
 	for index, row in enumerate(rows, start=1):
 		count = cint(row.opportunity_count)
 		amount = flt(row.total_amount)
+		key = (row.customer, row.opportunity_from, row.customer_name)
 		data.append(
 			{
 				"rank": index,
@@ -244,11 +246,42 @@ def get_data(filters):
 				"customer_name": row.customer_name or row.customer or _("Not Set"),
 				"opportunity_count": count,
 				"total_amount": round(amount, 2),
-				"average_amount": round(amount / count if count else 0, 2),
+				"total_qty": flt(qty_map.get(key)),
 			}
 		)
 
 	return data
+
+
+def get_total_qty_map(filters, matching_opportunities):
+	Opportunity = frappe.qb.DocType("Opportunity")
+	ItemRow = frappe.qb.DocType("Opportunity CRM Item")
+	date_field = Opportunity[DATE_FIELDS[filters.date_based_on]]
+
+	query = (
+		frappe.qb.from_(Opportunity)
+		.inner_join(ItemRow)
+		.on((ItemRow.parent == Opportunity.name) & (ItemRow.parenttype == "Opportunity"))
+		.select(
+			Opportunity.party_name.as_("customer"),
+			Opportunity.opportunity_from,
+			Opportunity.customer_name,
+			Sum(ItemRow.total_qty).as_("total_qty"),
+		)
+		.where(date_field >= filters.from_date)
+		.where(date_field < add_days(filters.to_date, 1))
+		.groupby(Opportunity.party_name, Opportunity.opportunity_from, Opportunity.customer_name)
+	)
+	query = apply_optional_filters(query, Opportunity, filters)
+	if matching_opportunities is not None:
+		if not matching_opportunities:
+			return {}
+		query = query.where(Opportunity.name.isin(matching_opportunities))
+
+	return {
+		(row.customer, row.opportunity_from, row.customer_name): flt(row.total_qty)
+		for row in query.run(as_dict=True)
+	}
 
 
 def apply_optional_filters(query, Opportunity, filters):
@@ -284,8 +317,8 @@ def get_chart(data):
 					"chartType": "bar",
 				},
 				{
-					"name": _("Total Amount"),
-					"values": [row["total_amount"] for row in data],
+					"name": _("Total Qty"),
+					"values": [row["total_qty"] for row in data],
 					"chartType": "line",
 				},
 			],

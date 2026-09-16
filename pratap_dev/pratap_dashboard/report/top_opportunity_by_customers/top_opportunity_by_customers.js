@@ -168,24 +168,6 @@ frappe.query_reports["Top Opportunity by Customers"] = {
 			label: __("Opportunity Owner"),
 			fieldtype: "Link",
 			options: "User",
-		},
-		{
-			fieldname: "industry",
-			label: __("Industry"),
-			fieldtype: "Link",
-			options: "Industry Type",
-		},
-		{
-			fieldname: "market_segment",
-			label: __("Market Segment"),
-			fieldtype: "Link",
-			options: "Market Segment",
-		},
-		{
-			fieldname: "campaign",
-			label: __("Campaign"),
-			fieldtype: "Link",
-			options: "Campaign",
-		},
+		}
 	],
 };
