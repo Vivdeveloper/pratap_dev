@@ -30,6 +30,7 @@ frappe.ui.form.on("Pratap Quality Inspection", {
 		// "Rework Material Transfer" — for a rework QC linked to a Work Order, transfer the
 		// per-row Transfer Qty from the WO source warehouse to WIP, auto-provisioning any
 		// shortfall (creates a Rework Material Transfer MR + moves stock into the source).
+		// (Total Batch Qty / rework totals are handled in the doctype's own script.)
 		if (frm.is_new() || (frm.doc.reference_type || "") !== "Work Order") {
 			return;
 		}

@@ -7,7 +7,15 @@ frappe.ui.form.on("Pratap Quality Inspection", {
 		set_reference_name_query(frm);
 	},
 
+	// Compute Total Batch Qty as early as the doc loads (before render), so the sum always shows.
+	onload(frm) {
+		compute_total_batch_qty(frm);
+	},
+
 	refresh(frm) {
+		// FIRST — always show the correct Total Batch Qty (Batch + rework) and drive the calcs
+		// off it, before anything else in refresh can short-circuit.
+		compute_total_batch_qty(frm);
 		set_reference_doctype(frm);
 		set_reference_name_query(frm);
 		set_cancel_all_ignore_doctypes(frm);
@@ -51,11 +59,11 @@ frappe.ui.form.on("Pratap Quality Inspection", {
 
 	reference_name(frm) {
 		fetch_reference_item_details(frm);
+		compute_total_batch_qty(frm);
 	},
 
 	reference_qty(frm) {
-		set_density_qty(frm);
-		set_raw_material_required_qty(frm);
+		compute_total_batch_qty(frm);
 		validate_total_raw_material_percentage(frm);
 	},
 
@@ -288,11 +296,60 @@ function update_document_status_from_readings(frm) {
 	}
 }
 
+// Qty basis for the on-form calcs: Total Batch Qty (Batch + rework) when available, else Batch Qty.
+function calc_basis_qty(frm) {
+	return flt(frm.doc.custom_total_batch_qty) || flt(frm.doc.reference_qty);
+}
+
+// Load Rework Material Transferred Qty + Total Batch Qty for the linked Work Order, then
+// recompute the qty-based fields off the total. Runs on load and whenever the reference
+// changes, so the correct Total Batch Qty is always shown (even before the doc is saved).
+function compute_total_batch_qty(frm) {
+	const batch = flt(frm.doc.reference_qty);
+	// ALWAYS show at least the current sum immediately (Batch Qty + whatever rework we know),
+	// so Total Batch Qty is never left at 0 while the server call is in flight.
+	set_total_batch_qty(frm, batch + flt(frm.doc.custom_rework_transferred_qty) || batch);
+
+	if ((frm.doc.reference_type || "") !== "Work Order" || !frm.doc.reference_name) {
+		// Non-WO reference has no rework: Total Batch Qty = Batch Qty.
+		set_rework_qty(frm, 0);
+		set_total_batch_qty(frm, batch);
+		set_density_qty(frm);
+		set_raw_material_required_qty(frm);
+		return;
+	}
+	frappe.call({
+		method: "pratap_dev.pratap.doctype.pratap_quality_inspection.pratap_quality_inspection.get_wo_rework_transferred_total",
+		args: { work_order: frm.doc.reference_name },
+		callback: (r) => {
+			const m = r.message || {};
+			// m.total = wo_qty + rework (server-computed), independent of the async Batch Qty fetch.
+			set_rework_qty(frm, flt(m.rework));
+			set_total_batch_qty(frm, flt(m.total) || batch + flt(m.rework));
+			set_density_qty(frm);
+			set_raw_material_required_qty(frm);
+		},
+	});
+}
+
+// Write helpers: set the model value AND refresh the field so read-only computed fields
+// reliably update on new/unsaved docs (frm.set_value can be clobbered by render).
+function set_total_batch_qty(frm, val) {
+	frm.doc.custom_total_batch_qty = flt(val);
+	frm.refresh_field("custom_total_batch_qty");
+}
+function set_rework_qty(frm, val) {
+	frm.doc.custom_rework_transferred_qty = flt(val);
+	frm.refresh_field("custom_rework_transferred_qty");
+}
+
 function set_density_qty(frm) {
-	const reference_qty = flt(frm.doc.reference_qty);
-	const custom_density = flt(frm.doc.custom_density);
+	const reference_qty = calc_basis_qty(frm);
+	// Blank/0 density is treated as 1 (same as the server default), so Density Qty shows the
+	// Total Batch Qty instead of 0 until a real density is entered.
+	const custom_density = flt(frm.doc.custom_density) || 1;
 	const process_loss = flt(frm.doc.process_loss);
-	const density_qty = custom_density > 0 ? reference_qty / custom_density : 0;
+	const density_qty = reference_qty / custom_density;
 	const multiplier = 1 - process_loss / 100;
 	const finished_qty = multiplier > 0 ? density_qty * multiplier : 0;
 	frm.set_value("density_qty", density_qty);
@@ -300,7 +357,7 @@ function set_density_qty(frm) {
 }
 
 function set_raw_material_required_qty(frm) {
-	const reference_qty = flt(frm.doc.reference_qty);
+	const reference_qty = calc_basis_qty(frm);
 	(frm.doc.raw_materials || []).forEach((row) => {
 		const percentage = flt(row.mat_req_in_pecentage);
 		const total_req_qty = reference_qty * (percentage / 100);

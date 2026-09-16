@@ -358,7 +358,11 @@ doc_events = {
         "validate": "pratap_dev.batch_hooks.set_batch_no_of_unit",
     },
     "Work Order": {
-        "before_validate": "pratap_dev.work_order_bom_item.set_bom_item",
+        "before_validate": [
+            "pratap_dev.work_order_bom_item.set_bom_item",
+            # WIP warehouse follows the production item's "Processing Location".
+            "pratap_dev.work_order_wip.set_wip_warehouse_from_item",
+        ],
         "validate": [
             "pratap_dev.work_order_instruction.set_operation_instructions",
             "pratap_dev.bom_batch_sheet.sync_work_order_batch_sheet",

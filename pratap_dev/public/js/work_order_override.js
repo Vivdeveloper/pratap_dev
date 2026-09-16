@@ -9,20 +9,10 @@ frappe.ui.form.on("Work Order", {
         if (frm.doc.custom_rework_qc) {
             handle_rework_consumption(frm);
         }
-        // Show "Create Pratap QC" for both draft and submitted Work Orders
-        // (no longer hidden once the Work Order is submitted).
-        frm.add_custom_button(__("Create Pratap QC"), () => {
-            frappe.new_doc("Pratap Quality Inspection", {
-                inspection_type: "In Process",
-                reference_type: "Work Order",
-                reference_doctype: "Work Order",
-                reference_name: frm.doc.name,
-                company: frm.doc.company,
-                production_item: frm.doc.production_item,
-                item_name: frm.doc.item_name,
-                reference_qty: frm.doc.qty,
-            });
-        });
+        // Hide "Create Pratap QC" and ERPNext's "Create Pick List" buttons on the Work Order
+        // (QC is handled from the transfer popup; pick list isn't used here). ERPNext adds
+        // Pick List in its own refresh (after ours), so this also re-runs on a short retry.
+        hide_wo_buttons(frm);
 
         add_material_request_button(frm);
 
@@ -37,6 +27,12 @@ frappe.ui.form.on("Work Order", {
         populate_wo_instructions(frm);
         },
 
+    // WIP warehouse follows the production item's "Processing Location"
+    // (Item.custom_job_work_warehouse) — fetch it as soon as the item is picked.
+    production_item(frm) {
+        set_wip_from_item(frm);
+    },
+
     // When the item / BOM / qty changes, ERPNext re-fetches Required Items from the BOM
     // asynchronously. Re-scan the rows after a short delay so the instruction columns
     // fill in. (Stock counts are intentionally NOT auto-fetched here — button-only.)
@@ -50,6 +46,23 @@ frappe.ui.form.on("Work Order", {
         populate_wo_instructions(frm, 1000);
     },
 });
+
+// WIP warehouse follows the production item's "Processing Location"
+// (Item.custom_job_work_warehouse). Fetched from the item master so it's never picked by
+// hand. The server (before_validate) enforces the same, covering programmatic creation.
+function set_wip_from_item(frm) {
+    if (!frm.doc.production_item) {
+        return;
+    }
+    frappe.db
+        .get_value("Item", frm.doc.production_item, "custom_job_work_warehouse")
+        .then((r) => {
+            const loc = r && r.message && r.message.custom_job_work_warehouse;
+            if (loc) {
+                frm.set_value("wip_warehouse", loc);
+            }
+        });
+}
 
 // Copy the Operation Instruction columns from the BOM onto the Required Items rows.
 // The server sets these on validate too; doing it here as well means they show up as
@@ -99,6 +112,18 @@ const WO_STOCK_WAREHOUSES = [
     ["Plant 2 WIP RM", "custom_plant_2_wip_rm"],
     ["Main Store RM", "custom_main_store_rm"],
 ];
+
+// Remove the "Create Pratap QC" (custom) and "Create Pick List" (ERPNext core) buttons.
+// ERPNext adds Pick List in its own refresh, which runs after ours, so re-run on a short
+// retry to catch it.
+function hide_wo_buttons(frm) {
+    const strip = () => {
+        frm.remove_custom_button(__("Create Pratap QC"));
+        frm.remove_custom_button(__("Create Pick List"));
+    };
+    strip();
+    setTimeout(strip, 400);
+}
 
 // Gate the standard "Start" button: it may only be used once EVERY required item has
 // MR Qty 0 (nothing left to procure — enough stock at the source warehouse). Otherwise

@@ -25,6 +25,8 @@
   "production_item",
   "item_name",
   "reference_qty",
+  "custom_rework_transferred_qty",
+  "custom_total_batch_qty",
   "manufacturing_uom",
   "purchase_uom",
   "column_break_nbam",
@@ -100,6 +102,22 @@
    "fieldname": "reference_qty",
    "fieldtype": "Float",
    "label": "Batch Qty",
+   "precision": "6",
+   "read_only": 1
+  },
+  {
+   "description": "Sum of all rework material transfers done for this Work Order.",
+   "fieldname": "custom_rework_transferred_qty",
+   "fieldtype": "Float",
+   "label": "Rework Quantity",
+   "precision": "6",
+   "read_only": 1
+  },
+  {
+   "description": "Batch Qty + Rework Material Transferred Qty.",
+   "fieldname": "custom_total_batch_qty",
+   "fieldtype": "Float",
+   "label": "Total Batch Qty",
    "precision": "6",
    "read_only": 1
   },

@@ -134,6 +134,8 @@ class PratapQualityInspection(Document):
 		self._ensure_density_for_grn()
 		self._set_density_for_same_uom()
 		self._validate_inspected_qty()
+		# Compute Total Batch Qty (Batch Qty + rework) FIRST — the calcs below key off it.
+		self._set_rework_and_total_batch_qty()
 		self._validate_total_raw_material_percentage()
 		self._set_raw_material_required_qty()
 		self._set_density_qty()
@@ -143,6 +145,16 @@ class PratapQualityInspection(Document):
 		self._validate_rework_raw_materials()
 		self._sync_accepted_qc_to_grn()
 		self._sync_density_to_grn_item()
+
+	def _set_rework_and_total_batch_qty(self):
+		"""Rework Material Transferred Qty = total qty of all rework material transfers done
+		for this Work Order (rework-tagged Stock Entries). Total Batch Qty = Batch Qty
+		(reference_qty, fetched from the WO qty) + that rework qty. Both are display fields."""
+		rework_qty = 0.0
+		if (self.reference_type or "").strip() == "Work Order" and self.reference_name:
+			rework_qty = _wo_rework_transferred_total(self.reference_name)
+		self.custom_rework_transferred_qty = rework_qty
+		self.custom_total_batch_qty = frappe.utils.flt(self.reference_qty) + frappe.utils.flt(rework_qty)
 
 	def _validate_rework_raw_materials(self):
 		"""When status is Rework and "Raw Material Required" is checked (default), at least
@@ -306,24 +318,26 @@ class PratapQualityInspection(Document):
 		if frappe.utils.flt(self.inspected_qty) <= 0:
 			frappe.throw(_("Inspected Qty must be greater than 0."))
 
-	def _set_density_qty(self):
-		reference_qty = frappe.utils.flt(self.reference_qty)
-		custom_density = frappe.utils.flt(self.custom_density)
+	def _batch_calc_qty(self):
+		"""Qty basis for the QC calcs (density qty / yield / raw-material required): the Total
+		Batch Qty (Batch Qty + rework transferred) when available, else the plain Batch Qty."""
+		return frappe.utils.flt(self.get("custom_total_batch_qty")) or frappe.utils.flt(self.reference_qty)
 
-		if custom_density > 0:
-			# (batch_qty - inspected_qty - process_loss%reference_qty)/ custom_density
-			self.density_qty = reference_qty / custom_density
-		else:
-			self.density_qty = 0
+	def _set_density_qty(self):
+		reference_qty = self._batch_calc_qty()
+		# Blank/0 density is treated as 1 so Density Qty = Total Batch Qty (not 0) until a real
+		# density is entered — matches the client preview and the submit-time density default.
+		custom_density = frappe.utils.flt(self.custom_density) or 1
+		self.density_qty = reference_qty / custom_density
 
 	def _set_finished_qty(self):
-		batch_qty = frappe.utils.flt(self.reference_qty)
+		batch_qty = self._batch_calc_qty()
 		inspected_qty = frappe.utils.flt(self.inspected_qty)
 		process_loss = frappe.utils.flt(self.process_loss)
 		if self.reference_type == "Work Order":
-			custom_density = frappe.utils.flt(self.custom_density)
-			if custom_density <= 0:
-				return
+			# Blank/0 density treated as 1 (matches Density Qty + submit default), so Yield
+			# computes off the Total Batch Qty instead of staying 0.
+			custom_density = frappe.utils.flt(self.custom_density) or 1
 			self.finished_qty = (
 				(batch_qty - inspected_qty - (batch_qty * process_loss / 100)) / custom_density
 			)
@@ -334,7 +348,7 @@ class PratapQualityInspection(Document):
 
 
 	def _set_raw_material_required_qty(self):
-		reference_qty = frappe.utils.flt(self.reference_qty)
+		reference_qty = self._batch_calc_qty()
 		for row in self.raw_materials or []:
 			percentage = frappe.utils.flt(row.mat_req_in_pecentage)
 			row.total_req_qty = reference_qty * (percentage / 100.0)
@@ -420,13 +434,20 @@ class PratapQualityInspection(Document):
 		# linked WO (if still draft) once the QC is Accepted.
 		self._submit_linked_work_order()
 
-		stock_entry_data = self.make_stock_entry(
-			work_order_id=self.reference_name,
-			purpose="Manufacture",
-			qty=qty,
-		)
-		stock_entry = frappe.get_doc(stock_entry_data)
+		# Consolidate EVERY material transfer of this WO (main-tab + rework) into ONE
+		# Manufacture stock entry that consumes exactly what was moved into WIP and produces
+		# the finished good. Falls back to the BOM-based build if nothing was transferred.
+		stock_entry = self._build_manufacture_from_transfers(self.reference_name, qty)
+		if stock_entry is None:
+			stock_entry = frappe.get_doc(
+				self.make_stock_entry(
+					work_order_id=self.reference_name, purpose="Manufacture", qty=qty
+				)
+			)
 		stock_entry.insert(ignore_permissions=True)
+		# insert() re-derives fg_completed_qty to 0 when items are supplied directly (no
+		# get_items), so re-assert it before submit or ERPNext rejects the Manufacture qty.
+		stock_entry.fg_completed_qty = qty
 		stock_entry.submit()
 		self._set_batch_custom_density()
 		self.db_set("stock_entry", stock_entry.name, update_modified=False)
@@ -446,6 +467,64 @@ class PratapQualityInspection(Document):
 
 		work_order = frappe.get_doc("Work Order", self.reference_name)
 		work_order.submit()
+
+	def _build_manufacture_from_transfers(self, work_order_id, finished_qty):
+		"""ONE 'Manufacture' Stock Entry that consumes EXACTLY the material moved into WIP by
+		every submitted 'Material Transfer for Manufacture' Stock Entry of this Work Order —
+		the main-tab transfers AND the rework transfers — and produces `finished_qty` of the
+		finished good. This consolidates all those transfers into a single manufacture and
+		clears WIP. Returns the un-inserted doc, or None when nothing was transferred (the
+		caller then falls back to the BOM-based build)."""
+		wo = frappe.get_doc("Work Order", work_order_id)
+		wip = wo.wip_warehouse
+		# Aggregate qty received into WIP per (item, batch) across ALL transfer SEs of the WO.
+		consumed = frappe.db.sql(
+			"""
+			SELECT sed.item_code, IFNULL(sed.batch_no, '') AS batch_no, SUM(sed.qty) AS qty
+			FROM `tabStock Entry Detail` sed
+			INNER JOIN `tabStock Entry` se ON se.name = sed.parent
+			WHERE se.work_order = %(wo)s AND se.purpose = 'Material Transfer for Manufacture'
+			  AND se.docstatus = 1 AND sed.t_warehouse = %(wip)s
+			GROUP BY sed.item_code, sed.batch_no
+			HAVING SUM(sed.qty) > 0
+			ORDER BY sed.item_code, sed.batch_no
+			""",
+			{"wo": work_order_id, "wip": wip},
+		)
+		if not consumed:
+			return None
+
+		se = frappe.new_doc("Stock Entry")
+		se.purpose = "Manufacture"
+		se.work_order = work_order_id
+		se.company = wo.company
+		se.bom_no = wo.bom_no
+		se.use_multi_level_bom = wo.use_multi_level_bom
+		se.from_bom = 1
+		se.fg_completed_qty = finished_qty
+		se.inspection_required = 0
+		se.set_stock_entry_type()
+
+		# Consumed raw materials FROM WIP — the exact per-batch qty transferred (main + rework).
+		for item_code, batch_no, qty in consumed:
+			row = se.append("items", {})
+			row.item_code = item_code
+			row.s_warehouse = wip
+			row.qty = frappe.utils.flt(qty)
+			row.transfer_qty = row.qty
+			row.uom = frappe.db.get_value("Item", item_code, "stock_uom")
+			if batch_no and frappe.db.get_value("Item", item_code, "has_batch_no"):
+				row.use_serial_batch_fields = 1
+				row.batch_no = batch_no
+
+		# Finished good produced (ERPNext auto-creates/links its Work-Order batch on submit).
+		fg = se.append("items", {})
+		fg.item_code = wo.production_item
+		fg.t_warehouse = wo.fg_warehouse
+		fg.qty = finished_qty
+		fg.is_finished_item = 1
+		fg.uom = frappe.db.get_value("Item", wo.production_item, "stock_uom")
+		return se
 
 	def _set_batch_custom_density(self):
 		batch_name = frappe.db.get_value(
@@ -1037,6 +1116,33 @@ def _map_grn_batches_to_rows(item_rows):
 			mapping.setdefault(row.batch_no, row)
 
 	return mapping
+
+
+def _wo_rework_transferred_total(work_order):
+	"""Total qty across ALL rework material transfers (rework-tagged, submitted Material
+	Transfer for Manufacture Stock Entries) for a Work Order — every item, every rework QC."""
+	if not work_order:
+		return 0.0
+	v = frappe.db.sql(
+		"""
+		SELECT SUM(sed.qty) FROM `tabStock Entry Detail` sed
+		INNER JOIN `tabStock Entry` se ON se.name = sed.parent
+		WHERE se.work_order = %(wo)s AND se.purpose = 'Material Transfer for Manufacture'
+		  AND se.docstatus = 1 AND IFNULL(se.custom_rework_qc, '') != ''
+		""",
+		{"wo": work_order},
+	)
+	return frappe.utils.flt(v[0][0]) if v and v[0][0] else 0.0
+
+
+@frappe.whitelist()
+def get_wo_rework_transferred_total(work_order):
+	"""Live figures for the QC form to preview before save: the rework-transferred total for
+	the Work Order, the WO's own qty (Batch Qty), and their sum (Total Batch Qty). Returning
+	wo_qty here means the preview never depends on the async-fetched reference_qty timing."""
+	rework = _wo_rework_transferred_total(work_order)
+	wo_qty = frappe.utils.flt(frappe.db.get_value("Work Order", work_order, "qty")) if work_order else 0.0
+	return {"rework": rework, "wo_qty": wo_qty, "total": wo_qty + rework}
 
 
 @frappe.whitelist()

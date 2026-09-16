@@ -62,7 +62,7 @@ function render_wo_transfer_dialog(frm, ctx) {
 	// Banner shown at the top of the Material Transfer tab when the QC gate is closed.
 	const bannerHtml = `<div class="wo-qc-banner" style="display:none;"></div>`;
 	if (hasJC || hasRW || hasIPQC) {
-		// Tabs: Material Transfer (existing) + Job Cards + QC (rework + accepted basic testing).
+		// Tabs: Material Transfer + Job Cards + In Process QC (Basic Testing list + Rework) + Final QC (In Process).
 		const tabs = [
 			`<button class="btn btn-xs btn-primary wo-tab-btn active" data-tab="transfer">${__("Material Transfer")}</button>`,
 		];
@@ -77,7 +77,7 @@ function render_wo_transfer_dialog(frm, ctx) {
 		}
 		if (hasRW) {
 			tabs.push(
-				`<button class="btn btn-xs btn-default wo-tab-btn" data-tab="rework">${__("QC")} (${rwCount})</button>`
+				`<button class="btn btn-xs btn-default wo-tab-btn" data-tab="rework">${__("In Process QC")} (${rwCount})</button>`
 			);
 			panes.push(
 				`<div class="wo-tab-pane" data-pane="rework" style="display:none;">${qc_pane_html(ctx)}</div>`
@@ -107,7 +107,8 @@ function render_wo_transfer_dialog(frm, ctx) {
 	if (hasJC) {
 		wire_job_cards(frm, dialog, ctx);
 	}
-	if (hasRW) {
+	if (hasRW || hasIPQC) {
+		// wire_rework handles both the Rework section and the Final QC items (same .wo-rw-* UI).
 		wire_rework(frm, dialog, ctx);
 	}
 
@@ -448,9 +449,9 @@ function wire_item_block(frm, dialog, ctx, $body, it) {
 // Time logging is only allowed AFTER the item is fully transferred. Before that (and
 // once finished), Start/Stop/Finish are all disabled. When full and not finished, the
 // Start/Stop sequence applies. The active (enabled) colored button stays bright.
-//   not full OR finished -> Start, Stop, Finish all disabled
-//   timer running        -> Start disabled, Stop enabled
-//   not running          -> Start enabled, Stop disabled (no two in a row)
+//   not full OR finished    -> Start, Stop, Finish all disabled
+//   timer running (started) -> Start disabled, Stop + Finish enabled
+//   not running (stopped)   -> Start enabled, Stop + Finish disabled (Finish only from Start)
 function apply_timer_buttons($item, running, finished) {
 	const full = $item.attr("data-full") === "1";
 	if (!full || finished) {
@@ -459,7 +460,9 @@ function apply_timer_buttons($item, running, finished) {
 	}
 	$item.find(".wo-tr-start").prop("disabled", !!running);
 	$item.find(".wo-tr-stop").prop("disabled", !running);
-	$item.find(".wo-tr-finish").prop("disabled", false);
+	// Finish is allowed ONLY while the batch is in the started (running) state — i.e. the
+	// last action was Start, not Stop. After a Stop the operator must Start again to Finish.
+	$item.find(".wo-tr-finish").prop("disabled", !running);
 }
 
 // Directional two-way calc, capped at 3 decimals.
@@ -571,8 +574,8 @@ function apply_batch_gate(dialog, ctx) {
 			: "";
 		$item.find(".wo-tr-transfer").prop("disabled", !canTransfer).attr("title", title);
 		// Timer: disabled before Start Batch or while the QC gate is closed. Otherwise
-		// Finish is always allowed; Start/Stop are limited to the one open item AND blocked
-		// while rework is pending.
+		// Finish is allowed only from the started (running) state; Start/Stop are limited to
+		// the one open item AND blocked while rework is pending.
 		if (!started || qcBlocked) {
 			$item.find(".wo-tr-start, .wo-tr-stop, .wo-tr-finish").prop("disabled", true);
 		} else {
@@ -791,7 +794,7 @@ function qc_pane_html(ctx) {
 	let html = "";
 	const bt = ctx.basic_testing_qcs || [];
 	if (bt.length) {
-		html += `<h5 style="margin:6px 0 8px;">${__("In Process QC (Basic Testing)")}</h5>`;
+		html += `<h5 style="margin:6px 0 8px;">${__("Basic Testing")}</h5>`;
 		html += bt.map(basic_testing_qc_card).join("");
 	}
 	const rw = ctx.rework_qcs || [];
@@ -802,38 +805,44 @@ function qc_pane_html(ctx) {
 	return html || `<div class="text-muted">${__("No QC records for this Work Order.")}</div>`;
 }
 
-// 4th tab — read-only list of every "In Process" inspection-type Pratap QC linked to this
-// Work Order (these are the QCs the "Final QC" / form "Create Pratap QC" button creates).
+// 4th tab — every "In Process" inspection-type Pratap QC linked to this Work Order. Each QC's
+// Raw Materials now get the SAME material-transfer + Start/Stop/Finish UI as Rework (they reuse
+// the .wo-rw-* markup, so wire_rework drives them).
 function in_process_qc_pane_html(ctx) {
 	const qcs = ctx.in_process_qcs || [];
 	if (!qcs.length) {
 		return `<div class="text-muted">${__("No Final QC for this Work Order.")}</div>`;
 	}
-	return qcs
-		.map((qc) => {
-			const st = (qc.status || "").trim();
-			const pill = st === "Accepted" ? "green" : st === "Rejected" ? "red" : "orange";
-			const draft = qc.docstatus === 0 ? ` <span class="text-muted small">(${__("Draft")})</span>` : "";
-			const qty =
-				qc.reference_qty || qc.finished_qty
-					? `<div class="text-muted small" style="margin-top:4px;">${__("Reference Qty")}: ${format_number(
-							qc.reference_qty
-					  )} · ${__("Finished Qty")}: ${format_number(qc.finished_qty)}</div>`
-					: "";
-			return `
-		<div style="border:1px solid var(--border-color,#d1d8dd);border-radius:8px;padding:10px 12px;margin-bottom:10px;background:#fff;">
-			<div style="display:flex;gap:10px;align-items:center;">
-				<b>${__("Final QC")}</b>
-				<span class="indicator-pill ${pill}">${frappe.utils.escape_html(qc.status || __("Pending"))}</span>${draft}
-				${qc.inspection_date ? `<span class="text-muted small">${frappe.datetime.str_to_user(qc.inspection_date)}</span>` : ""}
-				<a href="/app/pratap-quality-inspection/${encodeURIComponent(qc.name)}" target="_blank" rel="noopener" style="margin-left:auto;">${frappe.utils.escape_html(
-					qc.name
-				)} ↗</a>
-			</div>
-			${qty}
-		</div>`;
-		})
-		.join("");
+	return qcs.map(in_process_qc_block_html).join("");
+}
+
+function in_process_qc_block_html(qc) {
+	const st = (qc.status || "").trim();
+	const pill = st === "Accepted" ? "green" : st === "Rejected" ? "red" : "orange";
+	const draft = qc.docstatus === 0 ? ` <span class="text-muted small">(${__("Draft")})</span>` : "";
+	const notes = qc.rework_notes
+		? `<div class="wo-rw-notes" style="text-align:center;font-weight:600;margin:6px 0 12px;padding:8px 10px;border:1px dashed var(--border-color,#d1d8dd);border-radius:6px;background:#fff;white-space:pre-line;">${frappe.utils.escape_html(
+				qc.rework_notes
+		  )}</div>`
+		: "";
+	const items = (qc.items || []).length
+		? qc.items.map((it) => rework_item_html(qc.name, it)).join("")
+		: `<div class="text-muted" style="font-size:12.5px;">${__(
+				"No items in this QC's Raw Materials to transfer. Add rows in the QC's Raw Materials to transfer here."
+		  )}</div>`;
+	return `
+	<div class="wo-rw-qc" data-qc="${frappe.utils.escape_html(qc.name)}" style="border:1px solid var(--border-color,#d1d8dd);border-radius:8px;padding:10px 12px;margin-bottom:14px;background:var(--gray-50,#fafafa);">
+		<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:8px;">
+			<b>${__("Final QC")}</b>
+			<span class="indicator-pill ${pill}">${frappe.utils.escape_html(qc.status || __("Pending"))}</span>${draft}
+			${qc.inspection_date ? `<span class="text-muted small">${frappe.datetime.str_to_user(qc.inspection_date)}</span>` : ""}
+			<a href="/app/pratap-quality-inspection/${encodeURIComponent(qc.name)}" target="_blank" rel="noopener" style="margin-left:auto;">${frappe.utils.escape_html(
+				qc.name
+			)} ↗</a>
+		</div>
+		${notes}
+		${items}
+	</div>`;
 }
 
 function rework_recalc($tr, from_field) {
@@ -858,9 +867,9 @@ function rework_collect($item) {
 	return rows;
 }
 
-function rework_add_row($item) {
+function rework_add_row($item, prefill) {
 	const opts = $item.find(".wo-rw-batchopts").html();
-	$item.find(".wo-rw-rows").append(
+	const $tr = $(
 		`<tr>
 			<td><select class="form-control input-xs wo-rwb-batch"><option value="">${__("Select…")}</option>${opts}</select></td>
 			<td><input type="number" class="form-control input-xs wo-rwb-pkg" min="0" step="any"></td>
@@ -869,6 +878,15 @@ function rework_add_row($item) {
 			<td><button class="btn btn-xs btn-default wo-rwb-del">✕</button></td>
 		</tr>`
 	);
+	$item.find(".wo-rw-rows").append($tr);
+	// Prefill from the batch + qty captured on the QC's Raw Materials, so the operator can
+	// just click Material Transfer.
+	if (prefill && prefill.batch_no) {
+		$tr.find(".wo-rwb-batch").val(prefill.batch_no);
+		$tr.find(".wo-rwb-pkg").val(prefill.std_pkg || "");
+		$tr.find(".wo-rwb-units").val(prefill.units || "");
+		$tr.find(".wo-rwb-qty").val(prefill.qty || "");
+	}
 }
 
 // Like the main tab: the timer is only usable AFTER the rework item has been transferred
@@ -880,7 +898,8 @@ function apply_rework_timer($item, transferred, running, finished) {
 	}
 	$item.find(".wo-rw-start").prop("disabled", !!running);
 	$item.find(".wo-rw-stop").prop("disabled", !running);
-	$item.find(".wo-rw-finish").prop("disabled", false);
+	// Finish only while running (last action was Start), never from the stopped state.
+	$item.find(".wo-rw-finish").prop("disabled", !running);
 }
 
 function rework_log($item, log) {
@@ -890,7 +909,9 @@ function rework_log($item, log) {
 }
 
 function find_rw_item(ctx, qcName, itemCode) {
-	const qc = (ctx.rework_qcs || []).find((q) => q.name === qcName);
+	// Search both the Rework QCs and the Final QC (In Process) QCs — both use the transfer UI.
+	const all = [...(ctx.rework_qcs || []), ...(ctx.in_process_qcs || [])];
+	const qc = all.find((q) => q.name === qcName);
 	return qc && (qc.items || []).find((i) => i.item_code === itemCode);
 }
 
@@ -901,13 +922,14 @@ function wire_rework(frm, dialog, ctx) {
 		return { $item: $i, qc: $i.attr("data-qc"), item: $i.attr("data-item") };
 	};
 
-	// Seed one empty batch row per rework item + initial timer state.
-	$body.find(".wo-rw-item").each(function () {
-		rework_add_row($(this));
-	});
-	(ctx.rework_qcs || []).forEach((qc) => {
+	// Seed a batch row per transfer item + initial timer state — for BOTH the Rework section
+	// and the Final QC (In Process) items (they share the .wo-rw-* markup). When the QC saved
+	// a batch + qty on its Raw Materials, prefill that row so the operator just clicks
+	// Material Transfer; otherwise seed an empty row.
+	[...(ctx.rework_qcs || []), ...(ctx.in_process_qcs || [])].forEach((qc) => {
 		(qc.items || []).forEach((it) => {
 			const $i = $body.find(`.wo-rw-item[data-qc="${qc.name}"][data-item="${it.item_code}"]`);
+			rework_add_row($i, it.prefill);
 			apply_rework_timer($i, (it.transfers || []).length > 0, it.timer_running, it.finished);
 		});
 	});
@@ -962,7 +984,9 @@ function wire_rework(frm, dialog, ctx) {
 						$item.find(".wo-rw-total").text(fmt_dur(res.duration_mins));
 					}
 					// Now transferred -> the timer becomes usable for this rework item.
-					apply_rework_timer($item, true, false, "Finish —" in (res.addition_log || ""));
+					// (Use .includes — the `in` operator throws a TypeError on a string, which
+					// previously aborted this callback so Start/Stop only lit up after a refresh.)
+					apply_rework_timer($item, true, false, (res.addition_log || "").includes("Finish —"));
 					// Sync ctx + re-gate the main tab (rework progress affects the main block).
 					const rit = find_rw_item(ctx, qc, item);
 					if (rit) rit.transfers = res.transfers || [];
