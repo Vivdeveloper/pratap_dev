@@ -11,7 +11,7 @@
  "idx": 0,
  "is_public": 1,
  "is_standard": 1,
- "modified": "2026-09-12 11:13:48.261039",
+ "modified": "2026-09-16 11:11:03.993190",
  "modified_by": "Administrator",
  "module": "Pratap Dashboard",
  "name": "Top Opportunity by Customers",
@@ -32,9 +32,6 @@
   },
   {
    "y_field": "total_amount"
-  },
-  {
-   "y_field": "average_amount"
   }
  ]
 }
