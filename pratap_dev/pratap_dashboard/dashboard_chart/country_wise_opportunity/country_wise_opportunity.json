@@ -2,7 +2,7 @@
  "chart_name": "Country Wise Opportunity",
  "chart_type": "Report",
  "creation": "2026-09-12 12:20:43.913137",
- "currency": "",
+ "currency": "INR",
  "docstatus": 0,
  "doctype": "Dashboard Chart",
  "dynamic_filters_json": "{}",
@@ -11,7 +11,7 @@
  "idx": 0,
  "is_public": 0,
  "is_standard": 1,
- "modified": "2026-09-12 12:20:43.913137",
+ "modified": "2026-09-16 13:01:31.288343",
  "modified_by": "Administrator",
  "module": "Pratap Dashboard",
  "name": "Country Wise Opportunity",
@@ -28,7 +28,7 @@
  "x_field": "country",
  "y_axis": [
   {
-   "y_field": "opportunity_count"
+   "y_field": "total_amount"
   }
  ]
 }
