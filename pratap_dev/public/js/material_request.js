@@ -45,6 +45,15 @@ frappe.ui.form.on("Material Request", {
 			$(wo_btn).css({ "background-color": "black", color: "white" });
 		}
 
+		// Packaging Material picker — mirrors the Sales Forecast dialog but lists each
+		// forecast's packing materials (with expected qty + the 3 RM-warehouse stocks).
+		if (frm.doc.docstatus === 0) {
+			const pm_btn = frm.add_custom_button(__("Packaging Material"), () => {
+				open_packaging_material_dialog(frm);
+			});
+			$(pm_btn).css({ "background-color": "black", color: "white" });
+		}
+
 		// Material Transfer MRs use the "Material Issue Against Requisition" column set
 		// (Item Code, Item Description, Unit, Required Qty, Pack Size, Nos, Total Issue Qty,
 		// Balance Qty, Batch Number); Purchase MRs keep the procurement columns. Run again
@@ -751,9 +760,18 @@ function open_sales_forecast_dialog(frm) {
 	});
 }
 
+// FG warehouses shown for the Packaging Material picker (packing materials are stocked
+// on the FG side, not the RM warehouses).
+const MR_PACKING_STOCK_WAREHOUSES = [
+	["Main Store FG"],
+	["Plant 1 WIP FG"],
+	["Plant 2 WIP FG"],
+];
+
 // Stock columns are only meaningful when we are buying, so skip the lookup for
-// other purposes and render the dialog without them.
-function fetch_forecast_stock_map(frm, data) {
+// other purposes and render the dialog without them. `warehouses` defaults to the RM
+// trio (Sales Forecast); the Packaging Material picker passes the FG trio.
+function fetch_forecast_stock_map(frm, data, warehouses = MR_STOCK_WAREHOUSES) {
 	if (frm.doc.material_request_type !== "Purchase" || !frm.doc.company) {
 		return Promise.resolve(null);
 	}
@@ -773,7 +791,7 @@ function fetch_forecast_stock_map(frm, data) {
 
 	// Warehouse names may carry a trailing space, so resolve each one by prefix.
 	return Promise.all(
-		MR_STOCK_WAREHOUSES.map(([warehouse_name]) =>
+		warehouses.map(([warehouse_name]) =>
 			frappe.db
 				.get_list("Warehouse", {
 					filters: {
@@ -786,8 +804,8 @@ function fetch_forecast_stock_map(frm, data) {
 				.then((rows) => (rows && rows.length ? rows[0].name : null))
 		)
 	)
-		.then((warehouses) => {
-			const known = warehouses.filter(Boolean);
+		.then((resolved) => {
+			const known = resolved.filter(Boolean);
 			if (!known.length) {
 				return null;
 			}
@@ -803,10 +821,10 @@ function fetch_forecast_stock_map(frm, data) {
 						by_warehouse[bin.warehouse] = by_warehouse[bin.warehouse] || {};
 						by_warehouse[bin.warehouse][bin.item_code] = flt(bin.actual_qty);
 					});
-					// Column order mirrors MR_STOCK_WAREHOUSES; null warehouse => blank column.
-					return MR_STOCK_WAREHOUSES.map(([label], idx) => ({
+					// Column order mirrors `warehouses`; null warehouse => blank column.
+					return warehouses.map(([label], idx) => ({
 						label,
-						qty_by_item: by_warehouse[warehouses[idx]] || {},
+						qty_by_item: by_warehouse[resolved[idx]] || {},
 					}));
 				});
 		})
@@ -971,6 +989,181 @@ function show_sales_forecast_dialog(frm, data, stock_map) {
 
 	// "Select All" drives only the enabled boxes — already-inserted forecasts stay
 	// checked-and-disabled either way.
+	const $wrapper = dialog.fields_dict.html.$wrapper;
+	const $all = $wrapper.find(".sf-select-all-box");
+	$all.on("change", function () {
+		$wrapper.find(".sf-checkbox:not(:disabled)").prop("checked", this.checked);
+	});
+	$wrapper.on("change", ".sf-checkbox", () => {
+		const $boxes = $wrapper.find(".sf-checkbox:not(:disabled)");
+		$all.prop("checked", $boxes.length > 0 && $boxes.length === $boxes.filter(":checked").length);
+	});
+
+	dialog.show();
+}
+
+// ---------------------------------------------------------------------------
+// Packaging Material picker — same card/checkbox UI as the Sales Forecast dialog,
+// but each forecast lists its PACKING MATERIALS: expected qty (from the forecast's
+// packed-goods requirement) and the 3 RM-warehouse stocks. Selected packing
+// materials are inserted into the Material Request (qty = expected qty).
+// ---------------------------------------------------------------------------
+
+function open_packaging_material_dialog(frm) {
+	frappe.call({
+		method: "pratap_dev.material_request_forecast.get_forecast_packing_materials_for_material_request",
+		freeze: true,
+		freeze_message: __("Loading Packaging Materials..."),
+		callback(r) {
+			const data = r.message || [];
+			if (!data.length) {
+				frappe.msgprint(__("No Packaging Material items found."));
+				return;
+			}
+			fetch_forecast_stock_map(frm, data, MR_PACKING_STOCK_WAREHOUSES).then((stock_map) => {
+				show_packaging_material_dialog(frm, data, stock_map);
+			});
+		},
+	});
+}
+
+function show_packaging_material_dialog(frm, data, stock_map) {
+	const stock_cols = stock_map || [];
+
+	let html = `
+<style>
+.sf-card { border: 1px solid #e0e0e0; border-radius: 10px; padding: 12px; margin-bottom: 12px; background: #fff; transition: all 0.2s ease; }
+.sf-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+.sf-header { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 6px; font-weight: 600; }
+.sf-title { font-size: 14px; }
+.sf-plant { font-size: 11px; font-weight: 600; color: #1d6fc0; background: #e8f1fc; padding: 3px 10px; border-radius: 10px; margin-left: auto; }
+.sf-status { font-size: 11px; font-weight: 600; color: #6c757d; margin-left: 10px; }
+.sf-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+.sf-table th { background: #f7f7f7; padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
+.sf-table td { padding: 8px; border-bottom: 1px solid #eee; }
+.sf-qty-badge { background: #f1f3f5; padding: 3px 8px; border-radius: 6px; font-weight: 500; }
+.sf-stock-badge { background: #e8f1fc; color: #1d6fc0; padding: 3px 8px; border-radius: 6px; font-weight: 500; }
+.sf-select-all { display: flex; align-items: center; gap: 8px; padding: 8px 4px; margin-bottom: 8px; font-weight: 600; font-size: 13px; }
+</style>
+<label class="sf-select-all"><input type="checkbox" class="sf-select-all-box"> ${__("Select All")}</label>
+`;
+
+	data.forEach((d) => {
+		html += `
+		<div class="sf-card">
+			<div class="sf-header">
+				<input type="checkbox" class="sf-checkbox" data-fc="${frappe.utils.escape_html(d.forecast_club)}">
+				<span class="sf-title">${frappe.utils.escape_html(d.forecast_club)}</span>
+				${d.plant ? `<span class="sf-plant">${frappe.utils.escape_html(d.plant)}</span>` : `<span class="sf-plant" style="background:#f1f3f5;color:#6c757d;">${__("No Plant")}</span>`}
+				${d.forecast_type ? `<span class="sf-status">${frappe.utils.escape_html(d.forecast_type)}</span>` : ""}
+				${d.status ? `<span class="sf-status">${frappe.utils.escape_html(d.status)}</span>` : ""}
+			</div>
+			<table class="sf-table">
+				<thead>
+					<tr>
+						<th style="width:${stock_cols.length ? "16%" : "20%"}">${__("Packing Material")}</th>
+						<th style="width:${stock_cols.length ? "32%" : "60%"}">${__("Item Name")}</th>
+						<th style="width:${stock_cols.length ? "13%" : "20%"}">${__("Expected Qty")}</th>
+						${stock_cols.map((col) => `<th style="width:13%">${__(col.label)}</th>`).join("")}
+					</tr>
+				</thead>
+				<tbody>`;
+
+		if (d.items && d.items.length) {
+			d.items.forEach((i) => {
+				html += `
+					<tr>
+						<td>${frappe.utils.escape_html(i.item_code)}</td>
+						<td>${frappe.utils.escape_html(i.item_name || "")}</td>
+						<td><span class="sf-qty-badge">${i.qty}</span></td>
+						${stock_cols
+							.map(
+								(col) =>
+									`<td><span class="sf-stock-badge">${format_number(
+										flt(col.qty_by_item[i.item_code])
+									)}</span></td>`
+							)
+							.join("")}
+					</tr>`;
+			});
+		} else {
+			html += `<tr><td colspan="${3 + stock_cols.length}" style="text-align:center; color:#999;">${__(
+				"No Items"
+			)}</td></tr>`;
+		}
+
+		html += `</tbody></table></div>`;
+	});
+
+	const dialog = new frappe.ui.Dialog({
+		title: __("Select Packaging Materials"),
+		size: "large",
+		fields: [{ fieldtype: "HTML", fieldname: "html" }],
+		primary_action_label: __("Insert into MR"),
+		primary_action() {
+			const selected_fcs = [];
+			dialog.$wrapper.find(".sf-checkbox:checked").each(function () {
+				selected_fcs.push($(this).data("fc"));
+			});
+
+			if (!selected_fcs.length) {
+				frappe.msgprint(__("Select at least one Forecast"));
+				return;
+			}
+
+			const item_qty_map = {};
+			const item_fc_map = {};
+
+			data.forEach((d) => {
+				if (!selected_fcs.includes(d.forecast_club)) {
+					return;
+				}
+				(d.items || []).forEach((i) => {
+					item_qty_map[i.item_code] = (item_qty_map[i.item_code] || 0) + (i.qty || 0);
+					if (!item_fc_map[i.item_code]) {
+						item_fc_map[i.item_code] = d.forecast_club;
+					}
+				});
+			});
+
+			Object.keys(item_qty_map).forEach((item_code) => {
+				const total_qty = item_qty_map[item_code];
+				const forecast_club = item_fc_map[item_code];
+				const existing = frm.doc.items.find((row) => row.item_code === item_code);
+
+				if (existing) {
+					frappe.model.set_value(existing.doctype, existing.name, "qty", total_qty);
+					frappe.model.set_value(existing.doctype, existing.name, "custom_expected_qty", total_qty);
+					if (!existing.custom_forecast_club) {
+						frappe.model.set_value(existing.doctype, existing.name, "custom_forecast_club", forecast_club);
+					}
+					return;
+				}
+
+				const empty_row = frm.doc.items.find((row) => !row.item_code);
+				const row = empty_row || frm.add_child("items");
+
+				frappe.model.set_value(row.doctype, row.name, "item_code", item_code);
+				frappe.model.set_value(row.doctype, row.name, "qty", total_qty);
+				frappe.model.set_value(row.doctype, row.name, "custom_expected_qty", total_qty);
+				frappe.model.set_value(row.doctype, row.name, "custom_forecast_club", forecast_club);
+
+				if (frm.doc.set_warehouse) {
+					frappe.model.set_value(row.doctype, row.name, "warehouse", frm.doc.set_warehouse);
+				}
+				if (frm.doc.schedule_date) {
+					frappe.model.set_value(row.doctype, row.name, "schedule_date", frm.doc.schedule_date);
+				}
+			});
+
+			frm.refresh_field("items");
+			frappe.msgprint(__("Items inserted Successfully"));
+			dialog.hide();
+		},
+	});
+
+	dialog.fields_dict.html.$wrapper.html(html);
+
 	const $wrapper = dialog.fields_dict.html.$wrapper;
 	const $all = $wrapper.find(".sf-select-all-box");
 	$all.on("change", function () {
