@@ -40,6 +40,42 @@ frappe.query_reports["Top Opportunity by Created By"] = {
 			default: frappe.defaults.get_user_default("Company"),
 		},
 		{
+			fieldname: "item_code",
+			label: __("Item Code"),
+			fieldtype: "Link",
+			options: "Item",
+		},
+		{
+			fieldname: "custom_erp",
+			label: __("ERP"),
+			fieldtype: "Link",
+			options: "EPR",
+		},
+		{
+			fieldname: "custom_category_type",
+			label: __("Category Type"),
+			fieldtype: "Link",
+			options: "Category Type",
+		},
+		{
+			fieldname: "custom_material_base",
+			label: __("Material Base"),
+			fieldtype: "Link",
+			options: "Material Base",
+		},
+		{
+			fieldname: "custom_product_type",
+			label: __("Product Type"),
+			fieldtype: "Link",
+			options: "Product Type",
+		},
+		{
+			fieldname: "custom_product_category",
+			label: __("Product Category"),
+			fieldtype: "Link",
+			options: "Product Category",
+		},
+		{
 			fieldname: "created_by",
 			label: __("Created By"),
 			fieldtype: "Link",
@@ -92,24 +128,6 @@ frappe.query_reports["Top Opportunity by Created By"] = {
 			label: __("Territory"),
 			fieldtype: "Link",
 			options: "Territory",
-		},
-		{
-			fieldname: "industry",
-			label: __("Industry"),
-			fieldtype: "Link",
-			options: "Industry Type",
-		},
-		{
-			fieldname: "market_segment",
-			label: __("Market Segment"),
-			fieldtype: "Link",
-			options: "Market Segment",
-		},
-		{
-			fieldname: "campaign",
-			label: __("Campaign"),
-			fieldtype: "Link",
-			options: "Campaign",
-		},
+		}
 	],
 };

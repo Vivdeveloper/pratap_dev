@@ -13,6 +13,16 @@ DATE_FIELDS = {
 	"Document Creation": "creation",
 }
 
+ITEM_FILTERS = (
+	"item_code",
+	"custom_year",
+	"custom_erp",
+	"custom_category_type",
+	"custom_material_base",
+	"custom_product_type",
+	"custom_product_category",
+)
+
 
 def execute(filters=None):
 	filters = frappe._dict(filters or {})
@@ -93,6 +103,12 @@ def get_data(filters):
 	)
 	query = apply_optional_filters(query, Opportunity, filters)
 
+	matching_opportunities = get_opportunities_for_item_filters(filters)
+	if matching_opportunities is not None:
+		if not matching_opportunities:
+			return []
+		query = query.where(Opportunity.name.isin(matching_opportunities))
+
 	rows = query.run(as_dict=True)
 	total_opportunities = sum(cint(row.opportunity_count) for row in rows)
 
@@ -113,6 +129,36 @@ def get_data(filters):
 		)
 
 	return data
+
+
+def get_opportunities_for_item_filters(filters):
+	if not any(filters.get(field) for field in ITEM_FILTERS):
+		return None
+
+	ItemRow = frappe.qb.DocType("Opportunity CRM Item")
+	Item = frappe.qb.DocType("Item")
+	query = (
+		frappe.qb.from_(ItemRow)
+		.inner_join(Item)
+		.on(Item.name == ItemRow.custom_packing_material)
+		.select(ItemRow.parent)
+		.distinct()
+		.where(ItemRow.parenttype == "Opportunity")
+	)
+	item_field_map = {
+		"item_code": Item.name,
+		"custom_year": Item.custom_year,
+		"custom_erp": Item.custom_erp,
+		"custom_category_type": Item.custom_category_type,
+		"custom_material_base": Item.custom_material_base,
+		"custom_product_type": Item.custom_product_type,
+		"custom_product_category": Item.custom_product_category,
+	}
+	for filter_name, field in item_field_map.items():
+		if filters.get(filter_name):
+			query = query.where(field == filters[filter_name])
+
+	return query.run(pluck=True)
 
 
 def apply_optional_filters(query, Opportunity, filters):

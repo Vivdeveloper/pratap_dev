@@ -2,9 +2,21 @@
 # For license information, please see license.txt
 
 import frappe
+from erpnext.accounts.utils import get_fiscal_year
 from frappe import _
 from frappe.query_builder.functions import Count, Sum
-from frappe.utils import add_days, cint, flt, getdate
+from frappe.utils import (
+	add_days,
+	add_months,
+	cint,
+	flt,
+	get_first_day,
+	get_first_day_of_week,
+	get_last_day,
+	get_last_day_of_week,
+	getdate,
+	nowdate,
+)
 
 
 DATE_FIELDS = {
@@ -12,6 +24,16 @@ DATE_FIELDS = {
 	"Expected Closing Date": "expected_closing",
 	"Document Creation": "creation",
 }
+
+ITEM_FILTERS = (
+	"item_code",
+	"custom_year",
+	"custom_erp",
+	"custom_category_type",
+	"custom_material_base",
+	"custom_product_type",
+	"custom_product_category",
+)
 
 
 def execute(filters=None):
@@ -26,19 +48,78 @@ def execute(filters=None):
 
 
 def validate_filters(filters):
-	if not filters.get("from_date") or not filters.get("to_date"):
-		frappe.throw(_("From Date and To Date are required."))
-
-	if getdate(filters.from_date) > getdate(filters.to_date):
-		frappe.throw(_("From Date cannot be after To Date."))
-
 	if filters.get("date_based_on") not in DATE_FIELDS:
 		frappe.throw(_("Please select a valid Date Based On value."))
+
+	period_type = filters.get("period_type") or "Financial Year"
+	if period_type not in ("Financial Year", "Monthly", "Weekly"):
+		frappe.throw(_("Please select a valid Period Type."))
+	filters.period_type = period_type
+
+	if not filters.get("fiscal_year"):
+		filters.fiscal_year = get_fiscal_year(nowdate())[0]
+
+	from_date, to_date = get_period_dates(filters)
+	filters.from_date = from_date
+	filters.to_date = to_date
 
 	limit = cint(filters.get("limit") or 10)
 	if limit < 1:
 		frappe.throw(_("Limit must be at least 1."))
 	filters.limit = limit
+
+
+def get_month_number(month):
+	months = {
+		"January": 1,
+		"February": 2,
+		"March": 3,
+		"April": 4,
+		"May": 5,
+		"June": 6,
+		"July": 7,
+		"August": 8,
+		"September": 9,
+		"October": 10,
+		"November": 11,
+		"December": 12,
+	}
+	if month in months:
+		return months[month]
+	return cint(month) or getdate().month
+
+
+def get_period_dates(filters):
+	fiscal_year = get_fiscal_year(fiscal_year=filters.fiscal_year, as_dict=True)
+	year_start = getdate(fiscal_year.year_start_date)
+	year_end = getdate(fiscal_year.year_end_date)
+
+	if filters.period_type == "Monthly":
+		month = get_month_number(filters.get("month"))
+		current = get_first_day(year_start)
+		matched = None
+		while current <= year_end:
+			if current.month == month:
+				matched = current
+				break
+			current = add_months(current, 1)
+		if not matched:
+			frappe.throw(_("Selected month is not in Fiscal Year {0}.").format(filters.fiscal_year))
+		return matched, get_last_day(matched)
+
+	if filters.period_type == "Weekly":
+		week_date = getdate(filters.get("week_date") or nowdate())
+		from_date = get_first_day_of_week(week_date)
+		to_date = get_last_day_of_week(week_date)
+		if from_date < year_start:
+			from_date = year_start
+		if to_date > year_end:
+			to_date = year_end
+		if from_date > to_date:
+			frappe.throw(_("Selected week is not in Fiscal Year {0}.").format(filters.fiscal_year))
+		return from_date, to_date
+
+	return year_start, year_end
 
 
 def get_columns():
@@ -82,12 +163,42 @@ def get_columns():
 			"width": 200,
 		},
 		{
-			"fieldname": "average_amount",
-			"label": _("Average Amount"),
-			"fieldtype": "Currency",
-			"width": 160,
+			"fieldname": "total_qty",
+			"label": _("Total Qty"),
+			"fieldtype": "Float",
+			"width": 140,
 		},
 	]
+
+
+def get_opportunities_for_item_filters(filters):
+	if not any(filters.get(field) for field in ITEM_FILTERS):
+		return None
+
+	ItemRow = frappe.qb.DocType("Opportunity CRM Item")
+	Item = frappe.qb.DocType("Item")
+	query = (
+		frappe.qb.from_(ItemRow)
+		.inner_join(Item)
+		.on(Item.name == ItemRow.custom_packing_material)
+		.select(ItemRow.parent)
+		.distinct()
+		.where(ItemRow.parenttype == "Opportunity")
+	)
+	item_field_map = {
+		"item_code": Item.name,
+		"custom_year": Item.custom_year,
+		"custom_erp": Item.custom_erp,
+		"custom_category_type": Item.custom_category_type,
+		"custom_material_base": Item.custom_material_base,
+		"custom_product_type": Item.custom_product_type,
+		"custom_product_category": Item.custom_product_category,
+	}
+	for filter_name, field in item_field_map.items():
+		if filters.get(filter_name):
+			query = query.where(field == filters[filter_name])
+
+	return query.run(pluck=True)
 
 
 def get_data(filters):
@@ -114,11 +225,19 @@ def get_data(filters):
 	)
 	query = apply_optional_filters(query, Opportunity, filters)
 
+	matching_opportunities = get_opportunities_for_item_filters(filters)
+	if matching_opportunities is not None:
+		if not matching_opportunities:
+			return []
+		query = query.where(Opportunity.name.isin(matching_opportunities))
+
 	rows = query.run(as_dict=True)
+	qty_map = get_total_qty_map(filters, matching_opportunities)
 	data = []
 	for index, row in enumerate(rows, start=1):
 		count = cint(row.opportunity_count)
 		amount = flt(row.total_amount)
+		key = (row.customer, row.opportunity_from, row.customer_name)
 		data.append(
 			{
 				"rank": index,
@@ -127,11 +246,42 @@ def get_data(filters):
 				"customer_name": row.customer_name or row.customer or _("Not Set"),
 				"opportunity_count": count,
 				"total_amount": round(amount, 2),
-				"average_amount": round(amount / count if count else 0, 2)
+				"total_qty": flt(qty_map.get(key)),
 			}
 		)
 
 	return data
+
+
+def get_total_qty_map(filters, matching_opportunities):
+	Opportunity = frappe.qb.DocType("Opportunity")
+	ItemRow = frappe.qb.DocType("Opportunity CRM Item")
+	date_field = Opportunity[DATE_FIELDS[filters.date_based_on]]
+
+	query = (
+		frappe.qb.from_(Opportunity)
+		.inner_join(ItemRow)
+		.on((ItemRow.parent == Opportunity.name) & (ItemRow.parenttype == "Opportunity"))
+		.select(
+			Opportunity.party_name.as_("customer"),
+			Opportunity.opportunity_from,
+			Opportunity.customer_name,
+			Sum(ItemRow.total_qty).as_("total_qty"),
+		)
+		.where(date_field >= filters.from_date)
+		.where(date_field < add_days(filters.to_date, 1))
+		.groupby(Opportunity.party_name, Opportunity.opportunity_from, Opportunity.customer_name)
+	)
+	query = apply_optional_filters(query, Opportunity, filters)
+	if matching_opportunities is not None:
+		if not matching_opportunities:
+			return {}
+		query = query.where(Opportunity.name.isin(matching_opportunities))
+
+	return {
+		(row.customer, row.opportunity_from, row.customer_name): flt(row.total_qty)
+		for row in query.run(as_dict=True)
+	}
 
 
 def apply_optional_filters(query, Opportunity, filters):
@@ -167,8 +317,8 @@ def get_chart(data):
 					"chartType": "bar",
 				},
 				{
-					"name": _("Total Amount"),
-					"values": [row["total_amount"] for row in data],
+					"name": _("Total Qty"),
+					"values": [row["total_qty"] for row in data],
 					"chartType": "line",
 				},
 			],

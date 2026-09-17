@@ -86,6 +86,7 @@ def get_columns():
 def get_data(filters):
 	Opportunity = frappe.qb.DocType("Opportunity")
 	Item = frappe.qb.DocType("Opportunity CRM Item")
+	ItemMaster = frappe.qb.DocType("Item")
 	date_field = Opportunity[DATE_FIELDS[filters.date_based_on]]
 	opportunity_count = Count(Opportunity.name).distinct()
 	total_qty = Sum(Item.qty)
@@ -95,6 +96,8 @@ def get_data(filters):
 		frappe.qb.from_(Opportunity)
 		.inner_join(Item)
 		.on((Item.parent == Opportunity.name) & (Item.parenttype == "Opportunity"))
+		.left_join(ItemMaster)
+		.on(ItemMaster.name == Item.custom_packing_material)
 		.select(
 			Item.custom_packing_material.as_("item_code"),
 			Item.custom_item_name_fg.as_("item_name"),
@@ -111,7 +114,7 @@ def get_data(filters):
 		.orderby(total_amount, order=frappe.qb.desc)
 		.limit(filters.limit)
 	)
-	query = apply_optional_filters(query, Opportunity, Item, filters)
+	query = apply_optional_filters(query, Opportunity, Item, ItemMaster, filters)
 
 	rows = query.run(as_dict=True)
 	data = []
@@ -133,7 +136,7 @@ def get_data(filters):
 	return data
 
 
-def apply_optional_filters(query, Opportunity, Item, filters):
+def apply_optional_filters(query, Opportunity, Item, ItemMaster, filters):
 	field_map = {
 		"company": Opportunity.company,
 		"custom_trial": Opportunity.custom_trial,
@@ -153,6 +156,12 @@ def apply_optional_filters(query, Opportunity, Item, filters):
 		"item_code": Item.custom_packing_material,
 		"item_group": Item.item_group,
 		"brand": Item.brand,
+		"custom_year": ItemMaster.custom_year,
+		"custom_erp": ItemMaster.custom_erp,
+		"custom_category_type": ItemMaster.custom_category_type,
+		"custom_material_base": ItemMaster.custom_material_base,
+		"custom_product_type": ItemMaster.custom_product_type,
+		"custom_product_category": ItemMaster.custom_product_category,
 	}
 	for filter_name, field in field_map.items():
 		if filters.get(filter_name):

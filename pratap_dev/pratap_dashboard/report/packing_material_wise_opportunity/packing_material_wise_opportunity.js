@@ -52,6 +52,41 @@ frappe.query_reports["Packing Material Wise Opportunity"] = {
 			options: "Item",
 		},
 		{
+			fieldname: "custom_year",
+			label: __("Year"),
+			fieldtype: "Data",
+		},
+		{
+			fieldname: "custom_erp",
+			label: __("ERP"),
+			fieldtype: "Link",
+			options: "EPR",
+		},
+		{
+			fieldname: "custom_category_type",
+			label: __("Category Type"),
+			fieldtype: "Link",
+			options: "Category Type",
+		},
+		{
+			fieldname: "custom_material_base",
+			label: __("Material Base"),
+			fieldtype: "Link",
+			options: "Material Base",
+		},
+		{
+			fieldname: "custom_product_type",
+			label: __("Product Type"),
+			fieldtype: "Link",
+			options: "Product Type",
+		},
+		{
+			fieldname: "custom_product_category",
+			label: __("Product Category"),
+			fieldtype: "Link",
+			options: "Product Category",
+		},
+		{
 			fieldname: "item_group",
 			label: __("Item Group"),
 			fieldtype: "Link",

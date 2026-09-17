@@ -2,16 +2,16 @@
  "chart_name": "Status wise Opportunity",
  "chart_type": "Report",
  "creation": "2026-09-12 11:31:48.538018",
- "currency": "",
+ "currency": "INR",
  "docstatus": 0,
  "doctype": "Dashboard Chart",
  "dynamic_filters_json": "{}",
  "filters_json": "{\"from_date\":\"2026-04-01\",\"to_date\":\"2027-03-31\",\"date_based_on\":\"Opportunity Date\",\"company\":\"Pratap Texchem Private Limited\"}",
  "group_by_type": "Count",
- "idx": 0,
+ "idx": 1,
  "is_public": 1,
  "is_standard": 1,
- "modified": "2026-09-12 11:31:48.538018",
+ "modified": "2026-09-16 12:34:09.972635",
  "modified_by": "Administrator",
  "module": "Pratap Dashboard",
  "name": "Status wise Opportunity",
@@ -24,7 +24,11 @@
  "timeseries": 0,
  "timespan": "Last Year",
  "type": "Donut",
- "use_report_chart": 1,
- "x_field": "",
- "y_axis": []
+ "use_report_chart": 0,
+ "x_field": "status",
+ "y_axis": [
+  {
+   "y_field": "total_amount"
+  }
+ ]
 }
