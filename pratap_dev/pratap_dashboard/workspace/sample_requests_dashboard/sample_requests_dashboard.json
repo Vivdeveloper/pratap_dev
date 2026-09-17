@@ -18,7 +18,7 @@
  "is_hidden": 0,
  "label": "Sample Requests Dashboard",
  "links": [],
- "modified": "2026-09-12 10:49:45.318434",
+ "modified": "2026-09-17 10:32:13.095662",
  "modified_by": "Administrator",
  "module": "Pratap Dashboard",
  "name": "Sample Requests Dashboard",
@@ -37,7 +37,7 @@
   }
  ],
  "owner": "Administrator",
- "parent_page": "",
+ "parent_page": "Dashboards",
  "public": 1,
  "quick_lists": [],
  "roles": [],

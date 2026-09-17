@@ -11,7 +11,7 @@
  "idx": 0,
  "is_public": 1,
  "is_standard": 1,
- "modified": "2026-09-09 11:19:52.961774",
+ "modified": "2026-09-16 14:13:23.644078",
  "modified_by": "Administrator",
  "module": "Pratap Dashboard",
  "name": "Sample Request Trend",
@@ -23,7 +23,7 @@
  "time_interval": "Yearly",
  "timeseries": 0,
  "timespan": "Last Year",
- "type": "Line",
+ "type": "Bar",
  "use_report_chart": 0,
  "x_field": "period",
  "y_axis": [
@@ -32,9 +32,6 @@
   },
   {
    "y_field": "total_quantity"
-  },
-  {
-   "y_field": "average_quantity"
   }
  ]
 }
