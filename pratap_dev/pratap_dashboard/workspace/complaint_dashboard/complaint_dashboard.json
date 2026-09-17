@@ -1,6 +1,23 @@
 {
- "charts": [],
- "content": "[{\"id\":\"Ckomi93Zj4\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\">Complaint Dashboard</span>\",\"col\":12}}]",
+ "charts": [
+  {
+   "chart_name": "Customer Complaint Analysis",
+   "label": "Customer Complaint Analysis"
+  },
+  {
+   "chart_name": "Highest Complaint by Price and CRM",
+   "label": "Highest Complaint by Price and CRM"
+  },
+  {
+   "chart_name": "Complaint by Price Region wise",
+   "label": "Complaint by Price Region wise"
+  },
+  {
+   "chart_name": "Complaint by Price Creator wise",
+   "label": "Complaint by Price Creator wise"
+  }
+ ],
+ "content": "[{\"id\":\"Ckomi93Zj4\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\">Complaint Dashboard</span>\",\"col\":12}},{\"id\":\"s3UZ6OycD3\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Total Complaint\",\"col\":4}},{\"id\":\"vb_dNwFURs\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Open Complaints\",\"col\":4}},{\"id\":\"Exn9U1G3Rq\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"HIGH RISK Complaints\",\"col\":4}},{\"id\":\"3IQYxG-jlz\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"MID RISK Complaints\",\"col\":4}},{\"id\":\"vnD7zr-xGB\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Overdue Complaints\",\"col\":4}},{\"id\":\"weIRDgsxgV\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"CLOSED THIS MONTHS\",\"col\":4}},{\"id\":\"eI5UgTvc6K\",\"type\":\"chart\",\"data\":{\"chart_name\":\"Customer Complaint Analysis\",\"col\":12}},{\"id\":\"BlzTziFoSB\",\"type\":\"chart\",\"data\":{\"chart_name\":\"Highest Complaint by Price and CRM\",\"col\":12}},{\"id\":\"8NXl4Kkjyy\",\"type\":\"chart\",\"data\":{\"chart_name\":\"Complaint by Price Region wise\",\"col\":12}},{\"id\":\"mf2XlC6z94\",\"type\":\"chart\",\"data\":{\"chart_name\":\"Complaint by Price Creator wise\",\"col\":12}}]",
  "creation": "2026-09-17 10:30:28.375897",
  "custom_blocks": [],
  "docstatus": 0,
@@ -13,11 +30,36 @@
  "is_hidden": 0,
  "label": "Complaint Dashboard",
  "links": [],
- "modified": "2026-09-17 10:32:13.193433",
+ "modified": "2026-09-17 13:53:48.533708",
  "modified_by": "Administrator",
  "module": "Pratap Dashboard",
  "name": "Complaint Dashboard",
- "number_cards": [],
+ "number_cards": [
+  {
+   "label": "Total Complaint",
+   "number_card_name": "Total Complaint"
+  },
+  {
+   "label": "Overdue Complaints",
+   "number_card_name": "Overdue Complaints-1"
+  },
+  {
+   "label": "CLOSED THIS MONTHS",
+   "number_card_name": "CLOSED THIS MONTHS Complaints"
+  },
+  {
+   "label": "Open Complaints",
+   "number_card_name": "Open Complaints-1"
+  },
+  {
+   "label": "HIGH RISK Complaints",
+   "number_card_name": "HIGH RISK Complaints-1"
+  },
+  {
+   "label": "MID RISK Complaints",
+   "number_card_name": "MID RISK Complaints"
+  }
+ ],
  "owner": "Administrator",
  "parent_page": "Dashboards",
  "public": 1,

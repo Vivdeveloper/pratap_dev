@@ -1,0 +1,34 @@
+{
+ "chart_name": "Customer Complaint Analysis",
+ "chart_type": "Report",
+ "creation": "2026-09-17 11:36:28.914576",
+ "currency": "INR",
+ "docstatus": 0,
+ "doctype": "Dashboard Chart",
+ "dynamic_filters_json": "{}",
+ "filters_json": "{}",
+ "group_by_type": "Count",
+ "idx": 0,
+ "is_public": 0,
+ "is_standard": 1,
+ "modified": "2026-09-17 11:37:23.496559",
+ "modified_by": "Administrator",
+ "module": "Pratap Dashboard",
+ "name": "Customer Complaint Analysis",
+ "number_of_groups": 0,
+ "owner": "Administrator",
+ "report_name": "Customer Complaint Analysis",
+ "roles": [],
+ "show_values_over_chart": 0,
+ "time_interval": "Yearly",
+ "timeseries": 0,
+ "timespan": "Last Year",
+ "type": "Line",
+ "use_report_chart": 0,
+ "x_field": "customer",
+ "y_axis": [
+  {
+   "y_field": "potential_amount"
+  }
+ ]
+}
