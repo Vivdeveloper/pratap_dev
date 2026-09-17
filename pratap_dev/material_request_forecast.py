@@ -1,10 +1,87 @@
 # Copyright (c) 2026, pratap_dev contributors
 # License: MIT
 
+import json
+
 import frappe
 from frappe.utils import flt
 
- 
+
+@frappe.whitelist()
+def get_forecast_packing_materials_for_material_request():
+    """Return Forecast Clubs grouped with their PACKING MATERIALS for the Material
+    Request "Packaging Material" picker. Shape mirrors the Sales Forecast picker so
+    the same card/checkbox UI is reused:
+        [{ "forecast_club", "status", "plant", "forecast_type",
+           "items": [{ "item_code" (packing material), "item_name", "qty" }] }]
+
+    Each club's packing materials + expected qty come from the packed-goods requirement
+    stored on its items (custom_packed_goods_weekly_data): expected qty = sum of the
+    packed goods' required qty (qty_sf) per packing material, across the club's items.
+    The 3 RM-warehouse stock columns are added client-side (same as Sales Forecast).
+    """
+    clubs = frappe.get_all(
+        "Forecast Club",
+        filters={"docstatus": ["<", 2], "status": ["!=", "Material Requested"]},
+        fields=["name", "status", "plant", "forecast_type"],
+        order_by="modified desc",
+    )
+    if not clubs:
+        return []
+
+    club_names = [c.name for c in clubs]
+    rows = frappe.get_all(
+        "Forecast Club Item",
+        filters={"parent": ["in", club_names]},
+        fields=["parent", "custom_packed_goods_weekly_data"],
+    )
+
+    grouped = {
+        c.name: {
+            "forecast_club": c.name,
+            "status": c.status,
+            "plant": c.plant,
+            "forecast_type": c.forecast_type,
+            "items": {},  # packing_material -> {item_code, item_name, qty}
+        }
+        for c in clubs
+    }
+
+    name_cache = {}
+    for row in rows:
+        data = row.get("custom_packed_goods_weekly_data")
+        if not data:
+            continue
+        try:
+            pk_rows = json.loads(data) or []
+        except (ValueError, TypeError):
+            continue
+
+        for pk in pk_rows:
+            pm = pk.get("packing_material")
+            qty = flt(pk.get("qty_sf"))
+            if not pm or qty <= 0:
+                continue
+            bucket = grouped[row.parent]["items"]
+            entry = bucket.get(pm)
+            if not entry:
+                if pm not in name_cache:
+                    name_cache[pm] = frappe.db.get_value("Item", pm, "item_name") or pm
+                entry = {"item_code": pm, "item_name": name_cache[pm], "qty": 0}
+                bucket[pm] = entry
+            entry["qty"] = flt(entry["qty"] + qty, 3)
+
+    result = []
+    for c in clubs:
+        items = list(grouped[c.name]["items"].values())
+        if not items:
+            continue
+        grouped[c.name]["items"] = items
+        result.append(grouped[c.name])
+
+    return result
+
+
 @frappe.whitelist()
 def get_forecast_clubs_for_material_request():
     """Return Forecast Clubs (Sales Forecast) grouped with their material request items.
