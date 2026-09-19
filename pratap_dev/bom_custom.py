@@ -7,7 +7,8 @@ from erpnext.manufacturing.doctype.bom.bom import item_query as bom_item_query
 
 
 def validate_bom_total_qty(doc, method=None):
-	"""Ensure the sum of BOM Item quantities equals the BOM's total Quantity.
+	"""Ensure the sum of BOM Item quantities equals the BOM's total Quantity, and
+	store that sum in the "Total Quantity" batch-sheet field.
 
 	Pratap BOMs are formulations, so the produced Quantity must equal the sum of
 	the ingredient quantities. Runs on validate (before save), so a mismatch blocks
@@ -25,6 +26,10 @@ def validate_bom_total_qty(doc, method=None):
 			).format(items_qty, total_qty, abs(items_qty - total_qty)),
 			title=_("BOM Quantity Mismatch"),
 		)
+
+	# "Total Quantity" batch-sheet field = sum of all BOM Item Qty values.
+	if doc.meta.has_field("custom_total_percentage"):
+		doc.custom_total_percentage = items_qty
 
 
 @frappe.whitelist()

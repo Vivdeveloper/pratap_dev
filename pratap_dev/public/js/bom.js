@@ -22,4 +22,33 @@ frappe.ui.form.on("BOM", {
 			};
 		});
 	},
+	refresh(frm) {
+		set_bom_total_quantity(frm);
+	},
+	// Fires when a BOM Item row is removed.
+	items_remove(frm) {
+		set_bom_total_quantity(frm);
+	},
 });
+
+frappe.ui.form.on("BOM Item", {
+	// Live-update Total Quantity as each row's Qty changes.
+	qty(frm) {
+		set_bom_total_quantity(frm);
+	},
+});
+
+// Total Quantity (custom_total_percentage) = sum of all BOM Item Qty values.
+function set_bom_total_quantity(frm) {
+	if (!frm.fields_dict.custom_total_percentage) {
+		return;
+	}
+	let total = 0;
+	(frm.doc.items || []).forEach((row) => {
+		total += flt(row.qty);
+	});
+	// Only write when it actually differs, so a plain refresh doesn't dirty the form.
+	if (flt(frm.doc.custom_total_percentage) !== flt(total)) {
+		frm.set_value("custom_total_percentage", total);
+	}
+}

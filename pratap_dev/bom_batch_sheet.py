@@ -3,8 +3,8 @@
 
 """Batch-sheet fields on BOM that flow to the Work Order.
 
-BOM carries Remarks, Shelf Life, Sample Qty Prepared, Total Percentage, Minimum
-Batch Quantity, Effective Date and a Notes table. The scalar fields flow to the
+BOM carries Remarks, Shelf Life, Total Quantity, Minimum Batch Quantity,
+Effective Date and a Notes table. The scalar fields flow to the
 Work Order via ``fetch_from`` (set in the custom field JSON); the Notes table is
 copied here (tables can't use fetch_from). Two rules are enforced:
 
@@ -85,7 +85,6 @@ def get_bom_batch_sheet(bom_no):
 _BATCH_SHEET_SCALARS = [
 	"custom_remarks",
 	"custom_shelf_life",
-	"custom_sample_qty_prepared",
 	"custom_total_percentage",
 	"custom_min_batch_quantity",
 	"custom_effective_date",
