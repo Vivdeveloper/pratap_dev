@@ -88,6 +88,135 @@ def _total_rm_stock(item_code, company):
     return total
 
 
+# JOB WORK warehouses whose OUTs (consumption) feed the Last Month / 3-month consumption
+# columns. Naming varies slightly ("Plant 1 WIP RM- JOB WORK - PTPL"), so match by the
+# plant prefix AND "JOB WORK".
+JOB_WORK_CONSUMPTION_PREFIXES = ["Plant 1 WIP RM", "Plant 2 WIP RM"]
+
+
+def _job_work_warehouses(company):
+    out = []
+    for prefix in JOB_WORK_CONSUMPTION_PREFIXES:
+        rows = frappe.get_all(
+            "Warehouse",
+            filters=[
+                ["warehouse_name", "like", prefix + "%"],
+                ["warehouse_name", "like", "%JOB WORK%"],
+                ["company", "=", company],
+                ["is_group", "=", 0],
+            ],
+            fields=["name"],
+        )
+        out.extend(r.name for r in rows)
+    return out
+
+
+def _month_window(months_back):
+    """(first_day, last_day) of the calendar month `months_back` months before today."""
+    from frappe.utils import getdate, nowdate, add_months, get_first_day, get_last_day
+
+    ref = add_months(getdate(nowdate()), -months_back)
+    return get_first_day(ref), get_last_day(ref)
+
+
+def _consumption_out(item_code, warehouses, start, end):
+    """Total outward (consumed) qty for an item across `warehouses` in [start, end].
+    Sums the absolute value of negative Stock Ledger movements (issues/consumption)."""
+    if not (item_code and warehouses):
+        return 0.0
+    rows = frappe.db.sql(
+        """
+        SELECT COALESCE(SUM(-actual_qty), 0)
+        FROM `tabStock Ledger Entry`
+        WHERE item_code = %(item)s
+          AND warehouse IN %(whs)s
+          AND is_cancelled = 0
+          AND actual_qty < 0
+          AND posting_date BETWEEN %(start)s AND %(end)s
+        """,
+        {"item": item_code, "whs": tuple(warehouses), "start": start, "end": end},
+    )
+    return flt(rows[0][0]) if rows else 0.0
+
+
+@frappe.whitelist()
+def get_item_rfq_metrics(item_code, company):
+    """Live values for the RFQ/planning columns so the grid fills on item entry (before
+    save), mirroring the pipeline/stock live-fill. Server `update_pipeline_fields` remains
+    the authoritative compute on save."""
+    if not item_code or not company:
+        return {}
+    cons = _consumption_metrics(item_code, company)
+    return {
+        "last_month_consumption": cons["last_month"],
+        "min_level_avg_consumption": cons["avg_3m"],
+        "max_level_consumption": cons["max_3m"],
+        "last_month_purchase": _last_month_purchase_qty(item_code, company),
+        "current_requirement": _wo_requirement(item_code, company),
+    }
+
+
+def _wo_requirement(item_code, company):
+    """Current Requirement (as per BOM / Forecast vs Planning): the gross RM qty the active
+    production plan needs. Sums Work Order Item.required_qty (BOM-exploded) across submitted
+    Work Orders that are still open (not Completed / Stopped / Closed) for the item. WIP/store
+    stock is netted off later in 'Requirement generate for the Month' (= this − stock)."""
+    rows = frappe.db.sql(
+        """
+        SELECT COALESCE(SUM(woi.required_qty), 0)
+        FROM `tabWork Order Item` woi
+        INNER JOIN `tabWork Order` wo ON wo.name = woi.parent
+        WHERE woi.item_code = %(item)s
+          AND wo.docstatus = 1
+          AND wo.company = %(company)s
+          AND wo.status NOT IN ('Completed', 'Stopped', 'Closed')
+        """,
+        {"item": item_code, "company": company},
+    )
+    return flt(rows[0][0]) if rows else 0.0
+
+
+def _last_month_purchase_qty(item_code, company):
+    """Qty ordered on submitted Purchase Orders whose transaction date falls in last
+    calendar month (company-wide, for the item)."""
+    start, end = _month_window(1)
+    rows = frappe.db.sql(
+        """
+        SELECT COALESCE(SUM(poi.qty), 0)
+        FROM `tabPurchase Order Item` poi
+        INNER JOIN `tabPurchase Order` po ON po.name = poi.parent
+        WHERE poi.item_code = %(item)s
+          AND po.docstatus = 1
+          AND po.company = %(company)s
+          AND po.transaction_date BETWEEN %(start)s AND %(end)s
+        """,
+        {"item": item_code, "company": company, "start": start, "end": end},
+    )
+    return flt(rows[0][0]) if rows else 0.0
+
+
+def _consumption_metrics(item_code, company):
+    """Last-month consumption plus 3-month average and max monthly consumption, using the
+    JOB WORK warehouses' outward movements."""
+    whs = _job_work_warehouses(company)
+    if not whs:
+        return {"last_month": 0.0, "avg_3m": 0.0, "max_3m": 0.0}
+
+    # last month (m-1)
+    ls, le = _month_window(1)
+    last_month = _consumption_out(item_code, whs, ls, le)
+
+    # last 3 months (m-1, m-2, m-3) for avg + max
+    monthly = []
+    for m in (1, 2, 3):
+        s, e = _month_window(m)
+        monthly.append(_consumption_out(item_code, whs, s, e))
+
+    avg_3m = sum(monthly) / 3.0 if monthly else 0.0
+    max_3m = max(monthly) if monthly else 0.0
+    return {"last_month": last_month, "avg_3m": avg_3m, "max_3m": max_3m}
+
+
 def update_pipeline_fields(doc, method=None):
     """Server-side compute of the Purchase Material Request Item pipeline columns so they
     ALWAYS update on save — not only when the client-side script happens to run.
@@ -120,7 +249,30 @@ def update_pipeline_fields(doc, method=None):
 
         expected = flt(row.get("custom_expected_qty")) or flt(row.qty)
         required = expected - total_stock - pending_pr - pending_grn
-        row.custom_required_qty_for_pr = required if required > 0 else 0
+        required = required if required > 0 else 0
+        row.custom_required_qty_for_pr = required
+
+        # RFQ/Purchase columns (from the RM-requirement sheet):
+        #   Last Month Consumption / 3-month Avg & Max — JOB WORK warehouse OUTs.
+        #   Last Month Purchase — qty ordered on last month's POs.
+        if hasattr(row, "custom_last_month_consumption") or hasattr(row, "custom_last_month_purchase"):
+            cons = _consumption_metrics(row.item_code, doc.company)
+            row.custom_last_month_consumption = cons["last_month"]
+            row.custom_min_level_avg_consumption = cons["avg_3m"]
+            row.custom_max_level_consumption = cons["max_3m"]
+            row.custom_last_month_purchase = _last_month_purchase_qty(row.item_code, doc.company)
+
+            # Current Requirement As per BOM / Forecast vs Planning — from active Work Orders
+            # (BOM-exploded RM qty). Falls back to the row's expected/forecast qty when the
+            # item is in no open Work Order yet.
+            wo_req = _wo_requirement(row.item_code, doc.company)
+            row.custom_current_requirement = wo_req if wo_req > 0 else expected
+
+            # Actual Requirement for RFQ/P.O is editable ("Edit Option for Qty"); seed it with
+            # the sheet formula  N = G + L - M  = Max Level Consumption + Requirement generate
+            # for the Month - Pipe Line (PO/GRN pending), only when the user hasn't entered one.
+            if not flt(row.get("custom_actual_requirement_rfq_po")):
+                row.custom_actual_requirement_rfq_po = flt(cons["max_3m"]) + required - pending_pr
 
 
 def move_fulfilled_items(doc, method=None):

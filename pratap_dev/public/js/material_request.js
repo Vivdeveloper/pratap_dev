@@ -404,6 +404,7 @@ frappe.ui.form.on("Material Request Item", {
 	item_code(frm, cdt, cdn) {
 		set_rm_warehouse_qty(frm, cdt, cdn);
 		set_supplier_if_single_vendor(frm, cdt, cdn);
+		set_material_rfq_metrics(frm, cdt, cdn);
 	},
 	custom_packing_qty(frm, cdt, cdn) {
 		calculate_quantity(frm, cdt, cdn);
@@ -417,6 +418,11 @@ frappe.ui.form.on("Material Request Item", {
 	custom_expected_qty(frm, cdt, cdn) {
 		recompute_required_qty_for_pr(cdt, cdn);
 	},
+	// Planner typed an Actual Requirement -> stop auto-seeding it (Edit Option for Qty).
+	custom_actual_requirement_rfq_po(frm, cdt, cdn) {
+		const row = locals[cdt][cdn];
+		if (row) row.__actual_rfq_manual = true;
+	},
 	// Material Transfer issue-slip: recompute Total Issue Qty / Balance Qty.
 	custom_pack_size(frm, cdt, cdn) {
 		mr_recalc_issue_row(frm, cdt, cdn);
@@ -427,6 +433,9 @@ frappe.ui.form.on("Material Request Item", {
 	qty(frm, cdt, cdn) {
 		if (frm.doc.material_request_type === "Material Transfer") {
 			mr_recalc_issue_row(frm, cdt, cdn);
+		} else {
+			// Purchase: Quantity feeds the requirement when Expected Qty isn't set.
+			recompute_required_qty_for_pr(cdt, cdn);
 		}
 	},
 });
@@ -711,21 +720,62 @@ function set_material_pipeline_status(frm, cdt, cdn) {
 		.catch(() => {});
 }
 
-// Required Qty for PR = Forecast Qty - Total Qty - Pending PR for GRN - Pending GRN QC.
+// Live-fill the RFQ/planning columns on item entry (mirrors the pipeline live-fill), so the
+// grid shows them before Save. Server update_pipeline_fields recomputes on save (authoritative).
+function set_material_rfq_metrics(frm, cdt, cdn) {
+	const row = locals[cdt][cdn];
+	if (!row || !row.item_code || !frm.doc.company) {
+		return;
+	}
+	if (frm.doc.material_request_type !== "Purchase") {
+		return;
+	}
+	frappe
+		.xcall("pratap_dev.material_request_stock.get_item_rfq_metrics", {
+			item_code: row.item_code,
+			company: frm.doc.company,
+		})
+		.then((d) => {
+			if (!d) return;
+			set_rm_qty_field(cdt, cdn, "custom_last_month_consumption", d.last_month_consumption || 0);
+			set_rm_qty_field(cdt, cdn, "custom_last_month_purchase", d.last_month_purchase || 0);
+			set_rm_qty_field(cdt, cdn, "custom_min_level_avg_consumption", d.min_level_avg_consumption || 0);
+			set_rm_qty_field(cdt, cdn, "custom_max_level_consumption", d.max_level_consumption || 0);
+			// Current Requirement = Work Order requirement, else the row's Expected/Quantity.
+			const cur = flt(d.current_requirement) || flt(row.custom_expected_qty) || flt(row.qty);
+			set_rm_qty_field(cdt, cdn, "custom_current_requirement", cur);
+			// Max Level Consumption just changed -> refresh Actual Requirement (G + L - M).
+			recompute_required_qty_for_pr(cdt, cdn);
+		})
+		.catch(() => {});
+}
+
+// Required Qty for PR ("Requirement generate for the Month") = Expected (or Quantity when
+// Expected isn't set) - Total Stock - Pipe Line - Pending GRN. Also seeds the editable
+// "Actual Requirement for RFQ/P.O" when the user hasn't entered one yet.
 function recompute_required_qty_for_pr(cdt, cdn) {
 	const row = locals[cdt][cdn];
 	if (!row) {
 		return;
 	}
 
+	const expected = flt(row.custom_expected_qty) || flt(row.qty);
 	const required = Math.max(
-		flt(row.custom_expected_qty) -
+		expected -
 			flt(row.custom_total_stock_qty) -
 			flt(row.custom_pending_pr_for_grn) -
 			flt(row.custom_pending_grn_qc),
 		0
 	);
 	set_rm_qty_field(cdt, cdn, "custom_required_qty_for_pr", required);
+
+	// Actual Requirement for RFQ/P.O = G + L - M (Max Level Consumption + Requirement
+	// generate - Pipe Line). Seeded/kept live until the planner edits it manually.
+	if (!row.__actual_rfq_manual) {
+		const actual =
+			flt(row.custom_max_level_consumption) + required - flt(row.custom_pending_pr_for_grn);
+		set_rm_qty_field(cdt, cdn, "custom_actual_requirement_rfq_po", actual);
+	}
 }
 
 // Warehouse names may carry a trailing space (e.g. "Plant 1 WIP RM "), so match by prefix.
