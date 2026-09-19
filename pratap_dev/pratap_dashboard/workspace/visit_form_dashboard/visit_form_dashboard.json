@@ -1,6 +1,15 @@
 {
- "charts": [],
- "content": "[{\"id\":\"pMZj1a_ZIM\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\">Visit Form Dashboard</span>\",\"col\":12}},{\"id\":\"KjpXNThmQV\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Total Product Trials\",\"col\":4}},{\"id\":\"BDzsKdGNjK\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Ongoing Trials\",\"col\":4}},{\"id\":\"loMmWbIh_q\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Completed Trials\",\"col\":4}}]",
+ "charts": [
+  {
+   "chart_name": "Visit Type Wise Visit Count",
+   "label": "Visit Type Wise Visit Count"
+  },
+  {
+   "chart_name": "Sales Person wise Visit Count",
+   "label": "Sales Person wise Visit Count"
+  }
+ ],
+ "content": "[{\"id\":\"pMZj1a_ZIM\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\">Visit Form Dashboard</span>\",\"col\":12}},{\"id\":\"KjpXNThmQV\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Total Visits\",\"col\":4}},{\"id\":\"ZTLLKMssue\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Customer Visit\",\"col\":4}},{\"id\":\"3R3SySSP7H\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"PTCPL Office Visit\",\"col\":4}},{\"id\":\"-l20Y77s-J\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"PTCPL Plant Visit\",\"col\":4}},{\"id\":\"l61OF7opoP\",\"type\":\"chart\",\"data\":{\"chart_name\":\"Visit Type Wise Visit Count\",\"col\":12}},{\"id\":\"KhApsY1lzN\",\"type\":\"chart\",\"data\":{\"chart_name\":\"Sales Person wise Visit Count\",\"col\":12}}]",
  "creation": "2026-09-09 10:51:35.118681",
  "custom_blocks": [],
  "docstatus": 0,
@@ -13,22 +22,26 @@
  "is_hidden": 0,
  "label": "Visit Form Dashboard",
  "links": [],
- "modified": "2026-09-17 10:32:13.124878",
+ "modified": "2026-09-19 11:24:33.303797",
  "modified_by": "Administrator",
  "module": "Pratap Dashboard",
  "name": "Visit Form Dashboard",
  "number_cards": [
   {
-   "label": "Total Product Trials",
-   "number_card_name": "Total Product Trials"
+   "label": "Total Visits",
+   "number_card_name": "Total Visits"
   },
   {
-   "label": "Ongoing Trials",
-   "number_card_name": "Ongoing Trials"
+   "label": "Customer Visit",
+   "number_card_name": "Customer Visit"
   },
   {
-   "label": "Completed Trials",
-   "number_card_name": "Completed Trials"
+   "label": "PTCPL Office Visit",
+   "number_card_name": "PTCPL Office Visit"
+  },
+  {
+   "label": "PTCPL Plant Visit",
+   "number_card_name": "PTCPL Plant Visit"
   }
  ],
  "owner": "Administrator",
