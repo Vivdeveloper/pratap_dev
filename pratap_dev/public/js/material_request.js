@@ -85,6 +85,29 @@ frappe.ui.form.on("Material Request", {
 		clear_stale_from_warehouse(frm);
 		configure_items_grid(frm);
 	},
+
+	after_save(frm) {
+		// The server (move_fulfilled_items) removes already-fulfilled rows from the Items
+		// table during validate and snapshots them to custom_fulfilled_items_json. That
+		// server-side row removal leaves the browser's form model out of sync (the removed
+		// rows linger, so the title stays "Not Saved" even though the record actually saved
+		// as Draft). When a fulfilled snapshot is present, reload the doc so the form shows
+		// the true saved state.
+		if (frm.doc.material_request_type !== "Purchase") {
+			return;
+		}
+		let snapshot = [];
+		try {
+			snapshot = JSON.parse(frm.doc.custom_fulfilled_items_json || "[]") || [];
+		} catch (e) {
+			snapshot = [];
+		}
+		// reload_doc re-reads the saved doc from the server (dropped rows gone, dirty state
+		// cleared). after_save does not fire on reload, so there is no loop.
+		if (snapshot.length) {
+			frm.reload_doc();
+		}
+	},
 });
 
 // Exact "Material Issue Against Requisition" column set for Material Transfer MRs, in the
