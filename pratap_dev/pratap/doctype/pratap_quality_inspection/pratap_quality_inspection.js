@@ -12,6 +12,20 @@ frappe.ui.form.on("Pratap Quality Inspection", {
 		compute_total_batch_qty(frm);
 	},
 
+	after_save(frm) {
+		// A successful save should leave the form clean. If it is still dirty here, a
+		// server-side validate hook changed the document — e.g. readings appended from the
+		// template (_set_readings_from_template), or raw-material rows/values adjusted — and
+		// the browser model is out of sync, so the title stays "Not Saved" even though the
+		// record actually saved as Draft (same class of issue as the Material Request one).
+		// Reload to re-read the true saved state. after_save does not fire on reload, and
+		// reload_doc does not re-save, so there is no loop. This only touches this form —
+		// it has no effect on Material Request saves.
+		if (frm.is_dirty()) {
+			frm.reload_doc();
+		}
+	},
+
 	refresh(frm) {
 		// FIRST — always show the correct Total Batch Qty (Batch + rework) and drive the calcs
 		// off it, before anything else in refresh can short-circuit.
@@ -352,8 +366,15 @@ function set_density_qty(frm) {
 	const density_qty = reference_qty / custom_density;
 	const multiplier = 1 - process_loss / 100;
 	const finished_qty = multiplier > 0 ? density_qty * multiplier : 0;
-	frm.set_value("density_qty", density_qty);
-	frm.set_value("finished_qty", finished_qty);
+	// Direct assignment + refresh_field (NOT frm.set_value) so recomputing these read-only
+	// fields on load/refresh does not dirty the form. Using set_value here left submitted
+	// (approved) QCs stuck showing "Not Saved" every time they were opened, because the
+	// recomputed value differed from the stored one and marked the form dirty. The user's
+	// own edits to Density / Process Loss still dirty the form (those are real edits).
+	frm.doc.density_qty = flt(density_qty);
+	frm.doc.finished_qty = flt(finished_qty);
+	frm.refresh_field("density_qty");
+	frm.refresh_field("finished_qty");
 }
 
 function set_raw_material_required_qty(frm) {
@@ -361,8 +382,11 @@ function set_raw_material_required_qty(frm) {
 	(frm.doc.raw_materials || []).forEach((row) => {
 		const percentage = flt(row.mat_req_in_pecentage);
 		const total_req_qty = reference_qty * (percentage / 100);
-		frappe.model.set_value(row.doctype, row.name, "total_req_qty", total_req_qty);
+		// skip_dirty (6th arg) so recomputing this read-only column on load/refresh does not
+		// dirty the form (same "Not Saved on a submitted QC" issue as density_qty above).
+		frappe.model.set_value(row.doctype, row.name, "total_req_qty", total_req_qty, null, true);
 	});
+	frm.refresh_field("raw_materials");
 }
 
 function validate_total_raw_material_percentage(frm) {
