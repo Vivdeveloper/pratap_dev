@@ -52,10 +52,10 @@ def validate_filters(filters):
 def get_columns():
 	return [
 		{
-			"fieldname": "region",
-			"label": _("Region"),
+			"fieldname": "city",
+			"label": _("City"),
 			"fieldtype": "Link",
-			"options": "Region",
+			"options": "Cities",
 			"width": 200,
 		},
 		{
@@ -85,12 +85,12 @@ def get_data(filters):
 		.left_join(Customer)
 		.on(Customer.name == Visit.customer_id)
 		.select(
-			Customer.custom_region.as_("region"),
+			Customer.custom_city.as_("city"),
 			visit_count.as_("visit_count"),
 		)
 		.where(date_field >= filters.from_date)
 		.where(date_field < add_days(filters.to_date, 1))
-		.groupby(Customer.custom_region)
+		.groupby(Customer.custom_city)
 		.orderby(visit_count, order=frappe.qb.desc)
 	)
 	query = apply_optional_filters(query, Visit, Customer, filters)
@@ -105,7 +105,7 @@ def get_data(filters):
 			continue
 		data.append(
 			{
-				"region": row.region or _("Not Set"),
+				"city": row.city or _("Not Set"),
 				"visit_count": count,
 				"percentage": (count / grand_total * 100) if grand_total else 0,
 			}
@@ -150,7 +150,7 @@ def apply_optional_filters(query, Visit, Customer, filters):
 def get_chart(data):
 	return {
 		"data": {
-			"labels": [row["region"] for row in data],
+			"labels": [row["city"] for row in data],
 			"datasets": [
 				{
 					"name": _("Visits"),

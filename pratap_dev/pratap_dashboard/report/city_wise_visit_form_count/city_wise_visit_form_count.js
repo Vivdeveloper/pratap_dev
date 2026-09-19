@@ -1,7 +1,7 @@
 // Copyright (c) 2026, saurabh@exacuer.com and contributors
 // For license information, please see license.txt
 
-frappe.query_reports["Region Wise Visit Form count"] = {
+frappe.query_reports["City Wise Visit Form count"] = {
 	filters: [
 		{
 			fieldname: "from_date",
@@ -71,7 +71,8 @@ frappe.query_reports["Region Wise Visit Form count"] = {
 		{
 			fieldname: "city",
 			label: __("City"),
-			fieldtype: "Data",
+			fieldtype: "Link",
+			options: "Cities",
 		},
 		{
 			fieldname: "secondary_customer",
