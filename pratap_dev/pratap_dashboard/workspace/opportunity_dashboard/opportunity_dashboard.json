@@ -50,7 +50,7 @@
  "is_hidden": 0,
  "label": "Opportunity Dashboard",
  "links": [],
- "modified": "2026-09-12 12:37:29.249810",
+ "modified": "2026-09-17 10:32:13.157822",
  "modified_by": "Administrator",
  "module": "Pratap Dashboard",
  "name": "Opportunity Dashboard",
@@ -61,7 +61,7 @@
   }
  ],
  "owner": "Administrator",
- "parent_page": "",
+ "parent_page": "Dashboards",
  "public": 1,
  "quick_lists": [],
  "roles": [],

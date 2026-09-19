@@ -1,0 +1,149 @@
+// Copyright (c) 2026, saurabh@exacuer.com and contributors
+// For license information, please see license.txt
+
+frappe.query_reports["Region Wise Visit Form count"] = {
+	filters: [
+		{
+			fieldname: "from_date",
+			label: __("From Date"),
+			fieldtype: "Date",
+			default: erpnext.utils.get_fiscal_year(frappe.datetime.get_today(), true)[1],
+			reqd: 1,
+		},
+		{
+			fieldname: "to_date",
+			label: __("To Date"),
+			fieldtype: "Date",
+			default: erpnext.utils.get_fiscal_year(frappe.datetime.get_today(), true)[2],
+			reqd: 1,
+		},
+		{
+			fieldname: "date_based_on",
+			label: __("Date Based On"),
+			fieldtype: "Select",
+			options: ["Visit Date", "Created Date", "Document Creation"],
+			default: "Visit Date",
+			reqd: 1,
+		},
+		{
+			fieldname: "limit",
+			label: __("Top"),
+			fieldtype: "Int",
+			default: 10,
+			reqd: 1,
+		},
+		{
+			fieldname: "visit_type",
+			label: __("Visit Type"),
+			fieldtype: "Select",
+			options: ["", "C1 New", "C2 Trial", "C3 Negotiation", "C4 Support", "C5 PS-5/H6", "C6 CP/Dealer", "C7 HO/Plant", "C8 Lost"],
+		},
+		{
+			fieldname: "workflow_state",
+			label: __("Workflow State"),
+			fieldtype: "Link",
+			options: "Workflow State",
+		},
+		{
+			fieldname: "customer",
+			label: __("Customer"),
+			fieldtype: "Link",
+			options: "Customer",
+		},
+		{
+			fieldname: "customer_group",
+			label: __("Customer Group"),
+			fieldtype: "Link",
+			options: "Customer Group",
+		},
+		{
+			fieldname: "region",
+			label: __("Region"),
+			fieldtype: "Link",
+			options: "Region",
+		},
+		{
+			fieldname: "territory",
+			label: __("Territory"),
+			fieldtype: "Link",
+			options: "Territory",
+		},
+		{
+			fieldname: "city",
+			label: __("City"),
+			fieldtype: "Data",
+		},
+		{
+			fieldname: "secondary_customer",
+			label: __("Secondary Customer"),
+			fieldtype: "Link",
+			options: "Customer",
+		},
+		{
+			fieldname: "creator_id",
+			label: __("Creator Id"),
+			fieldtype: "Link",
+			options: "User",
+		},
+		{
+			fieldname: "creator",
+			label: __("Creator Name"),
+			fieldtype: "Link",
+			options: "Sales Person",
+		},
+		{
+			fieldname: "visit_for_opportunity",
+			label: __("Visit for Opportunity"),
+			fieldtype: "Select",
+			options: ["", "Yes", "No"],
+		},
+		{
+			fieldname: "customer_feedbaack",
+			label: __("Customer Feedback"),
+			fieldtype: "Select",
+			options: ["", "Positive", "Neutral", "Negative"],
+		},
+		{
+			fieldname: "document_type",
+			label: __("Document Type"),
+			fieldtype: "Link",
+			options: "DocType",
+		},
+		{
+			fieldname: "document_id",
+			label: __("Document ID"),
+			fieldtype: "Dynamic Link",
+			options: "document_type",
+		},
+		{
+			fieldname: "customer_visit",
+			label: __("Customer Visit"),
+			fieldtype: "Select",
+			options: ["", "Yes", "No"],
+		},
+		{
+			fieldname: "visit_for_office",
+			label: __("PTCPL Office Visit"),
+			fieldtype: "Select",
+			options: ["", "Yes", "No"],
+		},
+		{
+			fieldname: "ptcpl_plant_visit",
+			label: __("PTCPL Plant Visit"),
+			fieldtype: "Select",
+			options: ["", "Yes", "No"],
+		},
+		{
+			fieldname: "channel_partner_office",
+			label: __("Channel Partner Office"),
+			fieldtype: "Select",
+			options: ["", "Yes", "No"],
+		},
+		{
+			fieldname: "visit_again_required",
+			label: __("Next Visit"),
+			fieldtype: "Select",
+			options: ["", "Yes", "No"],
+		},
+	],
+};

@@ -1,23 +1,23 @@
 {
- "chart_name": "Region Wise Opportunity",
+ "chart_name": "Complaint by Price Creator wise",
  "chart_type": "Report",
- "creation": "2026-09-12 12:36:47.758690",
+ "creation": "2026-09-17 13:53:20.589964",
  "currency": "INR",
  "docstatus": 0,
  "doctype": "Dashboard Chart",
  "dynamic_filters_json": "{}",
- "filters_json": "{\"from_date\":\"2026-04-01\",\"to_date\":\"2027-03-31\",\"date_based_on\":\"Opportunity Date\",\"company\":\"Pratap Texchem Private Limited\"}",
+ "filters_json": "{\"from_date\":\"2026-04-01\",\"to_date\":\"2027-03-31\",\"date_based_on\":\"Created Date\",\"limit\":10}",
  "group_by_type": "Count",
- "idx": 1,
+ "idx": 0,
  "is_public": 0,
  "is_standard": 1,
- "modified": "2026-09-17 10:28:34.595821",
+ "modified": "2026-09-17 13:53:20.589964",
  "modified_by": "Administrator",
  "module": "Pratap Dashboard",
- "name": "Region Wise Opportunity",
+ "name": "Complaint by Price Creator wise",
  "number_of_groups": 0,
  "owner": "Administrator",
- "report_name": "Region Wise Opportunity",
+ "report_name": "Complaint by Price Creator wise",
  "roles": [],
  "show_values_over_chart": 0,
  "time_interval": "Yearly",
@@ -25,10 +25,13 @@
  "timespan": "Last Year",
  "type": "Bar",
  "use_report_chart": 0,
- "x_field": "region",
+ "x_field": "creator_name",
  "y_axis": [
   {
    "y_field": "total_amount"
+  },
+  {
+   "y_field": "total_qty"
   }
  ]
 }
