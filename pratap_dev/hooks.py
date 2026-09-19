@@ -287,6 +287,7 @@ doctype_js = {
         "public/js/work_order_time_log.js",
     ],
     "Purchase Order": "public/js/purchase_order_grn.js",
+    "Request for Quotation": "public/js/request_for_quotation.js",
     "Supplier Quotation": "public/js/supplier_quotation.js",
     "Purchase Receipt": [
         "public/js/pratap_quality_inspection_reference_override.js",
@@ -397,7 +398,12 @@ doc_events = {
         "before_update_after_submit": "pratap_dev.material_request_stock.update_pipeline_fields",
     },
     "Request for Quotation": {
-        "validate": "pratap_dev.rfq_supplier_fields.set_supplier_fields",
+        "validate": [
+            "pratap_dev.rfq_supplier_fields.set_supplier_fields",
+            # runs AFTER the supplier code is mirrored: pre-fills Standard Pkg Qty
+            # from the tracked table and computes No of Unit = Qty / Pkg.
+            "pratap_dev.item_supplier_pack.apply_rfq_pack_sizes",
+        ],
     },
     "Supplier Quotation": {
         "validate": "pratap_dev.supplier_quotation_po.set_required_date_from_rfq",
@@ -409,6 +415,9 @@ doc_events = {
         ],
         "on_submit": "pratap_dev.batch_package_hooks.purchase_receipt_on_submit",
         "on_cancel": "pratap_dev.batch_package_hooks.purchase_receipt_on_cancel",
+        # Track the latest Standard Pkg Qty per (Item, Supplier) into the Item's
+        # Supplier Pack Sizes table so RFQs can pre-fill it later.
+        "on_update": "pratap_dev.item_supplier_pack.capture_pack_sizes",
     },
     "Purchase Invoice": {
         "validate": "pratap_dev.purchase_invoice.set_grn_group_id_from_receipt",
