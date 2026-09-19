@@ -19,6 +19,15 @@ import frappe
 from frappe import _
 from frappe.utils import flt, get_datetime, format_datetime
 
+# Quantities are shown/tracked to 3 decimals, so anything beyond the 3rd decimal does
+# NOT count towards a shortfall. An item is fully transferred when the remaining qty
+# rounded to 3 decimals is 0 — i.e. we ignore 4th-decimal-and-beyond noise. (Previously
+# is_full used a 0.0001 tolerance, tighter than the display: a BOM-required qty carrying
+# a 4th decimal like 24.7293 left a 0.0003 remainder that showed "0.000 Remaining" yet
+# kept is_full False, so the Material Transfer button never greyed out.)
+def _is_fully_transferred(remaining):
+	return flt(remaining, 3) <= 0
+
 
 @frappe.whitelist()
 def get_wo_transfer_context(work_order):
@@ -61,7 +70,7 @@ def get_wo_transfer_context(work_order):
 				"duration_mins": flt(row.get("custom_addition_duration_mins"), 3),
 				"timer_running": bool(row.get("custom_addition_start")),
 				"finished": "Finish —" in (row.get("custom_addition_log") or ""),
-				"is_full": remaining <= 0.0001,
+				"is_full": _is_fully_transferred(remaining),
 			}
 		)
 
@@ -238,7 +247,7 @@ def _open_item_other_than(wo, exclude_row):
 		transferred = flt(row.transferred_qty) - _rework_transferred_qty(wo.name, row.item_code)
 		if transferred <= 0.0001:
 			continue
-		full = transferred + 0.0001 >= flt(row.required_qty)
+		full = _is_fully_transferred(flt(row.required_qty) - transferred)
 		finished = "Finish —" in (row.get("custom_addition_log") or "")
 		if not (full and finished):
 			return row.item_code
@@ -288,7 +297,9 @@ def _wo_job_cards(wo):
 	for name in names:
 		jc = frappe.get_doc("Job Card", name)
 		items = jc.get("items") or []
-		material_ok = (not items) or all(flt(i.transferred_qty) >= flt(i.required_qty) for i in items)
+		material_ok = (not items) or all(
+			_is_fully_transferred(flt(i.required_qty) - flt(i.transferred_qty)) for i in items
+		)
 		wo_ok = skip_transfer or wo_status == "In Process" or flt(jc.get("transferred_qty")) > 0 or (not items)
 		for_qty = flt(jc.for_quantity)
 		done_qty = flt(jc.total_completed_qty)
@@ -482,7 +493,7 @@ def set_transfer_plan(work_order, plan, auto=0):
 			if batch_no and qty > 0:
 				clean.append({"batch_no": batch_no, "std_pkg": std_pkg, "units": units, "qty": qty})
 
-		if not clean and flt(row.transferred_qty) + 0.0001 >= flt(row.required_qty):
+		if not clean and _is_fully_transferred(flt(row.required_qty) - flt(row.transferred_qty)):
 			# already fully transferred -> use the actual transfers as the plan
 			for t in _item_transfers(work_order, row.item_code):
 				clean.append({"batch_no": t["batch_no"], "std_pkg": t["std_pkg"], "units": t["units"], "qty": t["qty"]})
@@ -900,7 +911,7 @@ def transfer_item_for_manufacture(work_order, row_name, batches):
 		"stock_entry": se_name,
 		"transferred_qty": flt(new_transferred, 3),
 		"remaining_qty": flt(new_remaining, 3),
-		"is_full": new_remaining <= 0.0001,
+		"is_full": _is_fully_transferred(new_remaining),
 		"transfers": _item_transfers(wo.name, item_code),
 		"addition_log": log,
 		"duration_mins": flt(frappe.db.get_value("Work Order Item", row.name, "custom_addition_duration_mins"), 3),
@@ -1384,7 +1395,7 @@ def get_wo_time_log(work_order):
 		if req > 0:
 			any_required = True
 			transferred = flt(row.transferred_qty) - _rework_transferred_qty(wo.name, row.item_code)
-			if transferred + 1e-6 < req:
+			if not _is_fully_transferred(req - transferred):
 				batch_complete = False
 		log = row.get("custom_addition_log") or ""
 		if not (log or _item_transfers(wo.name, row.item_code)):
