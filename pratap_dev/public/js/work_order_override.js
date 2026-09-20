@@ -60,9 +60,11 @@ frappe.ui.form.on("Work Order", {
     },
 });
 
-// WIP warehouse follows the production item's "Processing Location"
-// (Item.custom_job_work_warehouse). Fetched from the item master so it's never picked by
-// hand. The server (before_validate) enforces the same, covering programmatic creation.
+// Warehouses that follow the production item master, fetched so they're never picked by
+// hand:
+//   * wip_warehouse                <- Item "Processing Location" (custom_job_work_warehouse)
+//   * custom_custom_source_warehouse <- Item "Raw Material Location" (custom_raw_material_location)
+// The server (before_validate) enforces the same, covering programmatic creation.
 function set_wip_from_item(frm, delay) {
     if (!frm.doc.production_item) {
         return;
@@ -72,13 +74,21 @@ function set_wip_from_item(frm, delay) {
             return;
         }
         frappe.db
-            .get_value("Item", frm.doc.production_item, "custom_job_work_warehouse")
+            .get_value("Item", frm.doc.production_item, [
+                "custom_job_work_warehouse",
+                "custom_raw_material_location",
+            ])
             .then((r) => {
-                const loc = r && r.message && r.message.custom_job_work_warehouse;
-                // Snap wip_warehouse to the item's Processing Location whenever it defines
-                // one and the current value differs (skip-if-equal avoids a dirty loop).
-                if (loc && frm.doc.wip_warehouse !== loc) {
-                    frm.set_value("wip_warehouse", loc);
+                const m = (r && r.message) || {};
+                const wip = m.custom_job_work_warehouse;
+                const src = m.custom_raw_material_location;
+                // Snap each field to the item's value whenever it defines one and the
+                // current value differs (skip-if-equal avoids a dirty loop).
+                if (wip && frm.doc.wip_warehouse !== wip) {
+                    frm.set_value("wip_warehouse", wip);
+                }
+                if (src && frm.doc.custom_custom_source_warehouse !== src) {
+                    frm.set_value("custom_custom_source_warehouse", src);
                 }
             });
     };
