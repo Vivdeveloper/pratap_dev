@@ -25,12 +25,22 @@ frappe.ui.form.on("Work Order", {
         // (i.e. nothing left to procure — all materials available at the source warehouse).
         gate_start_button_on_stock(frm);
         populate_wo_instructions(frm);
+        // WIP warehouse follows the item's Processing Location. The production_item
+        // change handler covers manual entry, but a Work Order created programmatically
+        // (e.g. from the Forecast Club / Sales Forecast flow) sets production_item
+        // without firing that event, so re-assert it live here too (after any load-time
+        // BOM cascade settles).
+        if (frm.doc.docstatus === 0 && frm.doc.production_item) {
+            set_wip_from_item(frm, 600);
+        }
         },
 
     // WIP warehouse follows the production item's "Processing Location"
     // (Item.custom_job_work_warehouse) — fetch it as soon as the item is picked.
+    // Small delay so it lands AFTER ERPNext's get_item_details / bom_no cascade, which
+    // otherwise re-syncs the doc and wipes the value.
     production_item(frm) {
-        set_wip_from_item(frm);
+        set_wip_from_item(frm, 300);
     },
 
     // When the item / BOM / qty changes, ERPNext re-fetches Required Items from the BOM
@@ -41,6 +51,9 @@ frappe.ui.form.on("Work Order", {
     },
     bom_no(frm) {
         populate_wo_instructions(frm, 1000);
+        // The BOM cascade re-syncs the doc and can drop wip_warehouse; re-assert it
+        // once that settles.
+        set_wip_from_item(frm, 800);
     },
     qty(frm) {
         populate_wo_instructions(frm, 1000);
@@ -50,18 +63,30 @@ frappe.ui.form.on("Work Order", {
 // WIP warehouse follows the production item's "Processing Location"
 // (Item.custom_job_work_warehouse). Fetched from the item master so it's never picked by
 // hand. The server (before_validate) enforces the same, covering programmatic creation.
-function set_wip_from_item(frm) {
+function set_wip_from_item(frm, delay) {
     if (!frm.doc.production_item) {
         return;
     }
-    frappe.db
-        .get_value("Item", frm.doc.production_item, "custom_job_work_warehouse")
-        .then((r) => {
-            const loc = r && r.message && r.message.custom_job_work_warehouse;
-            if (loc) {
-                frm.set_value("wip_warehouse", loc);
-            }
-        });
+    const run = () => {
+        if (!frm.doc.production_item) {
+            return;
+        }
+        frappe.db
+            .get_value("Item", frm.doc.production_item, "custom_job_work_warehouse")
+            .then((r) => {
+                const loc = r && r.message && r.message.custom_job_work_warehouse;
+                // Snap wip_warehouse to the item's Processing Location whenever it defines
+                // one and the current value differs (skip-if-equal avoids a dirty loop).
+                if (loc && frm.doc.wip_warehouse !== loc) {
+                    frm.set_value("wip_warehouse", loc);
+                }
+            });
+    };
+    if (delay) {
+        setTimeout(run, delay);
+    } else {
+        run();
+    }
 }
 
 // Copy the Operation Instruction columns from the BOM onto the Required Items rows.
