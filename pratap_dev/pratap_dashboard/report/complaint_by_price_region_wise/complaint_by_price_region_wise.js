@@ -1,0 +1,164 @@
+// Copyright (c) 2026, saurabh@exacuer.com and contributors
+// For license information, please see license.txt
+
+frappe.query_reports["Complaint by Price Region wise"] = {
+	filters: [
+		{
+			fieldname: "from_date",
+			label: __("From Date"),
+			fieldtype: "Date",
+			default: erpnext.utils.get_fiscal_year(frappe.datetime.get_today(), true)[1],
+			reqd: 1,
+		},
+		{
+			fieldname: "to_date",
+			label: __("To Date"),
+			fieldtype: "Date",
+			default: erpnext.utils.get_fiscal_year(frappe.datetime.get_today(), true)[2],
+			reqd: 1,
+		},
+		{
+			fieldname: "date_based_on",
+			label: __("Date Based On"),
+			fieldtype: "Select",
+			options: ["Created Date", "Closure Date", "Document Creation"],
+			default: "Created Date",
+			reqd: 1,
+		},
+		{
+			fieldname: "limit",
+			label: __("Top"),
+			fieldtype: "Int",
+			default: 10,
+			reqd: 1,
+		},
+		{
+			fieldname: "item_code",
+			label: __("Item Code"),
+			fieldtype: "Link",
+			options: "Item",
+		},
+		{
+			fieldname: "packing_material",
+			label: __("Packing Material"),
+			fieldtype: "Link",
+			options: "Item",
+		},
+		{
+			fieldname: "custom_year",
+			label: __("Year"),
+			fieldtype: "Data",
+		},
+		{
+			fieldname: "custom_erp",
+			label: __("ERP"),
+			fieldtype: "Link",
+			options: "EPR",
+		},
+		{
+			fieldname: "custom_category_type",
+			label: __("Category Type"),
+			fieldtype: "Link",
+			options: "Category Type",
+		},
+		{
+			fieldname: "custom_material_base",
+			label: __("Material Base"),
+			fieldtype: "Link",
+			options: "Material Base",
+		},
+		{
+			fieldname: "custom_product_type",
+			label: __("Product Type"),
+			fieldtype: "Link",
+			options: "Product Type",
+		},
+		{
+			fieldname: "custom_product_category",
+			label: __("Product Category"),
+			fieldtype: "Link",
+			options: "Product Category",
+		},
+		{
+			fieldname: "item_group",
+			label: __("Item Group"),
+			fieldtype: "Link",
+			options: "Item Group",
+		},
+		{
+			fieldname: "brand",
+			label: __("Brand"),
+			fieldtype: "Link",
+			options: "Brand",
+		},
+		{
+			fieldname: "status",
+			label: __("Status"),
+			fieldtype: "Select",
+			options: ["", "Opened", "Closed"],
+		},
+		{
+			fieldname: "closed_type",
+			label: __("Closed Type"),
+			fieldtype: "Select",
+			options: ["", "Resolved", "Unresolved"],
+		},
+		{
+			fieldname: "workflow_state",
+			label: __("Workflow State"),
+			fieldtype: "Link",
+			options: "Workflow State",
+		},
+		{
+			fieldname: "customer",
+			label: __("Customer"),
+			fieldtype: "Link",
+			options: "Customer",
+		},
+		{
+			fieldname: "customer_group",
+			label: __("Customer Group"),
+			fieldtype: "Link",
+			options: "Customer Group",
+		},
+		{
+			fieldname: "enquiry_opportunity",
+			label: __("Opportunity"),
+			fieldtype: "Link",
+			options: "Opportunity",
+		},
+		{
+			fieldname: "product_trial",
+			label: __("Product Trial"),
+			fieldtype: "Link",
+			options: "Product Trial",
+		},
+		{
+			fieldname: "risk_level",
+			label: __("Risk Level"),
+			fieldtype: "Link",
+			options: "Risk Level",
+		},
+		{
+			fieldname: "region",
+			label: __("Region"),
+			fieldtype: "Data",
+		},
+		{
+			fieldname: "territory",
+			label: __("Territory"),
+			fieldtype: "Data",
+		},
+		{
+			fieldname: "city",
+			label: __("City"),
+			fieldtype: "Data",
+		},
+		{
+			fieldname: "created_by",
+			label: __("Creator"),
+			fieldtype: "Link",
+			options: "User",
+		},
+	],
+};

@@ -1,0 +1,49 @@
+{
+ "add_total_row": 0,
+ "add_translate_data": 0,
+ "columns": [],
+ "creation": "2026-09-17 14:55:27.784442",
+ "disable_prepared_report_automation": 0,
+ "disabled": 0,
+ "docstatus": 0,
+ "doctype": "Report",
+ "doctype_to_sync": [],
+ "filters": [],
+ "idx": 0,
+ "is_standard": "Yes",
+ "letter_head": null,
+ "modified": "2026-09-17 14:55:27.784442",
+ "modified_by": "Administrator",
+ "module": "Pratap Dashboard",
+ "name": "Complaint by Amount Risk Level Wise",
+ "owner": "Administrator",
+ "prepared_report": 0,
+ "ref_doctype": "Complaint",
+ "report_name": "Complaint by Amount Risk Level Wise",
+ "report_type": "Script Report",
+ "roles": [
+  {
+   "role": "System Manager"
+  },
+  {
+   "role": "Sales User"
+  },
+  {
+   "role": "Sales Person User"
+  },
+  {
+   "role": "Sales Manager"
+  },
+  {
+   "role": "TSA ADMIN"
+  },
+  {
+   "role": "COMPLAINT ADMIN"
+  },
+  {
+   "role": "CRM Read"
+  }
+ ],
+ "snapshot_report": 0,
+ "timeout": 0
+}
