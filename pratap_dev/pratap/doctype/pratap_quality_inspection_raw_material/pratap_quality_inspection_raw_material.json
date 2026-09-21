@@ -15,6 +15,7 @@
   "source_warehouse",
   "actual_qty",
   "custom_batch",
+  "custom_batch_location",
   "custom_batch_qty",
   "custom_plant_1_wip_rm",
   "custom_plant_2_wip_rm",
@@ -59,12 +60,14 @@
    "label": "Total Req Qty"
   },
   {
+   "description": "Auto-filled from the Work Order's Custom Source Warehouse.",
    "fieldname": "source_warehouse",
    "fieldtype": "Link",
    "in_list_view": 1,
    "label": "Source Warehouse",
    "link_filters": "[[\"Warehouse\",\"parent_warehouse\",\"is\",\"set\"]]",
-   "options": "Warehouse"
+   "options": "Warehouse",
+   "read_only": 1
   },
   {
    "fieldname": "actual_qty",
@@ -85,11 +88,19 @@
    "options": "Batch"
   },
   {
+   "description": "Warehouse where the selected batch is currently stored (pick from where the batch has stock).",
+   "fieldname": "custom_batch_location",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Batch Location",
+   "options": "Warehouse"
+  },
+  {
+   "description": "Quantity taken from the selected batch. Per item, the sum across rows must equal Total Req Qty.",
    "fieldname": "custom_batch_qty",
    "fieldtype": "Float",
    "in_list_view": 1,
-   "label": "Batch Qty",
-   "read_only": 1
+   "label": "Batch Qty"
   },
   {
    "fieldname": "custom_plant_1_wip_rm",

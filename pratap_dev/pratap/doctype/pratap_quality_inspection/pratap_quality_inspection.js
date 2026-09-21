@@ -5,6 +5,15 @@ frappe.ui.form.on("Pratap Quality Inspection", {
 	setup(frm) {
 		set_reference_doctype(frm);
 		set_reference_name_query(frm);
+		// Batch Location dropdown: only warehouses where the row's selected batch has stock.
+		frm.set_query("custom_batch_location", "raw_materials", function (doc, cdt, cdn) {
+			const row = locals[cdt][cdn];
+			const whs = (row && row.__batch_warehouses) || [];
+			if (whs.length) {
+				return { filters: [["Warehouse", "name", "in", whs]] };
+			}
+			return {};
+		});
 	},
 
 	// Compute Total Batch Qty as early as the doc loads (before render), so the sum always shows.
@@ -30,6 +39,11 @@ frappe.ui.form.on("Pratap Quality Inspection", {
 		// FIRST — always show the correct Total Batch Qty (Batch + rework) and drive the calcs
 		// off it, before anything else in refresh can short-circuit.
 		compute_total_batch_qty(frm);
+		// Keep each raw-material row's read-only Source Warehouse in step with the WO's
+		// Custom Source Warehouse (covers programmatically-created / older QCs on load).
+		if (frm.doc.docstatus === 0) {
+			apply_wo_source_warehouse(frm);
+		}
 		set_reference_doctype(frm);
 		set_reference_name_query(frm);
 		set_cancel_all_ignore_doctypes(frm);
@@ -74,6 +88,8 @@ frappe.ui.form.on("Pratap Quality Inspection", {
 	reference_name(frm) {
 		fetch_reference_item_details(frm);
 		compute_total_batch_qty(frm);
+		// Source Warehouse on every raw-material row follows the WO Custom Source Warehouse.
+		apply_wo_source_warehouse(frm);
 	},
 
 	reference_qty(frm) {
@@ -174,18 +190,121 @@ frappe.ui.form.on("Pratap Quality Inspection", {
 
 frappe.ui.form.on("Pratap Quality Inspection Raw Material", {
 	mat_req_in_pecentage(frm) {
+		if (_rtm_rm_lock) return;
 		set_raw_material_required_qty(frm);
 		validate_total_raw_material_percentage(frm);
 	},
 
+	// Two-way: editing Total Req Qty back-computes Mat Req % (qty / basis * 100).
+	total_req_qty(frm, cdt, cdn) {
+		if (_rtm_rm_lock) return;
+		set_row_pct_from_req_qty(frm, cdt, cdn);
+	},
+
 	item_code(frm, cdt, cdn) {
 		set_row_actual_qty(cdt, cdn);
+		set_row_source_from_wo(frm, cdt, cdn);
 	},
 
 	source_warehouse(frm, cdt, cdn) {
 		set_row_actual_qty(cdt, cdn);
 	},
+
+	raw_materials_add(frm, cdt, cdn) {
+		// New row inherits the WO source warehouse (read-only field).
+		set_row_source_from_wo(frm, cdt, cdn);
+	},
+
+	// Batch chosen -> restrict Batch Location to warehouses holding this batch and
+	// auto-fill Batch Location + Batch Qty from where the batch has stock.
+	custom_batch(frm, cdt, cdn) {
+		fill_batch_location_and_qty(frm, cdt, cdn);
+	},
+
+	// Batch Location chosen -> set Batch Qty to that location's available qty for the batch.
+	custom_batch_location(frm, cdt, cdn) {
+		set_batch_qty_for_location(frm, cdt, cdn);
+	},
 });
+
+// Guard against the Mat Req % <-> Total Req Qty two-way handlers triggering each other.
+let _rtm_rm_lock = false;
+
+// Total Req Qty -> Mat Req %  (reverse of set_raw_material_required_qty).
+function set_row_pct_from_req_qty(frm, cdt, cdn) {
+	const row = locals[cdt][cdn];
+	if (!row) return;
+	const basis = calc_basis_qty(frm);
+	if (basis <= 0) return;
+	const pct = (flt(row.total_req_qty) / basis) * 100;
+	_rtm_rm_lock = true;
+	frappe.model.set_value(cdt, cdn, "mat_req_in_pecentage", flt(pct, 2)).always(() => {
+		_rtm_rm_lock = false;
+		validate_total_raw_material_percentage(frm);
+	});
+}
+
+// Fill every raw-material row's (read-only) Source Warehouse from the linked Work
+// Order's Custom Source Warehouse.
+function apply_wo_source_warehouse(frm) {
+	const wo = frm.doc.work_order || (frm.doc.reference_type === "Work Order" ? frm.doc.reference_name : null);
+	if (!wo) return;
+	frappe.db.get_value("Work Order", wo, "custom_custom_source_warehouse").then((r) => {
+		const src = r && r.message && r.message.custom_custom_source_warehouse;
+		if (!src) return;
+		(frm.doc.raw_materials || []).forEach((row) => {
+			if (row.source_warehouse !== src) {
+				frappe.model.set_value(row.doctype, row.name, "source_warehouse", src);
+			}
+		});
+	});
+}
+
+function set_row_source_from_wo(frm, cdt, cdn) {
+	const row = locals[cdt][cdn];
+	if (!row) return;
+	const wo = frm.doc.work_order || (frm.doc.reference_type === "Work Order" ? frm.doc.reference_name : null);
+	if (!wo) return;
+	frappe.db.get_value("Work Order", wo, "custom_custom_source_warehouse").then((r) => {
+		const src = r && r.message && r.message.custom_custom_source_warehouse;
+		if (src && row.source_warehouse !== src) {
+			frappe.model.set_value(cdt, cdn, "source_warehouse", src);
+		}
+	});
+}
+
+function fill_batch_location_and_qty(frm, cdt, cdn) {
+	const row = locals[cdt][cdn];
+	if (!row || !row.custom_batch) {
+		return;
+	}
+	frappe.xcall("pratap_dev.pratap_qc_material.get_batch_warehouses", { batch_no: row.custom_batch })
+		.then((warehouses) => {
+			row.__batch_warehouses = (warehouses || []).map((w) => w.warehouse);
+			if (!warehouses || !warehouses.length) {
+				return;
+			}
+			// Default to the warehouse with the most stock; user can change it.
+			const top = warehouses[0];
+			frappe.model.set_value(cdt, cdn, "custom_batch_location", top.warehouse).then(() => {
+				frappe.model.set_value(cdt, cdn, "custom_batch_qty", flt(top.qty));
+			});
+		});
+}
+
+function set_batch_qty_for_location(frm, cdt, cdn) {
+	const row = locals[cdt][cdn];
+	if (!row || !row.custom_batch || !row.custom_batch_location) {
+		return;
+	}
+	frappe.xcall("pratap_dev.pratap_qc_material.get_batch_warehouses", { batch_no: row.custom_batch })
+		.then((warehouses) => {
+			const hit = (warehouses || []).find((w) => w.warehouse === row.custom_batch_location);
+			if (hit) {
+				frappe.model.set_value(cdt, cdn, "custom_batch_qty", flt(hit.qty));
+			}
+		});
+}
 
 frappe.ui.form.on("Pratap Quality Inspection Reading", {
 	observe_value(frm, cdt, cdn) {
@@ -379,6 +498,8 @@ function set_density_qty(frm) {
 
 function set_raw_material_required_qty(frm) {
 	const reference_qty = calc_basis_qty(frm);
+	// Lock so the total_req_qty writes here don't fire the reverse (qty -> %) handler.
+	_rtm_rm_lock = true;
 	(frm.doc.raw_materials || []).forEach((row) => {
 		const percentage = flt(row.mat_req_in_pecentage);
 		const total_req_qty = reference_qty * (percentage / 100);
@@ -387,6 +508,8 @@ function set_raw_material_required_qty(frm) {
 		frappe.model.set_value(row.doctype, row.name, "total_req_qty", total_req_qty, null, true);
 	});
 	frm.refresh_field("raw_materials");
+	// Release after the current microtask so any triggered handlers see the lock.
+	setTimeout(() => { _rtm_rm_lock = false; }, 0);
 }
 
 function validate_total_raw_material_percentage(frm) {

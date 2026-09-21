@@ -353,7 +353,15 @@ doc_events = {
         "on_cancel": "pratap_dev.batch_package_hooks.stock_entry_on_cancel",
     },
     "Pratap Quality Inspection": {
+        "validate": [
+            # Stamp Source Warehouse from the WO Custom Source Warehouse (read-only field)
+            # and enforce per-item SUM(Batch Qty) == SUM(Total Req Qty) before save/submit.
+            "pratap_dev.pratap_qc_material.set_source_warehouse_from_wo",
+            "pratap_dev.pratap_qc_material.validate_batch_qty_matches_total",
+        ],
         "on_update": "pratap_dev.purchase_receipt.link_pratap_qc_to_grn_item",
+        # If a batch is stored away from the Source Warehouse, raise a Material Transfer MR.
+        "on_submit": "pratap_dev.pratap_qc_material.create_transfer_mr_on_submit",
     },
     "Batch": {
         "validate": "pratap_dev.batch_hooks.set_batch_no_of_unit",
