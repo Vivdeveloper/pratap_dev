@@ -8,8 +8,38 @@ let _rtm_pkg_lock = false;
 frappe.ui.form.on("Batch", {
 	refresh(frm) {
 		render_available_units_after(frm);
+		hide_rejected_ledger_rows(frm);
 	},
 });
+
+// Display-only: hide rejected-warehouse rows (e.g. "RM Rejected Warehouse ...") from the
+// Package Ledger grid. The rows stay in the data and the sub-ledger logic is unchanged —
+// they're just not shown here. Re-applied whenever the grid re-renders.
+function hide_rejected_ledger_rows(frm) {
+	const field = frm.fields_dict.custom_package_ledger;
+	if (!field || !field.grid) {
+		return;
+	}
+	const grid = field.grid;
+	const apply = () => {
+		(grid.grid_rows || []).forEach((gr) => {
+			if (!gr || !gr.row) {
+				return;
+			}
+			const wh = gr.doc && gr.doc.warehouse;
+			$(gr.row).toggle(!(wh && /rejected/i.test(wh)));
+		});
+	};
+	apply();
+	if (grid.refresh && !grid._rtm_reject_wrapped) {
+		const _refresh = grid.refresh.bind(grid);
+		grid.refresh = function () {
+			_refresh();
+			setTimeout(apply, 0);
+		};
+		grid._rtm_reject_wrapped = true;
+	}
+}
 
 frappe.ui.form.on("Batch Package Ledger", {
 	no_of_unit(frm, cdt, cdn) {
