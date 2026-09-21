@@ -39,6 +39,8 @@ frappe.ui.form.on("Pratap Quality Inspection", {
 		// FIRST — always show the correct Total Batch Qty (Batch + rework) and drive the calcs
 		// off it, before anything else in refresh can short-circuit.
 		compute_total_batch_qty(frm);
+		// GRN inspections have no Work-Order rework, so hide Rework Quantity + Total Batch Qty.
+		toggle_grn_fields(frm);
 		// Keep each raw-material row's read-only Source Warehouse in step with the WO's
 		// Custom Source Warehouse (covers programmatically-created / older QCs on load).
 		if (frm.doc.docstatus === 0) {
@@ -79,6 +81,7 @@ frappe.ui.form.on("Pratap Quality Inspection", {
 		handle_status_values(frm);
 		apply_reading_table_mode(frm);
 		toggle_supplier_coa(frm);
+		toggle_grn_fields(frm);
 		if (frm.doc.reference_type !== "GRN") {
 			frm.set_value("batch_qc_json", "");
 			clear_grn_batch_html(frm);
@@ -432,6 +435,14 @@ function update_document_status_from_readings(frm) {
 // Qty basis for the on-form calcs: Total Batch Qty (Batch + rework) when available, else Batch Qty.
 function calc_basis_qty(frm) {
 	return flt(frm.doc.custom_total_batch_qty) || flt(frm.doc.reference_qty);
+}
+
+// GRN inspections have no Work-Order rework, so Rework Quantity and Total Batch Qty are
+// meaningless there — hide them when Reference Type is GRN, show otherwise.
+function toggle_grn_fields(frm) {
+	const is_grn = frm.doc.reference_type === "GRN";
+	frm.toggle_display("custom_rework_transferred_qty", !is_grn);
+	frm.toggle_display("custom_total_batch_qty", !is_grn);
 }
 
 // Load Rework Material Transferred Qty + Total Batch Qty for the linked Work Order, then

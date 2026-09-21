@@ -253,11 +253,11 @@ fixtures = [
 		"dt": "Custom Field",
 		"filters": [["module", "=", "pratap"]],
 	},
-	# Ship the BOM English->Marathi translation Client Script with the app so the
-	# fix deploys everywhere (Client Scripts are otherwise per-site DB records).
+	# Ship these Client Scripts with the app so their fixes deploy everywhere
+	# (Client Scripts are otherwise per-site DB records that git/migrate won't carry).
 	{
 		"dt": "Client Script",
-		"filters": [["name", "=", "English to Marathi in BOM"]],
+		"filters": [["name", "in", ["English to Marathi in BOM", "Work Order Button"]]],
 	},
 ]
 
