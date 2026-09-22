@@ -841,20 +841,25 @@ def transfer_item_for_manufacture(work_order, row_name, batches):
 	item_code = row.item_code
 	src = row.source_warehouse or wo.source_warehouse
 
-	# Normalize batch lines: qty = std pkg x no of units (actual taken).
+	# Normalize batch lines. When Std Pkg Qty is defined, qty = std pkg x no of units;
+	# when NO standard packaging is defined for the batch, don't block — fall back to the
+	# entered Qty (or Units) so the transfer still passes.
 	lines = []
 	total_qty = 0.0
 	for b in batches:
 		std_pkg = flt(b.get("std_pkg"))
 		units = flt(b.get("units"))
-		qty = flt(std_pkg * units, 3)
+		if std_pkg > 0:
+			qty = flt(std_pkg * units, 3)
+		else:
+			qty = flt(b.get("qty")) or flt(units, 3)
 		batch_no = (b.get("batch_no") or "").strip()
 		if not batch_no or qty <= 0:
 			continue
 		lines.append({"batch_no": batch_no, "std_pkg": std_pkg, "units": units, "qty": qty})
 		total_qty += qty
 	if not lines or total_qty <= 0:
-		frappe.throw(_("Enter Std Pkg Qty and No of Units for the chosen batch(es)."))
+		frappe.throw(_("Enter a quantity for the chosen batch(es)."))
 
 	# Guard: don't transfer more than remaining for this item. Compare at 3 decimals so
 	# entering the on-screen remaining (shown rounded to 3 dp) isn't rejected by
@@ -1087,12 +1092,26 @@ def _qc_transfer_items(wo, qc):
 		log = d.get("addition_log") or ""
 		batches = _available_batches(rm.item_code, src) if has_batch else []
 
+		# The QC's own batch may sit in the Batch Location (e.g. Plant 1 WIP FG) rather than
+		# the Source Warehouse, so _available_batches(src) wouldn't list it. Add it to the
+		# dropdown from its Batch Location + Batch Qty so it's always selectable.
+		qc_batch = rm.get("custom_batch")
+		if qc_batch and not any(b.get("batch_no") == qc_batch for b in batches):
+			avail = flt(rm.get("custom_batch_qty"))
+			std = flt(frappe.db.get_value("Batch", qc_batch, "custom_standard_pkg_qty")) or 1
+			batches.insert(0, {
+				"batch_no": qc_batch,
+				"std_pkg": std,
+				"no_of_unit": flt(avail / std, 3) if std else 0,
+				"available_qty": avail,
+			})
+
 		# Prefill the transfer row from the batch + qty the QC captured in its Raw Materials
-		# (custom_batch + transfer/req qty), so the operator can just click Material Transfer.
+		# (custom_batch + Batch Qty), so the operator can just click Material Transfer.
 		# Only offered before the item has actually been transferred.
 		prefill = None
-		batch_no = rm.get("custom_batch")
-		qty = flt(rm.get("custom_transfer_qty")) or flt(rm.get("total_req_qty"))
+		batch_no = qc_batch
+		qty = flt(rm.get("custom_batch_qty")) or flt(rm.get("custom_transfer_qty")) or flt(rm.get("total_req_qty"))
 		if batch_no and qty > 0 and not _rework_item_transfers(wo.name, qc.name, rm.item_code):
 			std_pkg = flt(frappe.db.get_value("Batch", batch_no, "custom_standard_pkg_qty"))
 			if not std_pkg:
@@ -1250,14 +1269,19 @@ def rework_transfer_item(work_order, qc, item_code, batches):
 	for b in batches:
 		std_pkg = flt(b.get("std_pkg"))
 		units = flt(b.get("units"))
-		qty = flt(std_pkg * units, 3)
+		# Std packaging defined -> qty = std x units; not defined -> use entered Qty/Units
+		# so a batch without standard packaging is not blocked.
+		if std_pkg > 0:
+			qty = flt(std_pkg * units, 3)
+		else:
+			qty = flt(b.get("qty")) or flt(units, 3)
 		batch_no = (b.get("batch_no") or "").strip()
 		if not batch_no or qty <= 0:
 			continue
 		lines.append({"batch_no": batch_no, "std_pkg": std_pkg, "units": units, "qty": qty})
 		total += qty
 	if not lines or total <= 0:
-		frappe.throw(_("Enter Std Pkg Qty and No of Units for the chosen batch(es)."))
+		frappe.throw(_("Enter a quantity for the chosen batch(es)."))
 
 	# Auto-provision an item-level shortfall: if the source warehouse holds less of the item
 	# than this transfer needs, create a Rework Material Transfer MR + move the missing qty

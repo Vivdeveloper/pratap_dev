@@ -259,6 +259,11 @@ fixtures = [
 		"dt": "Client Script",
 		"filters": [["name", "in", ["English to Marathi in BOM", "Work Order Button"]]],
 	},
+	# Ship the rework transfer Stock Entry Type (master used by the QC -> rework draft SE).
+	{
+		"dt": "Stock Entry Type",
+		"filters": [["name", "=", "Rework Material Transfer"]],
+	},
 ]
 
 before_migrate = ["pratap_dev.fixture_export.setup_fixture_import"]

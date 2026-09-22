@@ -1,0 +1,11 @@
+[
+ {
+  "add_to_transit": 0,
+  "docstatus": 0,
+  "doctype": "Stock Entry Type",
+  "is_standard": 0,
+  "modified": "2026-09-22 10:05:05.242874",
+  "name": "Rework Material Transfer",
+  "purpose": "Material Transfer"
+ }
+]

@@ -255,16 +255,19 @@ function time_controls_html(it, inline) {
 		<span class="text-muted small" style="margin-left:6px;">${__("Total time")}: <b class="wo-tr-total">${fmt_dur(
 			it.duration_mins || 0
 		)}</b></span>`;
+	// Consistent layout everywhere: Start on the LEFT, Stop in the CENTER, Finish + total
+	// time on the RIGHT.
+	const start_btn = `<button class="btn btn-xs btn-success wo-tr-start">▶ ${__("Start")}</button>`;
+	const stop_btn = `<button class="btn btn-xs btn-danger wo-tr-stop" style="margin-left:auto;margin-right:auto;">■ ${__("Stop")}</button>`;
 	if (inline) {
 		// Right end of the batch button row (not-full item): keep the compact group.
 		return `<div class="wo-tr-timer" style="display:flex;gap:8px;align-items:center;">${startStop}${finishTime}</div>`;
 	}
-	// Standalone (fully transferred item): Start/Stop on the LEFT, Finish + total time
-	// pushed to the RIGHT end.
 	return `
 	<div class="wo-tr-timer" style="display:flex;gap:8px;align-items:center;margin-top:10px;">
-		${startStop}
-		<div style="margin-left:auto;display:flex;gap:8px;align-items:center;">${finishTime}</div>
+		${start_btn}
+		${stop_btn}
+		<div style="display:flex;gap:8px;align-items:center;">${finishTime}</div>
 	</div>`;
 }
 
@@ -719,13 +722,15 @@ function rework_item_html(qc, it) {
 		</div>
 		<div class="wo-rw-taken">${transfers_table_html(it.transfers)}</div>
 		${inputArea}
-		<div class="wo-rw-timer-row" style="display:flex;gap:8px;align-items:center;justify-content:flex-end;margin-top:8px;">
+		<div class="wo-rw-timer-row" style="display:flex;gap:8px;align-items:center;margin-top:8px;">
 			<button class="btn btn-xs btn-success wo-rw-start">▶ ${__("Start")}</button>
-			<button class="btn btn-xs btn-danger wo-rw-stop">■ ${__("Stop")}</button>
-			<button class="btn btn-xs btn-primary wo-rw-finish">✓ ${__("Finish")}</button>
-			<span class="text-muted small">${__("Total time")}: <b class="wo-rw-total">${fmt_dur(
-				it.duration_mins || 0
-			)}</b></span>
+			<button class="btn btn-xs btn-danger wo-rw-stop" style="margin-left:auto;margin-right:auto;">■ ${__("Stop")}</button>
+			<div style="display:flex;gap:8px;align-items:center;">
+				<button class="btn btn-xs btn-primary wo-rw-finish">✓ ${__("Finish")}</button>
+				<span class="text-muted small">${__("Total time")}: <b class="wo-rw-total">${fmt_dur(
+					it.duration_mins || 0
+				)}</b></span>
+			</div>
 		</div>
 		<div class="wo-rw-log text-muted small" style="margin-top:8px;white-space:pre-line;">${
 			it.addition_log ? "<b>" + __("Log") + ":</b>\n" + frappe.utils.escape_html(it.addition_log) : ""
@@ -860,8 +865,12 @@ function rework_collect($item) {
 		const batch_no = $(this).find(".wo-rwb-batch").val();
 		const std_pkg = flt($(this).find(".wo-rwb-pkg").val());
 		const units = flt($(this).find(".wo-rwb-units").val());
-		if (batch_no || std_pkg || units) {
-			rows.push({ batch_no, std_pkg, units, qty: flt(std_pkg * units, 3) });
+		const qty_input = flt($(this).find(".wo-rwb-qty").val());
+		// When Std Pkg Qty is defined, qty = std x units; when it is NOT defined, fall back
+		// to the entered Qty (or Units) so a batch with no standard packaging still transfers.
+		const qty = std_pkg > 0 ? flt(std_pkg * units, 3) : flt(qty_input || units, 3);
+		if (batch_no || std_pkg || units || qty_input) {
+			rows.push({ batch_no, std_pkg, units, qty });
 		}
 	});
 	return rows;

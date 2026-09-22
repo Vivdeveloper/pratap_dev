@@ -70,7 +70,7 @@ def _wo_source_warehouse(doc):
 	return frappe.db.get_value("Work Order", wo, "custom_custom_source_warehouse")
 
 
-def set_source_warehouse_from_wo(doc):
+def set_source_warehouse_from_wo(doc, method=None):
 	"""Stamp every raw-material row's Source Warehouse from the WO Custom Source
 	Warehouse (read-only field; the client sets it live, this guarantees it on save)."""
 	src = _wo_source_warehouse(doc)
@@ -99,34 +99,44 @@ def validate_batch_qty_matches_total(doc, method=None):
 			agg["has_batch"] = True
 			agg["batch"] += flt(row.custom_batch_qty)
 
-	mismatches = []
+	# Only block when the batch quantity is LESS than required (short). Equal or more is fine.
+	shortfalls = []
 	for item_code, agg in by_item.items():
 		if not agg["has_batch"]:
 			continue
-		if abs(agg["batch"] - agg["total"]) > _QTY_TOLERANCE:
-			mismatches.append((item_code, agg["batch"], agg["total"]))
+		if agg["batch"] < agg["total"] - _QTY_TOLERANCE:
+			shortfalls.append((item_code, agg["batch"], agg["total"]))
 
-	if mismatches:
+	if shortfalls:
 		msg = "<br>".join(
-			_("{0}: Batch Qty {1} does not match Total Req Qty {2}").format(
+			_("{0}: Batch Qty {1} is less than Total Req Qty {2}").format(
 				frappe.bold(ic), flt(b), flt(t)
 			)
-			for ic, b, t in mismatches
+			for ic, b, t in shortfalls
 		)
 		frappe.throw(
-			_("Batch Qty must match Total Req Qty before saving:<br>{0}").format(msg),
-			title=_("Batch Qty Mismatch"),
+			_("Batch Qty cannot be less than Total Req Qty:<br>{0}").format(msg),
+			title=_("Insufficient Batch Qty"),
 		)
 
 
 # ---------------------------------------------------------------------------
 # On submit: create Material Transfer MR for rows where Batch Location != Source WH
 # ---------------------------------------------------------------------------
+REWORK_STOCK_ENTRY_TYPE = "Rework Material Transfer"
+
+
 def create_transfer_mr_on_submit(doc, method=None):
-	"""When a batch is stored somewhere other than the Source Warehouse, raise a
-	Material Request (purpose Material Transfer) to move it Batch Location -> Source
-	Warehouse. One MR for the whole QC; each mismatched row is one MR item."""
-	items = []
+	"""When a batch is stored somewhere other than the Source Warehouse, create BOTH:
+	  1. A Material Request (type "Material Transfer") that is SUBMITTED (the record), and
+	  2. A DRAFT Stock Entry (type "Rework Material Transfer") to move the batch
+	     Batch Location -> Source Warehouse, left as a Draft for manual approval/submit.
+	One MR + one Stock Entry for the whole QC; each row where Batch Location differs from
+	Source Warehouse is one line."""
+	items = []   # MR items
+	moves = []   # Stock Entry batch moves
+	from_whs = set()
+	to_whs = set()
 	for row in doc.get("raw_materials") or []:
 		batch_loc = row.get("custom_batch_location")
 		source = row.get("source_warehouse")
@@ -135,6 +145,8 @@ def create_transfer_mr_on_submit(doc, method=None):
 			continue
 		if batch_loc == source:
 			continue
+		from_whs.add(batch_loc)
+		to_whs.add(source)
 		items.append(
 			{
 				"item_code": row.item_code,
@@ -145,25 +157,87 @@ def create_transfer_mr_on_submit(doc, method=None):
 				"schedule_date": frappe.utils.today(),
 			}
 		)
+		moves.append(
+			{
+				"item_code": row.item_code,
+				"qty": qty,
+				"uom": row.uom,
+				"s_warehouse": batch_loc,
+				"t_warehouse": source,
+				"batch_no": row.get("custom_batch"),
+			}
+		)
 
 	if not items:
 		return
 
+	# 1) Material Request (type "Material Transfer"), SUBMITTED — the record.
 	mr = frappe.new_doc("Material Request")
 	mr.material_request_type = "Material Transfer"
 	mr.transaction_date = frappe.utils.today()
 	mr.schedule_date = frappe.utils.today()
 	if doc.get("company"):
 		mr.company = doc.company
-	mr.custom_source_pratap_qc = doc.name if mr.meta.has_field("custom_source_pratap_qc") else None
+	if len(from_whs) == 1:
+		mr.set_from_warehouse = next(iter(from_whs))
+	if len(to_whs) == 1:
+		mr.set_warehouse = next(iter(to_whs))
+	# "Requested by user" defaults to an invalid "EMP" which blocks submit — set current user.
+	if mr.meta.has_field("custom_requested_by_user"):
+		mr.custom_requested_by_user = frappe.session.user
 	for it in items:
 		mr.append("items", it)
 	mr.insert(ignore_permissions=True)
+	try:
+		mr.submit()
+	except Exception:
+		frappe.log_error(title="Rework MR submit failed", message=frappe.get_traceback())
 
-	frappe.msgprint(
-		_("Material Request {0} (Material Transfer) created for {1} batch(es) stored away from the Source Warehouse.").format(
-			frappe.utils.get_link_to_form("Material Request", mr.name), len(items)
-		),
-		indicator="green",
-		alert=True,
-	)
+	# 2) DRAFT Stock Entry of the dedicated rework type — NOT submitted (manual approval).
+	se_name = None
+	try:
+		se = frappe.new_doc("Stock Entry")
+		se.stock_entry_type = REWORK_STOCK_ENTRY_TYPE
+		se.purpose = "Material Transfer"
+		if doc.get("company"):
+			se.company = doc.company
+		se.set_posting_time = 1
+		se.posting_date = frappe.utils.today()
+		for m in moves:
+			se.append(
+				"items",
+				{
+					"item_code": m["item_code"],
+					"qty": m["qty"],
+					"uom": m["uom"],
+					"stock_uom": m["uom"],
+					"conversion_factor": 1,
+					"s_warehouse": m["s_warehouse"],
+					"t_warehouse": m["t_warehouse"],
+					"use_serial_batch_fields": 1,
+					"batch_no": m["batch_no"],
+				},
+			)
+		se.insert(ignore_permissions=True)  # DRAFT — do not submit
+		se_name = se.name
+	except Exception:
+		frappe.log_error(title="Rework draft Stock Entry failed", message=frappe.get_traceback())
+
+	if se_name:
+		frappe.msgprint(
+			_("Material Request {0} (submitted) and Draft Stock Entry {1} ({2}) created for {3} batch(es) stored away from the Source Warehouse. Submit the Stock Entry to move the stock.").format(
+				frappe.utils.get_link_to_form("Material Request", mr.name),
+				frappe.utils.get_link_to_form("Stock Entry", se_name),
+				REWORK_STOCK_ENTRY_TYPE,
+				len(moves),
+			),
+			indicator="green",
+			alert=True,
+		)
+	else:
+		frappe.msgprint(
+			_("Material Request {0} created, but the rework transfer Stock Entry could not be created automatically — create it manually.").format(
+				frappe.utils.get_link_to_form("Material Request", mr.name)
+			),
+			indicator="orange",
+		)
