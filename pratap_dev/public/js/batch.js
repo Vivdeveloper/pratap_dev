@@ -57,7 +57,7 @@ frappe.ui.form.on("Batch Package Ledger", {
 	custom_package_ledger_add(frm) {
 		render_available_units_after(frm);
 	},
-	custom_package_ledger_remove(frm) {
+	custom_package_ledger_remove(frm) { 
 		render_available_units_after(frm); 
 	},
 	warehouse(frm) {
