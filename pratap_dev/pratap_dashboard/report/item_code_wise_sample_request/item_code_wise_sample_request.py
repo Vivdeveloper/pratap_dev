@@ -26,19 +26,12 @@ def execute(filters=None):
 
 
 def validate_filters(filters):
-	if not filters.get("from_date") or not filters.get("to_date"):
-		frappe.throw(_("From Date and To Date are required."))
-
-	if getdate(filters.from_date) > getdate(filters.to_date):
-		frappe.throw(_("From Date cannot be after To Date."))
+	from pratap_dev.pratap_dashboard.utils.period_filters import apply_period_filters
 
 	if filters.get("date_based_on") not in DATE_FIELDS:
 		frappe.throw(_("Please select a valid Date Based On value."))
+	apply_period_filters(filters, require_limit=True)
 
-	limit = cint(filters.get("limit") or 10)
-	if limit < 1:
-		frappe.throw(_("Limit must be at least 1."))
-	filters.limit = limit
 
 
 def get_columns():
@@ -80,6 +73,7 @@ def get_columns():
 def get_data(filters):
 	SampleRequest = frappe.qb.DocType("Sample Request")
 	Item = frappe.qb.DocType("Sample CRM Item")
+	ItemMaster = frappe.qb.DocType("Item")
 	date_field = SampleRequest[DATE_FIELDS[filters.date_based_on]]
 	request_count = Count(SampleRequest.name).distinct()
 	total_qty = Sum(Item.total_qty)
@@ -93,6 +87,8 @@ def get_data(filters):
 			& (Item.parenttype == "Sample Request")
 			& (Item.parentfield == "sample_crm_item")
 		)
+		.left_join(ItemMaster)
+		.on(ItemMaster.name == Item.item_code)
 		.select(
 			Item.item_code.as_("item_code"),
 			Item.item_name.as_("item_name"),
@@ -133,6 +129,7 @@ def get_data(filters):
 
 
 def apply_optional_filters(query, SampleRequest, Item, filters):
+	ItemMaster = frappe.qb.DocType("Item")
 	field_map = {
 		"customer": SampleRequest.customer_id,
 		"customer_group": SampleRequest.customer_group,
@@ -143,6 +140,11 @@ def apply_optional_filters(query, SampleRequest, Item, filters):
 		"city": SampleRequest.city,
 		"creator": SampleRequest.creator,
 		"item_code": Item.item_code,
+		"custom_erp": ItemMaster.custom_erp,
+		"custom_category_type": ItemMaster.custom_category_type,
+		"custom_material_base": ItemMaster.custom_material_base,
+		"custom_product_type": ItemMaster.custom_product_type,
+		"custom_product_category": ItemMaster.custom_product_category,
 	}
 	for filter_name, field in field_map.items():
 		if filters.get(filter_name):

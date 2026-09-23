@@ -1,20 +1,70 @@
+// Copyright (c) 2026, saurabh@exacuer.com and contributors
+// For license information, please see license.txt
+
 frappe.query_reports["TSA Status Wise Count"] = {
 	filters: [
 
 		{
-			fieldname: "from_date",
-			label: __("From Date"),
-			fieldtype: "Date",
-			default: erpnext.utils.get_fiscal_year(frappe.datetime.get_today(), true)[1],
+			fieldname: "period_type",
+			label: __("Period Type"),
+			fieldtype: "Select",
+			options: ["Financial Year", "Monthly", "Weekly"],
+			default: "Financial Year",
 			reqd: 1,
 		},
 		{
-			fieldname: "to_date",
-			label: __("To Date"),
-			fieldtype: "Date",
-			default: erpnext.utils.get_fiscal_year(frappe.datetime.get_today(), true)[2],
+			fieldname: "fiscal_year",
+			label: __("Fiscal Year"),
+			fieldtype: "Link",
+			options: "Fiscal Year",
+			default: erpnext.utils.get_fiscal_year(frappe.datetime.get_today()),
 			reqd: 1,
 		},
+		{
+			fieldname: "month",
+			label: __("Month"),
+			fieldtype: "Select",
+			options: [
+				"",
+				"January",
+				"February",
+				"March",
+				"April",
+				"May",
+				"June",
+				"July",
+				"August",
+				"September",
+				"October",
+				"November",
+				"December",
+			],
+			default: [
+				"January",
+				"February",
+				"March",
+				"April",
+				"May",
+				"June",
+				"July",
+				"August",
+				"September",
+				"October",
+				"November",
+				"December",
+			][frappe.datetime.str_to_obj(frappe.datetime.get_today()).getMonth()],
+			depends_on: "eval:doc.period_type=='Monthly'",
+			mandatory_depends_on: "eval:doc.period_type=='Monthly'",
+		},
+		{
+			fieldname: "week_date",
+			label: __("Week Of"),
+			fieldtype: "Date",
+			default: frappe.datetime.get_today(),
+			depends_on: "eval:doc.period_type=='Weekly'",
+			mandatory_depends_on: "eval:doc.period_type=='Weekly'",
+		},
+
 		{
 			fieldname: "date_based_on",
 			label: __("Date Based On"),
@@ -23,12 +73,50 @@ frappe.query_reports["TSA Status Wise Count"] = {
 			default: "Dispatch Date",
 			reqd: 1,
 		},
+
 		{
 			fieldname: "limit",
 			label: __("Top"),
 			fieldtype: "Int",
 			default: 10,
 			reqd: 1,
+		},
+
+		{
+			fieldname: "item_code",
+			label: __("Item Code"),
+			fieldtype: "Link",
+			options: "Item",
+		},
+		{
+			fieldname: "custom_erp",
+			label: __("ERP"),
+			fieldtype: "Link",
+			options: "EPR",
+		},
+		{
+			fieldname: "custom_category_type",
+			label: __("Category Type"),
+			fieldtype: "Link",
+			options: "Category Type",
+		},
+		{
+			fieldname: "custom_material_base",
+			label: __("Material Base"),
+			fieldtype: "Link",
+			options: "Material Base",
+		},
+		{
+			fieldname: "custom_product_type",
+			label: __("Product Type"),
+			fieldtype: "Link",
+			options: "Product Type",
+		},
+		{
+			fieldname: "custom_product_category",
+			label: __("Product Category"),
+			fieldtype: "Link",
+			options: "Product Category",
 		},
 
 		{
@@ -44,6 +132,28 @@ frappe.query_reports["TSA Status Wise Count"] = {
 			options: "Workflow State",
 		},
 		{
+			fieldname: "customer",
+			label: __("Customer"),
+			fieldtype: "Link",
+			options: "Customer",
+		},
+		{
+			fieldname: "customer_group",
+			label: __("Customer Group"),
+			fieldtype: "Link",
+			options: "Customer Group",
+		},
+		{
+			fieldname: "territory",
+			label: __("Territory"),
+			fieldtype: "Data",
+		},
+		{
+			fieldname: "region",
+			label: __("Region"),
+			fieldtype: "Data",
+		},
+		{
 			fieldname: "creator",
 			label: __("Creator"),
 			fieldtype: "Link",
@@ -55,11 +165,6 @@ frappe.query_reports["TSA Status Wise Count"] = {
 			fieldtype: "Link",
 			options: "Courier Details",
 		},
-		{
-			fieldname: "item_code",
-			label: __("Item"),
-			fieldtype: "Link",
-			options: "Item",
-		},
+
 	],
 };

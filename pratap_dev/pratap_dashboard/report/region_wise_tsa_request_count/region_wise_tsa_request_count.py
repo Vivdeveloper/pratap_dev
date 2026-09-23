@@ -36,16 +36,12 @@ def execute(filters=None):
 
 
 def validate_filters(filters):
-	if not filters.get("from_date") or not filters.get("to_date"):
-		frappe.throw(_("From Date and To Date are required."))
-	if getdate(filters.from_date) > getdate(filters.to_date):
-		frappe.throw(_("From Date cannot be after To Date."))
+	from pratap_dev.pratap_dashboard.utils.period_filters import apply_period_filters
+
 	if filters.get("date_based_on") not in DATE_FIELDS:
 		frappe.throw(_("Please select a valid Date Based On value."))
-	limit = cint(filters.get("limit") or 10)
-	if limit < 1:
-		frappe.throw(_("Limit must be at least 1."))
-	filters.limit = limit
+	apply_period_filters(filters, require_limit=True)
+
 
 
 def get_columns():
@@ -64,6 +60,8 @@ def coalesce_value(*values):
 
 
 def get_data(filters):
+	from pratap_dev.pratap_dashboard.utils.item_filters import get_parents_for_item_filters
+
 	date_field = DATE_FIELDS[filters.date_based_on]
 	request_filters = {
 		date_field: ["between", [filters.from_date, filters.to_date]],
@@ -77,9 +75,28 @@ def get_data(filters):
 	if filters.get("courier_details"):
 		request_filters["courier_details"] = filters.courier_details
 
+	or_filters = []
+	if filters.get("customer"):
+		or_filters = [["customer_id", "=", filters.customer], ["stock_customer_id", "=", filters.customer]]
+	if filters.get("customer_group"):
+		or_filters = [["customer_group", "=", filters.customer_group], ["stock_customer_group", "=", filters.customer_group]]
+	if filters.get("territory"):
+		or_filters = [["territory", "=", filters.territory], ["stock_territory", "=", filters.territory]]
+	if filters.get("region"):
+		or_filters = [["region", "=", filters.region], ["stock_region", "=", filters.region]]
+
+	matching = get_parents_for_item_filters(
+		filters, child_doctype="TSA Item", parenttype="TSA Request", item_link_field="item_code"
+	)
+	if matching is not None:
+		if not matching:
+			return []
+		request_filters["name"] = ["in", matching]
+
 	rows = frappe.get_all(
 		"TSA Request",
 		filters=request_filters,
+		or_filters=or_filters or None,
 		fields=["region", "stock_region"],
 	)
 

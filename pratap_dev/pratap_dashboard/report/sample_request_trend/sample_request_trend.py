@@ -27,17 +27,14 @@ def execute(filters=None):
 
 
 def validate_filters(filters):
-	if not filters.get("from_date") or not filters.get("to_date"):
-		frappe.throw(_("From Date and To Date are required."))
-
-	if getdate(filters.from_date) > getdate(filters.to_date):
-		frappe.throw(_("From Date cannot be after To Date."))
+	from pratap_dev.pratap_dashboard.utils.period_filters import apply_period_filters
 
 	if filters.get("date_based_on") not in DATE_FIELDS:
 		frappe.throw(_("Please select a valid Date Based On value."))
-
 	if filters.get("periodicity") not in ("Monthly", "Quarterly", "Yearly"):
 		frappe.throw(_("Please select a valid Periodicity."))
+	apply_period_filters(filters, require_limit=False)
+
 
 
 def get_columns():
@@ -76,11 +73,19 @@ def get_data(filters):
 	}
 	add_optional_filters(request_filters, filters)
 
-	if filters.get("item_code"):
-		request_names = get_requests_for_item(filters.item_code)
-		if not request_names:
+	from pratap_dev.pratap_dashboard.utils.item_filters import get_parents_for_item_filters
+
+	matching_requests = get_parents_for_item_filters(
+		filters,
+		child_doctype="Sample CRM Item",
+		parenttype="Sample Request",
+		parentfield="sample_crm_item",
+		item_link_field="item_code",
+	)
+	if matching_requests is not None:
+		if not matching_requests:
 			return []
-		request_filters["name"] = ["in", request_names]
+		request_filters["name"] = ["in", matching_requests]
 
 	requests = frappe.get_all(
 		"Sample Request",
@@ -138,17 +143,6 @@ def add_optional_filters(request_filters, filters):
 		if filters.get(filter_name):
 			request_filters[field_name] = filters[filter_name]
 
-
-def get_requests_for_item(item_code):
-	return frappe.get_all(
-		"Quotation Item",
-		filters={
-			"parenttype": "Sample Request",
-			"parentfield": "product_table",
-			"item_code": item_code,
-		},
-		pluck="parent",
-	)
 
 
 def get_period(value, periodicity):

@@ -3,20 +3,68 @@
 
 frappe.query_reports["Region Wise Sample Request Count"] = {
 	filters: [
+
 		{
-			fieldname: "from_date",
-			label: __("From Date"),
-			fieldtype: "Date",
-			default: erpnext.utils.get_fiscal_year(frappe.datetime.get_today(), true)[1],
+			fieldname: "period_type",
+			label: __("Period Type"),
+			fieldtype: "Select",
+			options: ["Financial Year", "Monthly", "Weekly"],
+			default: "Financial Year",
 			reqd: 1,
 		},
 		{
-			fieldname: "to_date",
-			label: __("To Date"),
-			fieldtype: "Date",
-			default: erpnext.utils.get_fiscal_year(frappe.datetime.get_today(), true)[2],
+			fieldname: "fiscal_year",
+			label: __("Fiscal Year"),
+			fieldtype: "Link",
+			options: "Fiscal Year",
+			default: erpnext.utils.get_fiscal_year(frappe.datetime.get_today()),
 			reqd: 1,
 		},
+		{
+			fieldname: "month",
+			label: __("Month"),
+			fieldtype: "Select",
+			options: [
+				"",
+				"January",
+				"February",
+				"March",
+				"April",
+				"May",
+				"June",
+				"July",
+				"August",
+				"September",
+				"October",
+				"November",
+				"December",
+			],
+			default: [
+				"January",
+				"February",
+				"March",
+				"April",
+				"May",
+				"June",
+				"July",
+				"August",
+				"September",
+				"October",
+				"November",
+				"December",
+			][frappe.datetime.str_to_obj(frappe.datetime.get_today()).getMonth()],
+			depends_on: "eval:doc.period_type=='Monthly'",
+			mandatory_depends_on: "eval:doc.period_type=='Monthly'",
+		},
+		{
+			fieldname: "week_date",
+			label: __("Week Of"),
+			fieldtype: "Date",
+			default: frappe.datetime.get_today(),
+			depends_on: "eval:doc.period_type=='Weekly'",
+			mandatory_depends_on: "eval:doc.period_type=='Weekly'",
+		},
+
 		{
 			fieldname: "date_based_on",
 			label: __("Date Based On"),
@@ -25,6 +73,7 @@ frappe.query_reports["Region Wise Sample Request Count"] = {
 			default: "Created Date",
 			reqd: 1,
 		},
+
 		{
 			fieldname: "limit",
 			label: __("Top"),
@@ -32,6 +81,44 @@ frappe.query_reports["Region Wise Sample Request Count"] = {
 			default: 10,
 			reqd: 1,
 		},
+
+		{
+			fieldname: "item_code",
+			label: __("Item Code"),
+			fieldtype: "Link",
+			options: "Item",
+		},
+		{
+			fieldname: "custom_erp",
+			label: __("ERP"),
+			fieldtype: "Link",
+			options: "EPR",
+		},
+		{
+			fieldname: "custom_category_type",
+			label: __("Category Type"),
+			fieldtype: "Link",
+			options: "Category Type",
+		},
+		{
+			fieldname: "custom_material_base",
+			label: __("Material Base"),
+			fieldtype: "Link",
+			options: "Material Base",
+		},
+		{
+			fieldname: "custom_product_type",
+			label: __("Product Type"),
+			fieldtype: "Link",
+			options: "Product Type",
+		},
+		{
+			fieldname: "custom_product_category",
+			label: __("Product Category"),
+			fieldtype: "Link",
+			options: "Product Category",
+		},
+
 		{
 			fieldname: "customer",
 			label: __("Customer"),
@@ -52,7 +139,7 @@ frappe.query_reports["Region Wise Sample Request Count"] = {
 		},
 		{
 			fieldname: "approval_status",
-			label: __("Approval Status"),
+			label: __("Status"),
 			fieldtype: "Select",
 			options: [
 				"",
@@ -80,13 +167,13 @@ frappe.query_reports["Region Wise Sample Request Count"] = {
 			],
 		},
 		{
-			fieldname: "region",
-			label: __("Region"),
+			fieldname: "territory",
+			label: __("Territory"),
 			fieldtype: "Data",
 		},
 		{
-			fieldname: "territory",
-			label: __("Territory"),
+			fieldname: "region",
+			label: __("Region"),
 			fieldtype: "Data",
 		},
 		{
@@ -100,11 +187,6 @@ frappe.query_reports["Region Wise Sample Request Count"] = {
 			fieldtype: "Link",
 			options: "User",
 		},
-		{
-			fieldname: "item_code",
-			label: __("Item"),
-			fieldtype: "Link",
-			options: "Item",
-		},
+
 	],
 };

@@ -33,16 +33,12 @@ def execute(filters=None):
 
 
 def validate_filters(filters):
-	if not filters.get("from_date") or not filters.get("to_date"):
-		frappe.throw(_("From Date and To Date are required."))
-	if getdate(filters.from_date) > getdate(filters.to_date):
-		frappe.throw(_("From Date cannot be after To Date."))
+	from pratap_dev.pratap_dashboard.utils.period_filters import apply_period_filters
+
 	if filters.get("date_based_on") not in DATE_FIELDS:
 		frappe.throw(_("Please select a valid Date Based On value."))
-	limit = cint(filters.get("limit") or 10)
-	if limit < 1:
-		frappe.throw(_("Limit must be at least 1."))
-	filters.limit = limit
+	apply_period_filters(filters, require_limit=True)
+
 
 
 def get_columns():
@@ -65,14 +61,7 @@ def get_data(filters):
 		.groupby(TSA.workflow_state)
 		.orderby(request_count, order=frappe.qb.desc)
 	)
-	if filters.get("tsa_request_type"):
-		query = query.where(TSA.tsa_request_type == filters.tsa_request_type)
-	if filters.get("creator"):
-		query = query.where(TSA.creator_id == filters.creator)
-	if filters.get("workflow_state"):
-		query = query.where(TSA.workflow_state == filters.workflow_state)
-	if filters.get("courier_details"):
-		query = query.where(TSA.courier_details == filters.courier_details)
+	query = apply_optional_filters(query, TSA, filters)
 
 	rows = query.run(as_dict=True)
 	grand_total = sum(cint(r.request_count) for r in rows)
@@ -91,6 +80,53 @@ def get_data(filters):
 		if len(data) >= filters.limit:
 			break
 	return data
+
+
+
+def apply_optional_filters(query, TSA, filters):
+	from frappe.query_builder import Criterion
+
+	field_map = {
+		"tsa_request_type": TSA.tsa_request_type,
+		"workflow_state": TSA.workflow_state,
+		"creator": TSA.creator_id,
+		"courier_details": TSA.courier_details,
+	}
+	for name, field in field_map.items():
+		if filters.get(name):
+			query = query.where(field == filters[name])
+
+	if filters.get("customer"):
+		query = query.where(
+			Criterion.any([TSA.customer_id == filters.customer, TSA.stock_customer_id == filters.customer])
+		)
+	if filters.get("customer_group"):
+		query = query.where(
+			Criterion.any(
+				[TSA.customer_group == filters.customer_group, TSA.stock_customer_group == filters.customer_group]
+			)
+		)
+	if filters.get("territory"):
+		query = query.where(
+			Criterion.any([TSA.territory == filters.territory, TSA.stock_territory == filters.territory])
+		)
+	if filters.get("region"):
+		query = query.where(Criterion.any([TSA.region == filters.region, TSA.stock_region == filters.region]))
+
+	matching = None
+	from pratap_dev.pratap_dashboard.utils.item_filters import get_parents_for_item_filters
+
+	matching = get_parents_for_item_filters(
+		filters,
+		child_doctype="TSA Item",
+		parenttype="TSA Request",
+		item_link_field="item_code",
+	)
+	if matching is not None:
+		if not matching:
+			return query.where(TSA.name == "__no_match__")
+		query = query.where(TSA.name.isin(matching))
+	return query
 
 
 def get_chart(data):
