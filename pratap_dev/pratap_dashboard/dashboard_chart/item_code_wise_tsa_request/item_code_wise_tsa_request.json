@@ -1,0 +1,39 @@
+{
+ "chart_name": "Item Code Wise TSA Request",
+ "chart_type": "Report",
+ "creation": "2026-09-22 11:10:00.000000",
+ "currency": "INR",
+ "docstatus": 0,
+ "doctype": "Dashboard Chart",
+ "dynamic_filters_json": "{}",
+ "filters_json": "{\"from_date\": \"2026-04-01\", \"to_date\": \"2027-03-31\", \"date_based_on\": \"Dispatch Date\", \"limit\": 10}",
+ "group_by_type": "Count",
+ "idx": 0,
+ "is_public": 1,
+ "is_standard": 1,
+ "modified": "2026-09-22 11:10:00.000000",
+ "modified_by": "Administrator",
+ "module": "Pratap Dashboard",
+ "name": "Item Code Wise TSA Request",
+ "number_of_groups": 0,
+ "owner": "Administrator",
+ "report_name": "Item Code Wise TSA Request",
+ "roles": [],
+ "show_values_over_chart": 1,
+ "time_interval": "Yearly",
+ "timeseries": 0,
+ "timespan": "Last Year",
+ "type": "Bar",
+ "use_report_chart": 1,
+ "x_field": "item_code",
+ "y_axis": [
+  {
+   "color": "#4463F0",
+   "y_field": "total_qty"
+  },
+  {
+   "color": "#ECAD4B",
+   "y_field": "total_amount"
+  }
+ ]
+}
