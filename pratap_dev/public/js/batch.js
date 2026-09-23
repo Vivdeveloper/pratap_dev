@@ -64,7 +64,7 @@ frappe.ui.form.on("Batch Package Ledger", {
 		render_available_units_after(frm);
 	},
 });
-
+ 
 // Display-only running balance: cumulative No of Unit per warehouse, in idx order.
 // Set directly on the rows (not via set_value) so it shows without dirtying the form.
 function render_available_units_after(frm) {
