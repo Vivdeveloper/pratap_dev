@@ -22,16 +22,12 @@ def execute(filters=None):
 
 
 def validate_filters(filters):
-	if not filters.get("from_date") or not filters.get("to_date"):
-		frappe.throw(_("From Date and To Date are required."))
-	if getdate(filters.from_date) > getdate(filters.to_date):
-		frappe.throw(_("From Date cannot be after To Date."))
+	from pratap_dev.pratap_dashboard.utils.period_filters import apply_period_filters
+
 	if filters.get("date_based_on") not in DATE_FIELDS:
 		frappe.throw(_("Please select a valid Date Based On value."))
-	limit = cint(filters.get("limit") or 10)
-	if limit < 1:
-		frappe.throw(_("Limit must be at least 1."))
-	filters.limit = limit
+	apply_period_filters(filters, require_limit=True)
+
 
 
 def get_columns():
@@ -47,6 +43,7 @@ def get_columns():
 def get_data(filters):
 	TSA = frappe.qb.DocType("TSA Request")
 	Item = frappe.qb.DocType("TSA Item")
+	ItemMaster = frappe.qb.DocType("Item")
 	date_field = TSA[DATE_FIELDS[filters.date_based_on]]
 	request_count = Count(TSA.name).distinct()
 	total_qty = Sum(Item.total_qty)
@@ -56,6 +53,8 @@ def get_data(filters):
 		frappe.qb.from_(TSA)
 		.inner_join(Item)
 		.on((Item.parent == TSA.name) & (Item.parenttype == "TSA Request"))
+		.left_join(ItemMaster)
+		.on(ItemMaster.name == Item.item_code)
 		.select(
 			Item.item_code.as_("item_code"),
 			Item.item_name.as_("item_name"),
@@ -70,6 +69,8 @@ def get_data(filters):
 		.groupby(Item.item_code, Item.item_name)
 		.orderby(total_amount, order=frappe.qb.desc)
 	)
+	from frappe.query_builder import Criterion
+
 	if filters.get("tsa_request_type"):
 		query = query.where(TSA.tsa_request_type == filters.tsa_request_type)
 	if filters.get("workflow_state"):
@@ -80,6 +81,25 @@ def get_data(filters):
 		query = query.where(Item.item_code == filters.item_code)
 	if filters.get("courier_details"):
 		query = query.where(TSA.courier_details == filters.courier_details)
+	if filters.get("customer"):
+		query = query.where(Criterion.any([TSA.customer_id == filters.customer, TSA.stock_customer_id == filters.customer]))
+	if filters.get("customer_group"):
+		query = query.where(
+			Criterion.any([TSA.customer_group == filters.customer_group, TSA.stock_customer_group == filters.customer_group])
+		)
+	if filters.get("territory"):
+		query = query.where(Criterion.any([TSA.territory == filters.territory, TSA.stock_territory == filters.territory]))
+	if filters.get("region"):
+		query = query.where(Criterion.any([TSA.region == filters.region, TSA.stock_region == filters.region]))
+	for fname, field in {
+		"custom_erp": ItemMaster.custom_erp,
+		"custom_category_type": ItemMaster.custom_category_type,
+		"custom_material_base": ItemMaster.custom_material_base,
+		"custom_product_type": ItemMaster.custom_product_type,
+		"custom_product_category": ItemMaster.custom_product_category,
+	}.items():
+		if filters.get(fname):
+			query = query.where(field == filters[fname])
 
 	rows = query.run(as_dict=True)
 	data = []
