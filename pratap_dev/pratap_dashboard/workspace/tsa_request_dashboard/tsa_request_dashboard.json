@@ -1,0 +1,71 @@
+{
+ "charts": [
+  {
+   "chart_name": "TSA Request Trend",
+   "label": "TSA Request Trend"
+  },
+  {
+   "chart_name": "TSA Request Type Wise Count",
+   "label": "TSA Request Type Wise Count"
+  },
+  {
+   "chart_name": "TSA Status Wise Count",
+   "label": "TSA Status Wise Count"
+  },
+  {
+   "chart_name": "Region Wise TSA Request Count",
+   "label": "Region Wise TSA Request Count"
+  },
+  {
+   "chart_name": "Creator Wise TSA Request Count",
+   "label": "Creator Wise TSA Request Count"
+  },
+  {
+   "chart_name": "Item Code Wise TSA Request",
+   "label": "Item Code Wise TSA Request"
+  }
+ ],
+ "content": "[{\"id\": \"tsaHdr0001\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\">TSA Request Dashboard</span>\", \"col\": 12}}, {\"id\": \"tsaNcTotal\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Total TSA Requests\", \"col\": 3}}, {\"id\": \"tsaNcDisp\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Dispatched TSA Requests\", \"col\": 3}}, {\"id\": \"tsaNcStock\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Stock TSA Requests\", \"col\": 3}}, {\"id\": \"tsaNcComp\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Complaint TSA Requests\", \"col\": 3}}, {\"id\": \"tsaChTrend\", \"type\": \"chart\", \"data\": {\"chart_name\": \"TSA Request Trend\", \"col\": 12}}, {\"id\": \"tsaChType\", \"type\": \"chart\", \"data\": {\"chart_name\": \"TSA Request Type Wise Count\", \"col\": 6}}, {\"id\": \"tsaChStat\", \"type\": \"chart\", \"data\": {\"chart_name\": \"TSA Status Wise Count\", \"col\": 6}}, {\"id\": \"tsaChRegn\", \"type\": \"chart\", \"data\": {\"chart_name\": \"Region Wise TSA Request Count\", \"col\": 6}}, {\"id\": \"tsaChCrea\", \"type\": \"chart\", \"data\": {\"chart_name\": \"Creator Wise TSA Request Count\", \"col\": 6}}, {\"id\": \"tsaChItem\", \"type\": \"chart\", \"data\": {\"chart_name\": \"Item Code Wise TSA Request\", \"col\": 12}}]",
+ "creation": "2026-09-22 11:10:00.000000",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "for_user": "",
+ "hide_custom": 0,
+ "icon": "dashboard-list",
+ "idx": 0,
+ "indicator_color": "green",
+ "is_hidden": 0,
+ "label": "TSA Request Dashboard",
+ "links": [],
+ "modified": "2026-09-22 11:10:00.000000",
+ "modified_by": "Administrator",
+ "module": "Pratap Dashboard",
+ "name": "TSA Request Dashboard",
+ "number_cards": [
+  {
+   "label": "Total TSA Requests",
+   "number_card_name": "Total TSA Requests"
+  },
+  {
+   "label": "Dispatched TSA Requests",
+   "number_card_name": "Dispatched TSA Requests"
+  },
+  {
+   "label": "Stock TSA Requests",
+   "number_card_name": "Stock TSA Requests"
+  },
+  {
+   "label": "Complaint TSA Requests",
+   "number_card_name": "Complaint TSA Requests"
+  }
+ ],
+ "owner": "Administrator",
+ "parent_page": "Dashboards",
+ "public": 1,
+ "quick_lists": [],
+ "roles": [],
+ "sequence_id": 7.0,
+ "shortcuts": [],
+ "title": "TSA Request Dashboard"
+}
