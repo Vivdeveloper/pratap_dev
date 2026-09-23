@@ -1,7 +1,7 @@
 // Copyright (c) 2026, saurabh@exacuer.com and contributors
 // For license information, please see license.txt
 
-frappe.query_reports["Sample Request Trend"] = {
+frappe.query_reports["TSA Request Trend"] = {
 	filters: [
 
 		{
@@ -70,7 +70,7 @@ frappe.query_reports["Sample Request Trend"] = {
 			label: __("Date Based On"),
 			fieldtype: "Select",
 			options: ["Created Date", "Dispatch Date", "Document Creation"],
-			default: "Created Date",
+			default: "Dispatch Date",
 			reqd: 1,
 		},
 
@@ -121,6 +121,18 @@ frappe.query_reports["Sample Request Trend"] = {
 		},
 
 		{
+			fieldname: "tsa_request_type",
+			label: __("Request Type"),
+			fieldtype: "Select",
+			options: ["", "Stock", "Complaint"],
+		},
+		{
+			fieldname: "workflow_state",
+			label: __("Status"),
+			fieldtype: "Link",
+			options: "Workflow State",
+		},
+		{
 			fieldname: "customer",
 			label: __("Customer"),
 			fieldtype: "Link",
@@ -133,41 +145,6 @@ frappe.query_reports["Sample Request Trend"] = {
 			options: "Customer Group",
 		},
 		{
-			fieldname: "sample_type",
-			label: __("Sample Request Type"),
-			fieldtype: "Link",
-			options: "Sample Type",
-		},
-		{
-			fieldname: "approval_status",
-			label: __("Status"),
-			fieldtype: "Select",
-			options: [
-				"",
-				"Draft",
-				"Pending for Technical Approval",
-				"Pending for CEO Approval",
-				"Pending for RM Approval",
-				"Pending for Admin CRM Approval",
-				"Approved by RM",
-				"Approved by Admin CRM",
-				"Approved by CEO",
-				"Technical Approved",
-				"Technical Revised",
-				"Technical Rejected",
-				"Opened",
-				"Approved",
-				"Rejected",
-				"Revised",
-				"Dispatched",
-				"Delivery Note",
-				"Product Trial Created",
-				"Hold",
-				"Reopen",
-				"Cancelled",
-			],
-		},
-		{
 			fieldname: "territory",
 			label: __("Territory"),
 			fieldtype: "Data",
@@ -178,15 +155,16 @@ frappe.query_reports["Sample Request Trend"] = {
 			fieldtype: "Data",
 		},
 		{
-			fieldname: "city",
-			label: __("City"),
-			fieldtype: "Data",
-		},
-		{
 			fieldname: "creator",
 			label: __("Creator"),
 			fieldtype: "Link",
 			options: "User",
+		},
+		{
+			fieldname: "courier_details",
+			label: __("Courier"),
+			fieldtype: "Link",
+			options: "Courier Details",
 		},
 
 	],

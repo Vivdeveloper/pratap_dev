@@ -1,12 +1,12 @@
 {
- "chart_name": "Sample Request Trend",
+ "chart_name": "Region Wise Sample Request Count",
  "chart_type": "Report",
- "creation": "2026-09-09 11:19:52.961774",
+ "creation": "2026-09-22 09:45:00.000000",
  "currency": "",
  "docstatus": 0,
  "doctype": "Dashboard Chart",
  "dynamic_filters_json": "{}",
- "filters_json": "{\"period_type\": \"Financial Year\", \"fiscal_year\": \"2026-2027\", \"date_based_on\": \"Created Date\", \"periodicity\": \"Monthly\"}",
+ "filters_json": "{\"period_type\": \"Financial Year\", \"fiscal_year\": \"2026-2027\", \"date_based_on\": \"Created Date\", \"limit\": 10}",
  "group_by_type": "Count",
  "idx": 0,
  "is_public": 1,
@@ -14,26 +14,22 @@
  "modified": "2026-09-23 12:40:00.000000",
  "modified_by": "Administrator",
  "module": "Pratap Dashboard",
- "name": "Sample Request Trend",
+ "name": "Region Wise Sample Request Count",
  "number_of_groups": 0,
  "owner": "Administrator",
- "report_name": "Sample Request Trend",
+ "report_name": "Region Wise Sample Request Count",
  "roles": [],
  "show_values_over_chart": 1,
  "time_interval": "Yearly",
  "timeseries": 0,
  "timespan": "Last Year",
- "type": "Bar",
+ "type": "Donut",
  "use_report_chart": 1,
- "x_field": "period",
+ "x_field": "region",
  "y_axis": [
   {
    "color": "#2490EF",
    "y_field": "request_count"
-  },
-  {
-   "color": "#0CA678",
-   "y_field": "total_quantity"
   }
  ]
 }

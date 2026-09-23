@@ -1,7 +1,7 @@
 // Copyright (c) 2026, saurabh@exacuer.com and contributors
 // For license information, please see license.txt
 
-frappe.query_reports["Sample Request Trend"] = {
+frappe.query_reports["Creator Wise Sample Request Count"] = {
 	filters: [
 
 		{
@@ -75,11 +75,10 @@ frappe.query_reports["Sample Request Trend"] = {
 		},
 
 		{
-			fieldname: "periodicity",
-			label: __("Periodicity"),
-			fieldtype: "Select",
-			options: ["Monthly", "Quarterly", "Yearly"],
-			default: "Monthly",
+			fieldname: "limit",
+			label: __("Top"),
+			fieldtype: "Int",
+			default: 10,
 			reqd: 1,
 		},
 
