@@ -4,6 +4,7 @@
    "dt": "Purchase Order Item",
    "fieldname": "custom_notes",
    "fieldtype": "Small Text",
+   "idx": 0,
    "insert_after": "schedule_date",
    "label": "Notes",
    "translatable": 1

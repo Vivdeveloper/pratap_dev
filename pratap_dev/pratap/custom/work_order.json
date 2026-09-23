@@ -1345,54 +1345,59 @@
    "width": null
   },
   {
+   "default": "0",
    "dt": "Work Order",
    "fieldname": "custom_plan_user_saved",
    "fieldtype": "Check",
-   "label": "Plan Saved By User",
-   "insert_after": "custom_notes",
    "hidden": 1,
+   "idx": 0,
+   "insert_after": "custom_notes",
+   "is_system_generated": 0,
+   "label": "Plan Saved By User",
    "no_copy": 1,
-   "read_only": 1,
-   "default": "0",
-   "is_system_generated": 0
+   "read_only": 1
   },
   {
+   "allow_on_submit": 1,
    "dt": "Work Order",
    "fieldname": "custom_batch_started_at",
    "fieldtype": "Datetime",
-   "label": "Batch Started At",
+   "idx": 0,
    "insert_after": "produced_qty",
+   "is_system_generated": 0,
+   "label": "Batch Started At",
    "no_copy": 1,
-   "read_only": 1,
-   "allow_on_submit": 1,
-   "is_system_generated": 0
+   "read_only": 1
   },
   {
+   "allow_on_submit": 1,
    "dt": "Work Order",
    "fieldname": "custom_last_material_transfer_at",
    "fieldtype": "Datetime",
-   "label": "Last Material Transfer At",
+   "idx": 0,
    "insert_after": "custom_batch_started_at",
+   "is_system_generated": 0,
+   "label": "Last Material Transfer At",
    "no_copy": 1,
-   "read_only": 1,
-   "allow_on_submit": 1,
-   "is_system_generated": 0
+   "read_only": 1
   },
   {
    "dt": "Work Order",
    "fieldname": "custom_time_log_tab",
    "fieldtype": "Tab Break",
-   "label": "Time Log",
+   "idx": 0,
    "insert_after": "amended_from",
-   "is_system_generated": 0
+   "is_system_generated": 0,
+   "label": "Time Log"
   },
   {
    "dt": "Work Order",
    "fieldname": "custom_time_log_html",
    "fieldtype": "HTML",
-   "label": "Time Log",
+   "idx": 0,
    "insert_after": "custom_time_log_tab",
-   "is_system_generated": 0
+   "is_system_generated": 0,
+   "label": "Time Log"
   }
  ],
  "custom_perms": [],

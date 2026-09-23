@@ -1412,14 +1412,15 @@
    "dt": "Purchase Receipt Item",
    "fieldname": "custom_batch_packages_json",
    "fieldtype": "Small Text",
-   "label": "Batch Packages JSON",
-   "insert_after": "custom_total_qty",
    "hidden": 1,
-   "read_only": 1,
+   "idx": 0,
+   "insert_after": "custom_total_qty",
+   "label": "Batch Packages JSON",
+   "module": null,
+   "name": "Purchase Receipt Item-custom_batch_packages_json",
    "no_copy": 1,
    "print_hide": 1,
-   "name": "Purchase Receipt Item-custom_batch_packages_json",
-   "module": null
+   "read_only": 1
   }
  ],
  "custom_perms": [],

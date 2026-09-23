@@ -4,12 +4,13 @@
    "dt": "Stock Entry",
    "fieldname": "custom_rework_qc",
    "fieldtype": "Link",
-   "options": "Pratap Quality Inspection",
-   "label": "Rework QC",
+   "idx": 0,
    "insert_after": "work_order",
-   "read_only": 1,
+   "is_system_generated": 0,
+   "label": "Rework QC",
    "no_copy": 1,
-   "is_system_generated": 0
+   "options": "Pratap Quality Inspection",
+   "read_only": 1
   }
  ],
  "custom_perms": [],
@@ -20,18 +21,18 @@
    "doc_type": "Stock Entry",
    "doctype_or_field": "DocField",
    "field_name": "inspection_required",
+   "name": "Stock Entry-inspection_required-read_only",
    "property": "read_only",
    "property_type": "Check",
-   "name": "Stock Entry-inspection_required-read_only",
    "value": "1"
   },
   {
    "doc_type": "Stock Entry",
    "doctype_or_field": "DocField",
    "field_name": "inspection_required",
+   "name": "Stock Entry-inspection_required-default",
    "property": "default",
    "property_type": "Text",
-   "name": "Stock Entry-inspection_required-default",
    "value": "0"
   }
  ],
