@@ -270,9 +270,10 @@ def update_pipeline_fields(doc, method=None):
 
             # Actual Requirement for RFQ/P.O is editable ("Edit Option for Qty"); seed it with
             # the sheet formula  N = G + L - M  = Max Level Consumption + Requirement generate
-            # for the Month - Pipe Line (PO/GRN pending), only when the user hasn't entered one.
+            # for the Month - Pipe Line (PO/GRN pending), floored at 0 (never negative), only
+            # when the user hasn't entered one.
             if not flt(row.get("custom_actual_requirement_rfq_po")):
-                row.custom_actual_requirement_rfq_po = flt(cons["max_3m"]) + required - pending_pr
+                row.custom_actual_requirement_rfq_po = max(0.0, flt(cons["max_3m"]) + required - pending_pr)
 
 
 def move_fulfilled_items(doc, method=None):

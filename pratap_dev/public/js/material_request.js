@@ -131,38 +131,368 @@ const MR_TRANSFER_COLS = [
 ];
 
 function configure_items_grid(frm) {
-	// Only Material Transfer MRs get the custom issue-slip column set. For every other
-	// purpose (Purchase, etc.) leave the grid exactly as ERPNext renders it — never touch
-	// it, so nothing about the standard form/save flow can be affected. Wrapped in
-	// try/catch so a grid-internals change can never break the form or block Save.
+	// Per-purpose Items view. The native grid is hidden and a custom scrollable HTML table is
+	// shown instead — Purchase gets the RM-requirement columns, every other purpose gets the
+	// transfer columns. Both edit the SAME real `items` child rows behind the scenes, so all
+	// validation / save / RFQ / PO / stock flows stay intact. try/catch so a UI tweak can
+	// never break the form or block Save.
 	try {
-		if (frm.doc.material_request_type !== "Material Transfer") {
-			return;
-		}
 		const grid = frm.fields_dict.items && frm.fields_dict.items.grid;
 		if (!grid || !grid.fields_map) {
 			return;
 		}
-		// Force EXACTLY the issue-slip columns, bypassing any saved "Configure Columns"
-		// (GridView) preference: setup_visible_columns() returns early when visible_columns
-		// is already populated, so we build it ourselves in the required order.
-		const cols = [];
-		MR_TRANSFER_COLS.forEach(([fn, size]) => {
-			const df = grid.fields_map[fn] || frappe.meta.get_docfield("Material Request Item", fn);
-			if (!df) {
-				return;
+		const purpose = frm.doc.material_request_type;
+
+		if (purpose === "Purchase") {
+			render_custom_items_table(frm, MR_PURCHASE_TABLE_COLS);
+		} else if (purpose) {
+			render_custom_items_table(frm, MR_OTHER_TABLE_COLS);
+		} else {
+			// No purpose yet -> leave ERPNext's native grid.
+			destroy_custom_items_table(frm);
+			grid.user_defined_columns = [];
+			grid.visible_columns = null;
+			if (grid.setup_visible_columns) {
+				grid.setup_visible_columns();
 			}
-			df.in_list_view = 1;
-			df.columns = size;
-			df.colsize = size;
-			cols.push([df, size]);
-		});
-		grid.user_defined_columns = [];
-		grid.visible_columns = cols;
-		grid.refresh();
+			grid.refresh();
+		}
 	} catch (e) {
 		// Never let a grid tweak break the form.
 		console.warn("configure_items_grid skipped:", e);
+	}
+}
+
+// ---------------------------------------------------------------------------------------
+// Custom Items tables (Purchase + Other) — one renderer, two column sets
+// ---------------------------------------------------------------------------------------
+//   ctrl  -> editable cell rendered with a real Frappe control (Link = searchable dropdown,
+//            Float = number, Date = datepicker). Writes straight to the real child row.
+//   ro/num-> read-only display (auto-computed server-side or fetched).
+
+// Purchase: the RM-requirement sheet columns, in exact sheet order.
+const MR_PURCHASE_TABLE_COLS = [
+	{ fn: "item_code", label: "Item Code", ctrl: { fieldtype: "Link", options: "Item" } },
+	{ fn: "item_name", label: "Product Name", ro: true },
+	{ fn: "custom_last_month_consumption", label: "Last Month Consumption", ro: true, num: true },
+	{ fn: "custom_last_month_purchase", label: "Last Month Purchase", ro: true, num: true },
+	{ fn: "custom_min_level_avg_consumption", label: "Minimum Level Avg. Consumption", ro: true, num: true },
+	{ fn: "custom_max_level_consumption", label: "Maximum Level Consumption", ro: true, num: true },
+	{ fn: "custom_current_requirement", label: "Current Requirement As per BOM/ Forecast vs Planning", ro: true, num: true },
+	{ fn: "custom_plant_1_wip_rm", label: "Plant 1 - WIP", ro: true },
+	{ fn: "custom_plant_2_wip_rm", label: "Plant 2 - WIP", ro: true },
+	{ fn: "custom_main_store_rm_qty", label: "Main Stores", ro: true },
+	{ fn: "custom_required_qty_for_pr", label: "Requirement generate for the Month", ro: true, num: true },
+	{ fn: "custom_pending_pr_for_grn", label: "Pipe Line P.O / GRN Pending etc.", ro: true, num: true },
+	{ fn: "custom_actual_requirement_rfq_po", label: "Actual Requirement for RFQ/P.O", ctrl: { fieldtype: "Float" } },
+	{ fn: "qty", label: "Qty", ctrl: { fieldtype: "Float" } },
+	{ fn: "uom", label: "UOM", ctrl: { fieldtype: "Link", options: "UOM" } },
+	{ fn: "schedule_date", label: "Required By", ctrl: { fieldtype: "Date" } },
+];
+
+// Non-purchase (Material Transfer / Issue / Manufacture / Customer Provided): transfer columns.
+const MR_OTHER_TABLE_COLS = [
+	{ fn: "item_code", label: "Item Code", ctrl: { fieldtype: "Link", options: "Item" } },
+	{ fn: "item_name", label: "Item Name", ro: true },
+	{ fn: "description", label: "Item Description", ro: true },
+	{ fn: "custom_plant_1_wip_rm", label: "Plant 1", ro: true },
+	{ fn: "custom_plant_2_wip_rm", label: "Plant 2", ro: true },
+	{ fn: "custom_total_stock_qty", label: "RM Quantity", ro: true, num: true },
+	{ fn: "uom", label: "UOM", ctrl: { fieldtype: "Link", options: "UOM" } },
+	{ fn: "qty", label: "Quantity to be Transferred", ctrl: { fieldtype: "Float" } },
+];
+
+const MR_ITEM_DT = "Material Request Item";
+
+// Restore the native Items grid and remove the custom table (used when there is no purpose).
+function destroy_custom_items_table(frm) {
+	const field = frm.fields_dict.items;
+	if (!field || !field.$wrapper) {
+		return;
+	}
+	field.$wrapper.find(".form-grid-container").show();
+	field.$wrapper.find(".grid-footer").show();
+	field.$wrapper.find(".mr-purchase-custom").remove();
+	field._mr_custom_modal_hook = false;
+}
+
+// Hide the native Items grid and render a custom, horizontally-scrollable HTML table showing
+// exactly the Purchase columns (sheet order). Editing writes into the real child rows.
+function inject_mr_pc_style() {
+	if (document.getElementById("mr-pc-style")) {
+		return;
+	}
+	const css = `
+	/* read-only cells: greyed out */
+	.mr-purchase-custom td.mr-pc-ro { background: var(--gray-100, #f4f5f6); color: var(--text-muted, #6c7680); }
+	/* editable cells: control fills the cell with no visible input box (looks like the cell itself is editable) */
+	.mr-purchase-custom td.mr-pc-ctrl { padding: 0 !important; }
+	.mr-purchase-custom td.mr-pc-ctrl .control-input-wrapper,
+	.mr-purchase-custom td.mr-pc-ctrl .control-input,
+	.mr-purchase-custom td.mr-pc-ctrl .awesomplete { width: 100%; }
+	.mr-purchase-custom td.mr-pc-ctrl input,
+	.mr-purchase-custom td.mr-pc-ctrl .form-control {
+		border: none !important;
+		background: transparent !important;
+		box-shadow: none !important;
+		border-radius: 0 !important;
+		height: 36px !important;
+		padding: 6px 8px !important;
+		width: 100% !important;
+	}
+	.mr-purchase-custom td.mr-pc-ctrl:focus-within {
+		box-shadow: inset 0 0 0 1px var(--primary, #2490ef);
+	}
+	/* the search dropdown floats ABOVE everything and is not clipped by the scroll container */
+	.mr-purchase-custom .awesomplete > ul { z-index: 1050 !important; }`;
+	const style = document.createElement("style");
+	style.id = "mr-pc-style";
+	style.textContent = css;
+	document.head.appendChild(style);
+}
+
+// Live-fill every DB-derived number for a row the moment its item is picked (no save needed):
+//   - Plant 1/2, Main Store, Total Stock (warehouse balances)  [all purposes]
+//   - Pending PR / GRN QC (from open POs)                       [Purchase pipeline]
+//   - Last Month Consumption / Min / Max / Last Month Purchase / Current Requirement
+//                                                               [Purchase, via get_item_rfq_metrics]
+// After each fetch, Required-for-PR + Actual-Requirement recompute client-side and the table
+// re-renders. The server compute on save stays as the authoritative backstop.
+function mr_pc_populate_row(frm, name, cols) {
+	const cdt = MR_ITEM_DT;
+	const row = (frm.doc.items || []).find((r) => r.name === name);
+	if (!row) {
+		return;
+	}
+	// stock (Plant 1/2 / Main Store / Total) + Required recompute — relevant to every purpose
+	if (typeof set_rm_warehouse_qty === "function") {
+		set_rm_warehouse_qty(frm, cdt, name);
+	}
+	// pending PR / GRN QC from open POs — Purchase pipeline (harmless otherwise)
+	if (typeof set_material_pipeline_status === "function") {
+		set_material_pipeline_status(frm, cdt, name);
+	}
+	// consumption / min / max / last-month-purchase / current-requirement (Purchase table only)
+	if (cols === MR_PURCHASE_TABLE_COLS && row.item_code && frm.doc.company) {
+		frappe
+			.xcall("pratap_dev.material_request_stock.get_item_rfq_metrics", {
+				item_code: row.item_code,
+				company: frm.doc.company,
+			})
+			.then((m) => {
+				m = m || {};
+				frappe.model.set_value(cdt, name, "custom_last_month_consumption", flt(m.last_month_consumption));
+				frappe.model.set_value(cdt, name, "custom_min_level_avg_consumption", flt(m.min_level_avg_consumption));
+				frappe.model.set_value(cdt, name, "custom_max_level_consumption", flt(m.max_level_consumption));
+				frappe.model.set_value(cdt, name, "custom_last_month_purchase", flt(m.last_month_purchase));
+				const wo_req = flt(m.current_requirement);
+				const expected = flt(row.custom_expected_qty) || flt(row.qty);
+				frappe.model.set_value(cdt, name, "custom_current_requirement", wo_req > 0 ? wo_req : expected);
+				if (typeof recompute_required_qty_for_pr === "function") {
+					recompute_required_qty_for_pr(cdt, name);
+				}
+				render_custom_items_table(frm, cols);
+			})
+			.catch(() => {});
+	}
+	// re-render to reflect the (async) stock + pending fills
+	setTimeout(() => render_custom_items_table(frm, cols), 600);
+}
+
+function render_custom_items_table(frm, cols) {
+	const field = frm.fields_dict.items;
+	const grid = field && field.grid;
+	if (!field || !field.$wrapper || !grid) {
+		return;
+	}
+	inject_mr_pc_style();
+	// hide the native grid UI (keep the grid object alive for the row-edit popups)
+	field.$wrapper.find(".form-grid-container").hide();
+	field.$wrapper.find(".grid-footer").hide();
+
+	let $c = field.$wrapper.find(".mr-purchase-custom");
+	if (!$c.length) {
+		$c = $('<div class="mr-purchase-custom" style="margin-top:8px;"></div>').appendTo(field.$wrapper);
+	}
+
+	const rows = frm.doc.items || [];
+	const editable = frm.doc.docstatus === 0;
+	const esc = frappe.utils.escape_html;
+	const cell = (v, num) => {
+		// Numeric columns always show a number (0 when unset) — never blank — matching the
+		// native grid. Text columns show blank when empty.
+		if (num) {
+			return format_number(flt(v), null, 0);
+		}
+		if (v === null || v === undefined || v === "") return "";
+		return esc(String(v));
+	};
+
+	let html = `<div class="mr-pc-scroll" style="overflow-x:auto;border:1px solid var(--border-color, #d1d8dd);border-radius:6px;transition:padding-bottom .1s;">
+		<table class="table table-bordered" style="margin:0;white-space:nowrap;min-width:max-content;">
+		<thead><tr style="background-color:#e9ecef;font-weight:600;">
+			<th style="min-width:40px;">Sr. No</th>
+			${cols.map((c) => `<th style="min-width:130px;white-space:normal;">${esc(c.label)}</th>`).join("")}
+			${editable ? `<th style="min-width:70px;"></th>` : ""}
+		</tr></thead><tbody>`;
+
+	rows.forEach((row, i) => {
+		html += `<tr data-name="${esc(row.name)}"><td>${i + 1}</td>`;
+		cols.forEach((c) => {
+			if (c.ctrl && editable) {
+				// placeholder cell -> a real Frappe control is mounted after insert
+				html += `<td class="mr-pc-ctrl" data-name="${esc(row.name)}" data-fn="${c.fn}" style="min-width:130px;"></td>`;
+			} else {
+				// read-only cell -> greyed out
+				html += `<td class="mr-pc-ro" style="min-width:120px;">${cell(row[c.fn], c.num)}</td>`;
+			}
+		});
+		if (editable) {
+			html += `<td style="white-space:nowrap;">
+				<button class="btn btn-xs btn-default mr-pc-edit" title="Edit full row">${frappe.utils.icon("edit", "xs")}</button>
+				<button class="btn btn-xs btn-default mr-pc-del" title="Delete row">${frappe.utils.icon("delete", "xs")}</button>
+			</td>`;
+		}
+		html += `</tr>`;
+	});
+	if (!rows.length) {
+		html += `<tr><td colspan="${cols.length + 2}" class="text-muted text-center">No items</td></tr>`;
+	}
+	html += `</tbody></table></div>`;
+	if (editable) {
+		html += `<div style="margin-top:8px;"><button class="btn btn-xs btn-default mr-pc-add">${__("Add Row")}</button></div>`;
+	}
+	$c.html(html);
+
+	// Mount a real Frappe control in each editable cell (Link = searchable dropdown, etc.).
+	$c.find(".mr-pc-ctrl").each(function () {
+		const $td = $(this);
+		const name = $td.data("name");
+		const fn = $td.data("fn");
+		const col = cols.find((x) => x.fn === fn);
+		const row = (frm.doc.items || []).find((r) => r.name === name);
+		if (!col || !row) {
+			return;
+		}
+		const is_num = (col.ctrl.fieldtype === "Float" || col.ctrl.fieldtype === "Int" || col.ctrl.fieldtype === "Currency");
+		let control;
+		control = frappe.ui.form.make_control({
+			df: Object.assign({ fieldname: fn, label: "", placeholder: col.label }, col.ctrl, {
+				onchange() {
+					const v = control.get_value();
+					const cur = row[fn];
+					// Ignore no-op changes — programmatic set_value() below also fires onchange,
+					// which would otherwise loop (re-render -> set_value -> onchange -> ...).
+					const same = is_num ? flt(v) === flt(cur) : (v || "") === (cur || "");
+					if (same) {
+						return;
+					}
+					frappe.model.set_value(MR_ITEM_DT, name, fn, v);
+					if (fn === "item_code") {
+						// picking an item -> live-fill all DB-derived numbers, then re-render
+						mr_pc_populate_row(frm, name, cols);
+					} else {
+						// planner edited Actual Requirement -> stop auto-seeding it
+						if (fn === "custom_actual_requirement_rfq_po") {
+							row.__actual_rfq_manual = 1;
+						}
+						// Qty / Expected drive the arithmetic columns -> recompute live, then
+						// re-render (onchange fires on blur, so re-rendering won't steal focus)
+						if (typeof recompute_required_qty_for_pr === "function") {
+							recompute_required_qty_for_pr(MR_ITEM_DT, name);
+						}
+						setTimeout(() => render_custom_items_table(frm, cols), 150);
+					}
+				},
+			}),
+			parent: $td.get(0),
+			render_input: true,
+			only_input: true,
+		});
+		const val = row[fn] == null ? "" : row[fn];
+		control.set_value(val);
+		// ensure the displayed value shows immediately (Link/Data don't always paint on set_value)
+		if (control.$input) {
+			control.$input.val(val);
+		}
+	});
+
+	// The horizontal-scroll container clips overflow-y, which would cut off the search
+	// dropdown. Instead of expanding the table, we position the dropdown with `fixed` so it
+	// floats ABOVE everything (high z-index) and isn't clipped. Reposition on focus/type and
+	// while the container scrolls.
+	const position_dropdown = (input) => {
+		const $ul = $(input).closest(".awesomplete").find("> ul");
+		if (!$ul.length) return;
+		const r = input.getBoundingClientRect();
+		$ul.css({
+			position: "fixed",
+			left: Math.round(r.left) + "px",
+			top: Math.round(r.bottom) + "px",
+			width: Math.round(r.width) + "px",
+			"max-height": "280px",
+			"overflow-y": "auto",
+			"z-index": 1050,
+		});
+	};
+	$c.off("focusin.mrpc input.mrpc").on("focusin.mrpc input.mrpc", "input", function () {
+		const input = this;
+		setTimeout(() => position_dropdown(input), 0);
+	});
+	$c.find(".mr-pc-scroll").off("scroll.mrpc").on("scroll.mrpc", function () {
+		const input = $c.find("input:focus").get(0);
+		if (input) position_dropdown(input);
+	});
+
+	// pencil -> open Frappe's native row-edit form (full detail view). The native grid is
+	// hidden, and its inline edit panel can't render while hidden — so briefly SHOW the grid,
+	// open the row, and hide the grid again once the row form is closed.
+	$c.off("click.mrpcedit").on("click.mrpcedit", ".mr-pc-edit", function () {
+		const name = $(this).closest("tr").data("name");
+		const gr = grid.grid_rows_by_docname && grid.grid_rows_by_docname[name];
+		if (!gr) {
+			return;
+		}
+		const $gc = field.$wrapper.find(".form-grid-container");
+		$gc.show();
+		if (!gr.wrapper.hasClass("grid-row-open")) {
+			gr.toggle_view();
+		}
+		try {
+			const obs = new MutationObserver(() => {
+				if (!gr.wrapper.hasClass("grid-row-open")) {
+					obs.disconnect();
+					$gc.hide();
+					render_custom_items_table(frm, cols);
+				}
+			});
+			obs.observe(gr.wrapper.get(0), { attributes: true, attributeFilter: ["class"] });
+		} catch (e) {
+			/* MutationObserver unsupported -> the grid just stays visible until re-render */
+		}
+	});
+	// delete row
+	$c.off("click.mrpcdel").on("click.mrpcdel", ".mr-pc-del", function () {
+		const name = $(this).closest("tr").data("name");
+		frm.doc.items = (frm.doc.items || []).filter((r) => r.name !== name);
+		frm.refresh_field("items");
+		render_custom_items_table(frm, cols);
+	});
+	// add row -> add a real child + re-render so you can search-pick the item inline
+	$c.off("click.mrpcadd").on("click.mrpcadd", ".mr-pc-add", function () {
+		frm.add_child("items");
+		frm.refresh_field("items");
+		render_custom_items_table(frm, cols);
+	});
+
+	// re-render after a row-edit popup closes so the table reflects the edits
+	if (!field._mr_custom_modal_hook) {
+		field._mr_custom_modal_hook = true;
+		$(document).on("hide.bs.modal.mrpc", () => {
+			if (field.$wrapper.find(".mr-purchase-custom").length) {
+				setTimeout(() => render_custom_items_table(frm, cols), 200);
+			}
+		});
 	}
 }
 
@@ -323,6 +653,14 @@ function setup_reject_button(frm) {
 	});
 
 	if (frm.is_new() || frm.doc.docstatus !== 0) {
+		return;
+	}
+
+	// No ACTIVE workflow applied to this doc (workflow_state empty) -> there are no reject
+	// transitions to fetch. Skip the call, otherwise the server throws "Workflow not found"
+	// (the Material Request workflows exist but are inactive) and pops an error.
+	if (!frm.doc.workflow_state) {
+		hide_bottom();
 		return;
 	}
 
@@ -770,10 +1108,13 @@ function recompute_required_qty_for_pr(cdt, cdn) {
 	set_rm_qty_field(cdt, cdn, "custom_required_qty_for_pr", required);
 
 	// Actual Requirement for RFQ/P.O = G + L - M (Max Level Consumption + Requirement
-	// generate - Pipe Line). Seeded/kept live until the planner edits it manually.
+	// generate - Pipe Line), floored at 0 (never negative). Seeded/kept live until the
+	// planner edits it manually.
 	if (!row.__actual_rfq_manual) {
-		const actual =
-			flt(row.custom_max_level_consumption) + required - flt(row.custom_pending_pr_for_grn);
+		const actual = Math.max(
+			flt(row.custom_max_level_consumption) + required - flt(row.custom_pending_pr_for_grn),
+			0
+		);
 		set_rm_qty_field(cdt, cdn, "custom_actual_requirement_rfq_po", actual);
 	}
 }

@@ -88,13 +88,19 @@ def _upsert_item_pack_sizes(item_code, supplier_map):
 # USE — Request for Quotation: pre-fill Standard Pkg Qty + No of Unit
 # ---------------------------------------------------------------------------
 def apply_rfq_pack_sizes(doc, method=None):
-	"""Fill Standard Pkg Qty (from the tracked table) and No of Unit on RFQ items."""
+	"""Fill Standard Pkg Qty + PR Quantity + No of Unit + Quantity on RFQ items.
+
+	Direction of compute (authoritative on save):
+	  * PR Quantity (custom_pr_quantity) is captured ONCE from the Material Request
+	    qty carried into the RFQ and then stays STATIC -- it is never updated again
+	    (also read-only in the UI), so it always reflects what the MR asked for.
+	  * No of Unit  = ceil(PR Quantity / Standard Pkg Qty).
+	  * Quantity    = Standard Pkg Qty * No of Unit  (rounded up to whole packs).
+	"""
 	supplier = doc.get("custom_supplier_code")
 	if not supplier:
 		suppliers = doc.get("suppliers") or []
 		supplier = suppliers[0].supplier if suppliers else None
-	if not supplier:
-		return
 
 	cache = {}
 	for row in doc.get("items") or []:
@@ -102,22 +108,33 @@ def apply_rfq_pack_sizes(doc, method=None):
 		if not item_code:
 			continue
 
-		if item_code not in cache:
-			cache[item_code] = _get_pack_size(item_code, supplier)
-		tracked = cache[item_code]
+		# Auto-fill Standard Pkg Qty from the tracked (Item, Supplier) table only when
+		# it's blank (a manually entered value is preserved so the user can override).
+		if supplier:
+			if item_code not in cache:
+				cache[item_code] = _get_pack_size(item_code, supplier)
+			tracked = cache[item_code]
+			if tracked > 0 and not flt(row.get("custom_packing_qty")):
+				row.custom_packing_qty = _fmt(tracked)
 
-		# Auto-fill Standard Pkg Qty from the tracked table only when it's blank
-		# (a manually entered value is preserved so the user can override).
-		if tracked > 0 and not flt(row.get("custom_packing_qty")):
-			row.custom_packing_qty = _fmt(tracked)
+		# PR Quantity: captured ONCE from the MR qty carried into the RFQ, then STATIC.
+		# (On a fresh RFQ from an MR, row.qty == the requested MR qty at this point.)
+		if not flt(row.get("custom_pr_quantity")):
+			row.custom_pr_quantity = flt(row.get("qty"))
+		pr_qty = flt(row.get("custom_pr_quantity"))
 
-		# Default No of Unit = ceil(Quantity / Standard Pkg Qty), but ONLY when it's
-		# blank -- a manually entered No of Unit is preserved. Live recompute while
-		# editing is handled client-side (request_for_quotation.js).
 		pack = flt(row.get("custom_packing_qty"))
-		qty = flt(row.get("qty"))
-		if pack > 0 and qty > 0 and not flt(row.get("custom_total_qty")):
-			row.custom_total_qty = str(int(math.ceil(qty / pack)))
+		# No of Unit: seed with ceil(PR Quantity / Std Pkg Qty) ONLY on the first fill
+		# (when it's blank). A manually edited No of Unit is preserved thereafter -- the
+		# field stays fully editable.
+		if pack > 0 and pr_qty > 0 and not flt(row.get("custom_total_qty")):
+			row.custom_total_qty = str(int(math.ceil(pr_qty / pack)))
+
+		# Quantity always tracks Std Pkg Qty * No of Unit, so later edits to EITHER field
+		# flow through -- while PR Quantity is left untouched.
+		units = flt(row.get("custom_total_qty"))
+		if pack > 0 and units > 0:
+			row.qty = pack * units
 
 
 def _get_pack_size(item_code, supplier):
