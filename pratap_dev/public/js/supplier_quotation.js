@@ -118,9 +118,18 @@ function show_create_purchase_order_dialog(frm) {
 			const locked = (has_cap && pending <= 0.0001) || (!has_cap && already);
 
 			let default_units;
-			if (locked) default_units = 0;
-			else if (has_cap) default_units = max_units;
-			else default_units = flt(c.no_of_unit) || (std_pkg ? flt(flt(d.qty) / std_pkg, 3) : 0);
+			if (locked) {
+				default_units = 0;
+			} else if (flt(c.no_of_unit) > 0) {
+				// Default Units to Order = the SQ row's No of Unit (whole packs), so Qty
+				// to Order auto-fills to No of Unit x Std Pkg Qty. Falls back to the
+				// pending/qty-derived value only when No of Unit isn't set.
+				default_units = flt(c.no_of_unit);
+			} else if (has_cap) {
+				default_units = max_units;
+			} else {
+				default_units = std_pkg ? flt(flt(d.qty) / std_pkg, 3) : 0;
+			}
 
 			return {
 				docname: d.name,
@@ -225,7 +234,7 @@ function render_create_purchase_order_dialog(frm, data) {
 					{
 						fieldtype: "Data",
 						fieldname: "pending",
-						label: __("Pending"),
+						label: __("PR Pending"),
 						in_list_view: 1,
 						read_only: 1,
 						columns: 1,
