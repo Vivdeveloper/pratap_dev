@@ -175,12 +175,39 @@ def get_batch_package_options(batch_no, warehouse):
 
 @frappe.whitelist()
 def get_item_package_options(item_code, warehouse):
-	"""Every (batch, pack size) with a positive package balance for `item_code` in
-	`warehouse`, in FIFO order (oldest batch first) — like the standard batch
-	selector, but at pack-size granularity. Used to auto-fill the SE dialog.
+	"""Every (batch, pack size) available for `item_code` in `warehouse`, FIFO (oldest
+	batch first). Used to auto-fill the Batch Packages SE dialog.
+
+	Two sources, per batch:
+	  1. Batch Package Ledger — the pack-size sub-ledger (when packs were captured, e.g.
+	     via a GRN). Its defined pack size is shown as-is.
+	  2. FALLBACK — when a batch has NO package-ledger balance in the warehouse but DOES
+	     have real stock there (e.g. the QC -> rework transfer batch, whose stock came in
+	     without a package breakdown), show that batch with **Pack Qty = 1** so the whole
+	     available qty is one-unit-each. "No pack size defined -> 1; if defined, show it."
 	"""
 	if not item_code or not warehouse:
 		return []
+
+	# Actual batch-wise stock in the warehouse (fallback for batches with no pack ledger).
+	from erpnext.stock.doctype.serial_and_batch_bundle.serial_and_batch_bundle import (
+		get_available_batches,
+	)
+
+	stock_by_batch = {}
+	try:
+		avail = get_available_batches(
+			frappe._dict({"item_code": item_code, "warehouse": warehouse})
+		) or []
+		for d in avail:
+			bn = d.get("batch_no")
+			if bn:
+				stock_by_batch[bn] = stock_by_batch.get(bn, 0.0) + flt(d.get("qty"))
+	except Exception:
+		frappe.log_error(
+			title="get_item_package_options stock fallback failed",
+			message=frappe.get_traceback(),
+		)
 
 	# FIFO: oldest manufacturing date first, then creation.
 	batches = frappe.get_all(
@@ -192,15 +219,30 @@ def get_item_package_options(item_code, warehouse):
 
 	options = []
 	for b in batches:
-		for bal in get_available_rows(b.name, warehouse):
-			options.append(
-				{
-					"batch_no": b.name,
-					"standard_pkg_qty": bal["standard_pkg_qty"],
-					"no_of_unit": bal["no_of_unit"],
-					"total_qty": bal["total_qty"],
-				}
-			)
+		rows = get_available_rows(b.name, warehouse)
+		if rows:
+			# Package ledger has a defined pack size -> use it as-is.
+			for bal in rows:
+				options.append(
+					{
+						"batch_no": b.name,
+						"standard_pkg_qty": bal["standard_pkg_qty"],
+						"no_of_unit": bal["no_of_unit"],
+						"total_qty": bal["total_qty"],
+					}
+				)
+		else:
+			# No package ledger -> fall back to real stock at Pack Qty = 1.
+			qty = flt(stock_by_batch.get(b.name))
+			if qty > 0.0001:
+				options.append(
+					{
+						"batch_no": b.name,
+						"standard_pkg_qty": 1.0,
+						"no_of_unit": qty,
+						"total_qty": qty,
+					}
+				)
 	return options
 
 

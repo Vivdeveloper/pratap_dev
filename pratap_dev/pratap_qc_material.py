@@ -140,7 +140,10 @@ def create_transfer_mr_on_submit(doc, method=None):
 	for row in doc.get("raw_materials") or []:
 		batch_loc = row.get("custom_batch_location")
 		source = row.get("source_warehouse")
-		qty = flt(row.get("custom_batch_qty"))
+		# Transfer only the REQUIRED qty for the rework (Total Req Qty), not the batch's
+		# full available qty. The batch (custom_batch) says WHICH batch to pull from; the
+		# quantity to move is the row's Total Req Qty.
+		qty = flt(row.get("total_req_qty"))
 		if not (row.item_code and batch_loc and source and qty > 0):
 			continue
 		if batch_loc == source:
@@ -241,3 +244,4 @@ def create_transfer_mr_on_submit(doc, method=None):
 			),
 			indicator="orange",
 		)
+
