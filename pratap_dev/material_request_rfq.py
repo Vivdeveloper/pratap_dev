@@ -101,6 +101,24 @@ def get_rfq_matrix_data(material_request):
         supplier_item_map.setdefault(row.item_code, set()).add(row.supplier)
         suppliers.add(row.supplier)
 
+    # Drop DISABLED (inactive) suppliers. The standard "Create Supplier Quotation" dropdown
+    # hides disabled suppliers, so letting one be picked here would make it silently vanish
+    # at that step (a dead end). Only enabled suppliers are offered for the RFQ.
+    if suppliers:
+        enabled = {
+            r.name
+            for r in frappe.get_all(
+                "Supplier",
+                filters={"name": ["in", list(suppliers)], "disabled": 0},
+                fields=["name"],
+            )
+        }
+        suppliers = {s for s in suppliers if s in enabled}
+        supplier_item_map = {
+            item_code: {s for s in sset if s in enabled}
+            for item_code, sset in supplier_item_map.items()
+        }
+
     supplier_names = {}
     if suppliers:
         for s in frappe.get_all(

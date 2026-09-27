@@ -160,8 +160,8 @@ def make_partial_purchase_order(source_name, rows, required_date=None):
 	}
 	qty_by_item = {name: units * pkg_by_item.get(name, 1.0) for name, units in units_by_item.items()}
 
-	# Server-side pending cap (don't trust the client): total requested qty per MR
-	# row must not exceed that row's pending.
+	# Ordering MORE than the Material Request's pending qty is ALLOWED — we no longer block
+	# it, just WARN so it stays visible. (Total requested qty per MR row vs its pending.)
 	pending_by_mri = _pending_by_mri(list(mri_by_item.values()))
 	req_by_mri = {}
 	for name, qty in qty_by_item.items():
@@ -171,10 +171,12 @@ def make_partial_purchase_order(source_name, rows, required_date=None):
 	for mri, req in req_by_mri.items():
 		pend = pending_by_mri.get(mri)
 		if pend is not None and req > pend + 0.0001:
-			frappe.throw(
+			frappe.msgprint(
 				_(
-					"Cannot order {0} against Material Request item {1}: only {2} is pending."
-				).format(req, mri, pend)
+					"Ordering {0} against Material Request item {1}, which exceeds the pending {2}. Proceeding anyway."
+				).format(req, mri, pend),
+				title=_("PO Qty Exceeds PR"),
+				indicator="orange",
 			)
 
 	# Map only the selected SQ rows, then override each PO item's qty.
