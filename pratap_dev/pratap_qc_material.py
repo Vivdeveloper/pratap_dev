@@ -177,6 +177,9 @@ def create_transfer_mr_on_submit(doc, method=None):
 	# 1) Material Request (type "Material Transfer"), SUBMITTED — the record.
 	mr = frappe.new_doc("Material Request")
 	mr.material_request_type = "Material Transfer"
+	# Link back to the QC so it appears under the QC's Connections (and vice-versa).
+	if mr.meta.has_field("custom_rework_qc"):
+		mr.custom_rework_qc = doc.name
 	mr.transaction_date = frappe.utils.today()
 	mr.schedule_date = frappe.utils.today()
 	if doc.get("company"):
@@ -202,6 +205,9 @@ def create_transfer_mr_on_submit(doc, method=None):
 		se = frappe.new_doc("Stock Entry")
 		se.stock_entry_type = REWORK_STOCK_ENTRY_TYPE
 		se.purpose = "Material Transfer"
+		# Link back to the QC so it appears under the QC's Connections (and vice-versa).
+		if se.meta.has_field("custom_rework_qc"):
+			se.custom_rework_qc = doc.name
 		if doc.get("company"):
 			se.company = doc.company
 		se.set_posting_time = 1

@@ -401,7 +401,18 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
- "links": [],
+ "links": [
+  {
+   "group": "Rework",
+   "link_doctype": "Material Request",
+   "link_fieldname": "custom_rework_qc"
+  },
+  {
+   "group": "Rework",
+   "link_doctype": "Stock Entry",
+   "link_fieldname": "custom_rework_qc"
+  }
+ ],
  "modified": "2026-06-19 14:52:48.933918",
  "modified_by": "Administrator",
  "module": "pratap",
