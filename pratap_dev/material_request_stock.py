@@ -88,6 +88,29 @@ def _total_rm_stock(item_code, company):
     return total
 
 
+# The three RM stock columns on the MR item, keyed by their warehouse prefix.
+RM_STOCK_FIELD_BY_PREFIX = {
+    "Main Store RM": "custom_main_store_rm_qty",
+    "Plant 1 WIP RM": "custom_plant_1_wip_rm",
+    "Plant 2 WIP RM": "custom_plant_2_wip_rm",
+}
+
+
+def _rm_stock_breakdown(item_code, company):
+    """Live on-hand stock per RM warehouse keyed by the MR Item fieldname, plus the total.
+    Keeps Plant 1 WIP / Plant 2 WIP / Main Stores columns in step with Total Stock so the
+    'Requirement generate for the Month' = Current Requirement − those three columns is exact."""
+    from erpnext.stock.utils import get_latest_stock_qty
+
+    out = {"total": 0.0}
+    for prefix, fieldname in RM_STOCK_FIELD_BY_PREFIX.items():
+        wh = _resolve_stock_warehouse(prefix, company)
+        qty = flt(get_latest_stock_qty(item_code, wh)) if wh else 0.0
+        out[fieldname] = qty
+        out["total"] += qty
+    return out
+
+
 # JOB WORK warehouses whose OUTs (consumption) feed the Last Month / 3-month consumption
 # columns. Naming varies slightly ("Plant 1 WIP RM- JOB WORK - PTPL"), so match by the
 # plant prefix AND "JOB WORK".
@@ -241,14 +264,24 @@ def update_pipeline_fields(doc, method=None):
         pipe = get_item_pipeline_status(row.item_code, doc.company)
         pending_pr = flt(pipe.get("pending_pr_for_grn"))
         pending_grn = flt(pipe.get("pending_grn_qc"))
-        total_stock = _total_rm_stock(row.item_code, doc.company)
+        stock = _rm_stock_breakdown(row.item_code, doc.company)
+        total_stock = stock["total"]
 
         row.custom_pending_pr_for_grn = pending_pr
         row.custom_pending_grn_qc = pending_grn
+        # Refresh the three RM stock columns so they stay in step with Total Stock.
+        row.custom_main_store_rm_qty = stock["custom_main_store_rm_qty"]
+        row.custom_plant_1_wip_rm = stock["custom_plant_1_wip_rm"]
+        row.custom_plant_2_wip_rm = stock["custom_plant_2_wip_rm"]
         row.custom_total_stock_qty = total_stock
 
         expected = flt(row.get("custom_expected_qty")) or flt(row.qty)
-        required = expected - total_stock - pending_pr - pending_grn
+        # Current Requirement As per BOM / Forecast vs Planning = the row's Expected Qty
+        # (from the Sales Forecast "Expected Qty"), falling back to Quantity.
+        row.custom_current_requirement = expected
+        # Requirement generate for the Month = Current Requirement - Plant 1 WIP - Plant 2 WIP
+        # - Main Stores (= Current Requirement - total RM stock), floored at 0.
+        required = expected - total_stock
         required = required if required > 0 else 0
         row.custom_required_qty_for_pr = required
 
@@ -262,18 +295,12 @@ def update_pipeline_fields(doc, method=None):
             row.custom_max_level_consumption = cons["max_3m"]
             row.custom_last_month_purchase = _last_month_purchase_qty(row.item_code, doc.company)
 
-            # Current Requirement As per BOM / Forecast vs Planning — from active Work Orders
-            # (BOM-exploded RM qty). Falls back to the row's expected/forecast qty when the
-            # item is in no open Work Order yet.
-            wo_req = _wo_requirement(row.item_code, doc.company)
-            row.custom_current_requirement = wo_req if wo_req > 0 else expected
+            # (Current Requirement is set above directly from the Expected Qty.)
 
-            # Actual Requirement for RFQ/P.O is editable ("Edit Option for Qty"); seed it with
-            # the sheet formula  N = G + L - M  = Max Level Consumption + Requirement generate
-            # for the Month - Pipe Line (PO/GRN pending), floored at 0 (never negative), only
-            # when the user hasn't entered one.
-            if not flt(row.get("custom_actual_requirement_rfq_po")):
-                row.custom_actual_requirement_rfq_po = max(0.0, flt(cons["max_3m"]) + required - pending_pr)
+            # Actual Requirement for RFQ/P.O = Maximum Level Consumption + Requirement generate
+            # for the Month - Pipe Line (PO/GRN pending), floored at 0 (never negative). Always
+            # derived from the formula (read-only column).
+            row.custom_actual_requirement_rfq_po = max(0.0, flt(cons["max_3m"]) + required - pending_pr)
 
 
 def move_fulfilled_items(doc, method=None):
