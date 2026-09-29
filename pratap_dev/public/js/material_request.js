@@ -71,6 +71,7 @@ frappe.ui.form.on("Material Request", {
 		// the pipeline status here too (company-wide, from open POs) so the columns reflect
 		// the POs raised for this order instead of staying stale at 0.
 		refresh_pipeline_status_all(frm);
+		fetch_ordered_qty_all(frm);
 
 		setup_reject_button(frm);
 		clear_stale_from_warehouse(frm);
@@ -184,8 +185,9 @@ const MR_PURCHASE_TABLE_COLS = [
 	{ fn: "custom_main_store_rm_qty", label: "Main Stores", ro: true },
 	{ fn: "custom_required_qty_for_pr", label: "Requirement generate for the Month", ro: true, num: true },
 	{ fn: "custom_pending_pr_for_grn", label: "Pipe Line P.O / GRN Pending etc.", ro: true, num: true },
+	{ fn: "custom_pending_po_qty", label: "Pending PO Qty", ro: true, num: true },
 	{ fn: "custom_actual_requirement_rfq_po", label: "Actual Requirement for RFQ/P.O", ro: true, num: true },
-	{ fn: "qty", label: "Qty", ctrl: { fieldtype: "Float" } },
+	{ fn: "qty", label: "Qty", ro: true, num: true },
 	{ fn: "uom", label: "UOM", ctrl: { fieldtype: "Link", options: "UOM" } },
 	{ fn: "schedule_date", label: "Required By", ctrl: { fieldtype: "Date" } },
 ];
@@ -285,9 +287,8 @@ function mr_pc_populate_row(frm, name, cols) {
 				frappe.model.set_value(cdt, name, "custom_min_level_avg_consumption", flt(m.min_level_avg_consumption));
 				frappe.model.set_value(cdt, name, "custom_max_level_consumption", flt(m.max_level_consumption));
 				frappe.model.set_value(cdt, name, "custom_last_month_purchase", flt(m.last_month_purchase));
-				const wo_req = flt(m.current_requirement);
-				const expected = flt(row.custom_expected_qty) || flt(row.qty);
-				frappe.model.set_value(cdt, name, "custom_current_requirement", wo_req > 0 ? wo_req : expected);
+				// Current Requirement As per BOM/Forecast vs Planning = the Expected Qty.
+				frappe.model.set_value(cdt, name, "custom_current_requirement", flt(row.custom_expected_qty));
 				if (typeof recompute_required_qty_for_pr === "function") {
 					recompute_required_qty_for_pr(cdt, name);
 				}
@@ -593,6 +594,38 @@ function populate_rm_stock_all(frm) {
 		return;
 	}
 	(frm.doc.items || []).forEach((row) => set_rm_warehouse_qty(frm, row.doctype, row.name));
+}
+
+// Pending PO Qty = Qty - qty already ordered against the row (submitted POs). Only SAVED rows
+// can have POs, so batch-fetch the ordered qty, cache it on each row (row.__ordered_qty), then
+// refresh the Pending PO column. New/unsaved rows keep __ordered_qty = 0 (Pending PO = Qty).
+function fetch_ordered_qty_all(frm) {
+	if (frm.doc.material_request_type !== "Purchase") {
+		return;
+	}
+	const names = (frm.doc.items || [])
+		.map((r) => r.name)
+		.filter((n) => n && !String(n).startsWith("new-"));
+	if (!names.length) {
+		return;
+	}
+	frappe.call({
+		method: "pratap_dev.material_request_stock.get_row_ordered_qty",
+		args: { mr_item_names: JSON.stringify(names) },
+		callback(r) {
+			const map = r.message || {};
+			(frm.doc.items || []).forEach((row) => {
+				row.__ordered_qty = flt(map[row.name]);
+				set_rm_qty_field(
+					row.doctype,
+					row.name,
+					"custom_pending_po_qty",
+					Math.max(flt(row.qty) - flt(row.__ordered_qty), 0)
+				);
+			});
+			render_custom_items_table(frm, MR_PURCHASE_TABLE_COLS);
+		},
+	});
 }
 
 // Refresh the pipeline columns (Pending PR for GRN / Pending for GRN QC) on a SUBMITTED
@@ -1071,9 +1104,8 @@ function set_material_rfq_metrics(frm, cdt, cdn) {
 			set_rm_qty_field(cdt, cdn, "custom_min_level_avg_consumption", d.min_level_avg_consumption || 0);
 			set_rm_qty_field(cdt, cdn, "custom_max_level_consumption", d.max_level_consumption || 0);
 			// Current Requirement As per BOM/Forecast vs Planning = the row's Expected Quantity
-			// (from the Sales Forecast "Expected Qty"), falling back to Quantity.
-			const cur = flt(row.custom_expected_qty) || flt(row.qty);
-			set_rm_qty_field(cdt, cdn, "custom_current_requirement", cur);
+			// (from the Sales Forecast "Expected Qty"). Qty is now derived, so no qty fallback.
+			set_rm_qty_field(cdt, cdn, "custom_current_requirement", flt(row.custom_expected_qty));
 			// Max Level Consumption just changed -> refresh Actual Requirement (G + L - M).
 			recompute_required_qty_for_pr(cdt, cdn);
 		})
@@ -1089,26 +1121,46 @@ function recompute_required_qty_for_pr(cdt, cdn) {
 		return;
 	}
 
-	// Current Requirement = Expected Qty (kept in sync so the two columns always agree).
-	const current_req = flt(row.custom_expected_qty) || flt(row.qty);
-	set_rm_qty_field(cdt, cdn, "custom_current_requirement", current_req);
+	const parent = locals[row.parenttype] && locals[row.parenttype][row.parent];
+	const is_purchase = parent && parent.material_request_type === "Purchase";
+	// Planning columns are computed while DRAFT and frozen at submit (docstatus > 0), so
+	// raising POs afterwards never re-shrinks the ordered quantity.
+	const is_draft = !parent || parent.docstatus === 0;
 
-	const required = Math.max(
-		current_req -
-			flt(row.custom_plant_1_wip_rm) -
-			flt(row.custom_plant_2_wip_rm) -
-			flt(row.custom_main_store_rm_qty),
-		0
-	);
-	set_rm_qty_field(cdt, cdn, "custom_required_qty_for_pr", required);
+	if (is_draft) {
+		// Current Requirement = Expected Qty. Qty is derived (below), so no qty fallback here
+		// (that would be circular: current_req -> required -> actual -> qty -> current_req).
+		const current_req = flt(row.custom_expected_qty);
+		set_rm_qty_field(cdt, cdn, "custom_current_requirement", current_req);
 
-	// Actual Requirement for RFQ/P.O = Maximum Level Consumption + Requirement generate for
-	// the Month - Pipe Line P.O / GRN Pending, floored at 0 (never negative). Always derived.
-	const actual = Math.max(
-		flt(row.custom_max_level_consumption) + required - flt(row.custom_pending_pr_for_grn),
-		0
-	);
-	set_rm_qty_field(cdt, cdn, "custom_actual_requirement_rfq_po", actual);
+		const required = Math.max(
+			current_req -
+				flt(row.custom_plant_1_wip_rm) -
+				flt(row.custom_plant_2_wip_rm) -
+				flt(row.custom_main_store_rm_qty),
+			0
+		);
+		set_rm_qty_field(cdt, cdn, "custom_required_qty_for_pr", required);
+
+		// Actual Requirement for RFQ/P.O = Maximum Level Consumption + Requirement generate for
+		// the Month - Pipe Line P.O / GRN Pending, floored at 0 (never negative).
+		const actual = Math.max(
+			flt(row.custom_max_level_consumption) + required - flt(row.custom_pending_pr_for_grn),
+			0
+		);
+		set_rm_qty_field(cdt, cdn, "custom_actual_requirement_rfq_po", actual);
+
+		// Purchase MR only: Qty to order = Actual Requirement (read-only, mirrors it).
+		if (is_purchase) {
+			set_rm_qty_field(cdt, cdn, "qty", actual);
+		}
+	}
+
+	// Pending PO Qty = (frozen) Qty for which no PO has been raised yet (Qty - PO made).
+	// Always refreshes so it decreases as POs are raised, even after submit.
+	if (is_purchase) {
+		set_rm_qty_field(cdt, cdn, "custom_pending_po_qty", Math.max(flt(row.qty) - flt(row.__ordered_qty), 0));
+	}
 }
 
 // Warehouse names may carry a trailing space (e.g. "Plant 1 WIP RM "), so match by prefix.

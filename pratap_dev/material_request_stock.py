@@ -163,6 +163,19 @@ def _consumption_out(item_code, warehouses, start, end):
 
 
 @frappe.whitelist()
+def get_row_ordered_qty(mr_item_names):
+    """Submitted-PO qty already ordered against each Material Request Item row name.
+    Used by the custom MR items table to show 'Pending PO Qty' = MR qty − PO made."""
+    import json
+
+    if isinstance(mr_item_names, str):
+        mr_item_names = json.loads(mr_item_names or "[]")
+    from pratap_dev.material_request_rfq import get_ordered_qty_by_mr_row
+
+    return get_ordered_qty_by_mr_row(mr_item_names or [])
+
+
+@frappe.whitelist()
 def get_item_rfq_metrics(item_code, company):
     """Live values for the RFQ/planning columns so the grid fills on item entry (before
     save), mirroring the pipeline/stock live-fill. Server `update_pipeline_fields` remains
@@ -257,50 +270,60 @@ def update_pipeline_fields(doc, method=None):
     if (doc.get("material_request_type") or "") != "Purchase":
         return
 
+    from pratap_dev.material_request_rfq import get_ordered_qty_by_mr_row
+
+    row_names = [r.name for r in (doc.get("items") or []) if r.name]
+    ordered_by_row = get_ordered_qty_by_mr_row(row_names) if row_names else {}
+    is_draft = doc.docstatus == 0
+
     for row in doc.get("items") or []:
         if not row.item_code:
             continue
 
+        # Progress / stock columns always refresh (draft AND submitted) so the pipeline and
+        # on-hand figures stay current.
         pipe = get_item_pipeline_status(row.item_code, doc.company)
         pending_pr = flt(pipe.get("pending_pr_for_grn"))
         pending_grn = flt(pipe.get("pending_grn_qc"))
         stock = _rm_stock_breakdown(row.item_code, doc.company)
-        total_stock = stock["total"]
-
         row.custom_pending_pr_for_grn = pending_pr
         row.custom_pending_grn_qc = pending_grn
-        # Refresh the three RM stock columns so they stay in step with Total Stock.
         row.custom_main_store_rm_qty = stock["custom_main_store_rm_qty"]
         row.custom_plant_1_wip_rm = stock["custom_plant_1_wip_rm"]
         row.custom_plant_2_wip_rm = stock["custom_plant_2_wip_rm"]
-        row.custom_total_stock_qty = total_stock
+        row.custom_total_stock_qty = stock["total"]
 
-        expected = flt(row.get("custom_expected_qty")) or flt(row.qty)
-        # Current Requirement As per BOM / Forecast vs Planning = the row's Expected Qty
-        # (from the Sales Forecast "Expected Qty"), falling back to Quantity.
-        row.custom_current_requirement = expected
-        # Requirement generate for the Month = Current Requirement - Plant 1 WIP - Plant 2 WIP
-        # - Main Stores (= Current Requirement - total RM stock), floored at 0.
-        required = expected - total_stock
-        required = required if required > 0 else 0
-        row.custom_required_qty_for_pr = required
+        # Planning columns (Current Requirement / Requirement generate / consumption / Actual
+        # Requirement / Qty) are computed while the MR is a DRAFT, then FROZEN at submit — so
+        # raising POs afterwards never re-shrinks the ordered quantity.
+        if is_draft:
+            # Current Requirement As per BOM / Forecast vs Planning = the row's Expected Qty.
+            # Qty is derived below (= Actual Requirement), so no qty fallback (would be circular).
+            expected = flt(row.get("custom_expected_qty"))
+            row.custom_current_requirement = expected
+            # Requirement generate for the Month = Current Requirement - total RM stock (>= 0).
+            required = expected - stock["total"]
+            required = required if required > 0 else 0
+            row.custom_required_qty_for_pr = required
 
-        # RFQ/Purchase columns (from the RM-requirement sheet):
-        #   Last Month Consumption / 3-month Avg & Max — JOB WORK warehouse OUTs.
-        #   Last Month Purchase — qty ordered on last month's POs.
-        if hasattr(row, "custom_last_month_consumption") or hasattr(row, "custom_last_month_purchase"):
             cons = _consumption_metrics(row.item_code, doc.company)
             row.custom_last_month_consumption = cons["last_month"]
             row.custom_min_level_avg_consumption = cons["avg_3m"]
             row.custom_max_level_consumption = cons["max_3m"]
             row.custom_last_month_purchase = _last_month_purchase_qty(row.item_code, doc.company)
 
-            # (Current Requirement is set above directly from the Expected Qty.)
-
-            # Actual Requirement for RFQ/P.O = Maximum Level Consumption + Requirement generate
-            # for the Month - Pipe Line (PO/GRN pending), floored at 0 (never negative). Always
-            # derived from the formula (read-only column).
+            # Actual Requirement for RFQ/P.O = Max Level Consumption + Requirement generate for
+            # the Month - Pipe Line (PO/GRN pending), floored at 0.
             row.custom_actual_requirement_rfq_po = max(0.0, flt(cons["max_3m"]) + required - pending_pr)
+
+            # Qty to order = Actual Requirement for RFQ/P.O (read-only column mirrors it).
+            row.qty = flt(row.custom_actual_requirement_rfq_po)
+            row.stock_qty = flt(row.qty) * flt(row.get("conversion_factor") or 1)
+
+        # Pending PO Qty = (frozen) Qty - qty already ordered against this row. Always refreshes
+        # so it decreases as POs are raised, even after the MR is submitted.
+        ordered = flt(ordered_by_row.get(row.name))
+        row.custom_pending_po_qty = max(flt(row.qty) - ordered, 0)
 
 
 def move_fulfilled_items(doc, method=None):
