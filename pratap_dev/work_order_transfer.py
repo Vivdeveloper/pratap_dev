@@ -1106,24 +1106,32 @@ def _qc_transfer_items(wo, qc):
 				"available_qty": avail,
 			})
 
-		# Prefill the transfer row from the batch + qty the QC captured in its Raw Materials
-		# (custom_batch + Batch Qty), so the operator can just click Material Transfer.
-		# Only offered before the item has actually been transferred.
+		# Prefill the transfer row from the batch the QC captured in its Raw Materials, so the
+		# operator can just click Material Transfer. Only offered before the item has actually
+		# been transferred.
+		#
+		# Std Pkg Qty and the qty come from the batch's REAL available stock (the matched
+		# dropdown entry), NOT the QC row's recorded Batch Qty — so No of Units reflects what
+		# the batch actually holds. The wanted qty (Batch Qty / transfer qty / required) is
+		# capped at the batch's available_qty so we never prefill more than exists.
 		prefill = None
 		batch_no = qc_batch
-		qty = flt(rm.get("custom_batch_qty")) or flt(rm.get("custom_transfer_qty")) or flt(rm.get("total_req_qty"))
-		if batch_no and qty > 0 and not _rework_item_transfers(wo.name, qc.name, rm.item_code):
-			std_pkg = flt(frappe.db.get_value("Batch", batch_no, "custom_standard_pkg_qty"))
-			if not std_pkg:
-				match = next((b for b in batches if b.get("batch_no") == batch_no), None)
-				std_pkg = flt(match.get("std_pkg")) if match else 0
+		want = flt(rm.get("custom_batch_qty")) or flt(rm.get("custom_transfer_qty")) or flt(rm.get("total_req_qty"))
+		if batch_no and want > 0 and not _rework_item_transfers(wo.name, qc.name, rm.item_code):
+			match = next((b for b in batches if b.get("batch_no") == batch_no), None)
+			std_pkg = flt(match.get("std_pkg")) if match else flt(
+				frappe.db.get_value("Batch", batch_no, "custom_standard_pkg_qty")
+			)
 			std_pkg = std_pkg or 1
-			prefill = {
-				"batch_no": batch_no,
-				"std_pkg": std_pkg,
-				"units": flt(qty / std_pkg, 3) if std_pkg else 0,
-				"qty": flt(qty, 3),
-			}
+			avail = flt(match.get("available_qty")) if match else 0.0
+			qty = min(want, avail) if avail > 0 else want
+			if qty > 0:
+				prefill = {
+					"batch_no": batch_no,
+					"std_pkg": std_pkg,
+					"units": flt(qty / std_pkg, 3) if std_pkg else 0,
+					"qty": flt(qty, 3),
+				}
 
 		items.append(
 			{

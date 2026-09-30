@@ -127,6 +127,17 @@ function render_wo_transfer_dialog(frm, ctx) {
 		"wo-inprocess-qc-btn"
 	);
 	dialog.$wrapper.find(".wo-inprocess-qc-btn").css("margin-left", "10px");
+	// Only ONE unfinished In Process QC at a time: while any in-process (rework) QC item is
+	// still not transferred + finished, disable the button so another can't be started.
+	if (rework_pending(ctx)) {
+		dialog.$wrapper
+			.find(".wo-inprocess-qc-btn")
+			.prop("disabled", true)
+			.attr(
+				"title",
+				__("Finish the current In Process QC (transfer & finish every item) before starting another.")
+			);
+	}
 	// "Final QC" — same as the form's "Create Pratap QC": opens a new In Process Pratap QC
 	// for this Work Order (prefilled), sitting right beside the In Process QC button.
 	dialog.add_custom_action(

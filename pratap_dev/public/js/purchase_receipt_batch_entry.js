@@ -676,6 +676,8 @@ function get_batch_entry_table_fields(default_pkg_qty, is_read_only = false, ite
 			in_list_view: 1,
 			read_only: is_read_only,
 			columns: 2,
+			// Expiry can only be today or a future date — never the past.
+			datepicker_options: { minDate: frappe.datetime.str_to_obj(frappe.datetime.get_today()) },
 		},
 	];
 }
@@ -706,6 +708,7 @@ function validate_batch_entry_rows(rows, required_no_of_unit) {
 	}
 
 	let total_no_of_unit = 0;
+	const today = frappe.datetime.get_today();
 
 	// The same batch may appear on more than one row (one batch, several pack
 	// sizes). Only the total No of Unit has to match the item row; duplicates are
@@ -717,6 +720,14 @@ function validate_batch_entry_rows(rows, required_no_of_unit) {
 		}
 		if (flt(entry.custom_total_qty) <= 0) {
 			frappe.throw(__("No of Unit must be greater than 0 for batch {0}.", [identifier]));
+		}
+		// Expiry Date can only be today or a future date — never in the past.
+		if (entry.expiry_date && entry.expiry_date < today) {
+			frappe.throw(
+				__("Expiry Date for batch {0} cannot be in the past — pick today or a future date.", [
+					identifier,
+				])
+			);
 		}
 		total_no_of_unit += flt(entry.custom_total_qty);
 	}
