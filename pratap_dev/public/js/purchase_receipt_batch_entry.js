@@ -676,8 +676,9 @@ function get_batch_entry_table_fields(default_pkg_qty, is_read_only = false, ite
 			in_list_view: 1,
 			read_only: is_read_only,
 			columns: 2,
-			// Expiry can only be today or a future date — never the past.
-			datepicker_options: { minDate: frappe.datetime.str_to_obj(frappe.datetime.get_today()) },
+			// Expiry can only be today or a future date — never the past. Frappe's Date control
+			// reads df.min_date (NOT datepicker_options) to set the picker's minimum date.
+			min_date: frappe.datetime.str_to_obj(frappe.datetime.get_today()),
 		},
 	];
 }
