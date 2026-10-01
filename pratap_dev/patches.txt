@@ -7,3 +7,4 @@
 pratap_dev.patches.disable_work_order_material_request_scripts
 pratap_dev.patches.backfill_grn_qc_status
 pratap_dev.patches.add_grn_qc_status_list_column
+pratap_dev.patches.rename_rate_in_kg_to_rate_per_unit

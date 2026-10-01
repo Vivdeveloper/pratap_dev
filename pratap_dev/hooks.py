@@ -301,7 +301,10 @@ doctype_js = {
     ],
     "Purchase Invoice": "public/js/pratap_quality_inspection_reference_override.js",
     "Delivery Note": "public/js/pratap_quality_inspection_reference_override.js",
-    "Sales Invoice": "public/js/pratap_quality_inspection_reference_override.js",
+    "Sales Invoice": [
+        "public/js/pratap_quality_inspection_reference_override.js",
+        "public/js/sales_invoice_rate_per_unit.js",
+    ],
     "Material Request": "public/js/material_request.js",
     "BOM": [
         "public/js/bom.js",
