@@ -190,6 +190,9 @@ const MR_PURCHASE_TABLE_COLS = [
 	{ fn: "qty", label: "Qty", ro: true, num: true },
 	{ fn: "uom", label: "UOM", ctrl: { fieldtype: "Link", options: "UOM" } },
 	{ fn: "schedule_date", label: "Required By", ctrl: { fieldtype: "Date" } },
+	// Lead Time in Days — fetched from the Item master (item_code.lead_time_days), i.e. the
+	// supplier's average delivery lead time. Read-only reference column.
+	{ fn: "custom_lead_time_in_days", label: "Lead Time in Days", ro: true },
 ];
 
 // Non-purchase (Material Transfer / Issue / Manufacture / Customer Provided): transfer columns.
