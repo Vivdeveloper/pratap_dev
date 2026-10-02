@@ -209,6 +209,19 @@ const MR_OTHER_TABLE_COLS = [
 
 const MR_ITEM_DT = "Material Request Item";
 
+// The column set that matches the CURRENT purpose. Used so every render (including stale/late
+// timer-driven re-renders) always shows the right columns for the current material_request_type.
+function current_mr_cols(frm) {
+	const purpose = frm.doc.material_request_type;
+	if (purpose === "Purchase") {
+		return MR_PURCHASE_TABLE_COLS;
+	}
+	if (purpose) {
+		return MR_OTHER_TABLE_COLS;
+	}
+	return null;
+}
+
 // Restore the native Items grid and remove the custom table (used when there is no purpose).
 function destroy_custom_items_table(frm) {
 	const field = frm.fields_dict.items;
@@ -309,6 +322,15 @@ function render_custom_items_table(frm, cols) {
 	if (!field || !field.$wrapper || !grid) {
 		return;
 	}
+	// Always render the column set for the CURRENT purpose. A delayed/stale re-render (e.g. a
+	// pending timer from before the Work Order button switched the purpose to Material Transfer)
+	// must never paint the previous purpose's columns. If there is no purpose yet, bail and let
+	// configure_items_grid show the native grid.
+	const active_cols = current_mr_cols(frm);
+	if (!active_cols) {
+		return;
+	}
+	cols = active_cols;
 	inject_mr_pc_style();
 	// hide the native grid UI (keep the grid object alive for the row-edit popups)
 	field.$wrapper.find(".form-grid-container").hide();
@@ -1441,6 +1463,11 @@ function show_sales_forecast_dialog(frm, data, stock_map) {
 			});
 
 			frm.refresh_field("items");
+			// Re-render the custom table for the CURRENT purpose (a picker may have switched it,
+			// e.g. Work Order -> Material Transfer) so the columns + new rows are correct, never
+			// the stale set. A second pass catches async stock/metric fills.
+			configure_items_grid(frm);
+			setTimeout(() => configure_items_grid(frm), 400);
 			frappe.msgprint(__("Items inserted Successfully"));
 			dialog.hide();
 		},
@@ -1618,6 +1645,11 @@ function show_packaging_material_dialog(frm, data, stock_map) {
 			});
 
 			frm.refresh_field("items");
+			// Re-render the custom table for the CURRENT purpose (a picker may have switched it,
+			// e.g. Work Order -> Material Transfer) so the columns + new rows are correct, never
+			// the stale set. A second pass catches async stock/metric fills.
+			configure_items_grid(frm);
+			setTimeout(() => configure_items_grid(frm), 400);
 			frappe.msgprint(__("Items inserted Successfully"));
 			dialog.hide();
 		},
@@ -1829,6 +1861,11 @@ function show_work_order_dialog(frm, data) {
 			});
 
 			frm.refresh_field("items");
+			// Re-render the custom table for the CURRENT purpose (a picker may have switched it,
+			// e.g. Work Order -> Material Transfer) so the columns + new rows are correct, never
+			// the stale set. A second pass catches async stock/metric fills.
+			configure_items_grid(frm);
+			setTimeout(() => configure_items_grid(frm), 400);
 			frappe.msgprint(__("Items inserted Successfully"));
 			dialog.hide();
 		},
