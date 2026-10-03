@@ -230,6 +230,7 @@ function transfers_table_html(transfers) {
 			(t) =>
 				`<tr>
 					<td>${frappe.utils.escape_html(t.batch_no)}</td>
+					<td>${frappe.utils.escape_html(t.qc_remark || "")}</td>
 					<td class="text-right">${format_number(t.std_pkg)}</td>
 					<td class="text-right">${format_number(t.units)}</td>
 					<td class="text-right">${format_number(t.qty)}</td>
@@ -245,6 +246,7 @@ function transfers_table_html(transfers) {
 		<table class="table table-bordered" style="font-size:12px;margin-bottom:0;">
 			<thead><tr>
 				<th>${__("Batch")}</th>
+				<th>${__("QC Remark")}</th>
 				<th class="text-right">${__("Std Pkg Qty")}</th>
 				<th class="text-right">${__("No of Units")}</th>
 				<th class="text-right">${__("Qty")}</th>
@@ -294,7 +296,7 @@ function batch_area_html(it) {
 	const opts = (it.batches || [])
 		.map(
 			(b) =>
-				`<option value="${frappe.utils.escape_html(b.batch_no)}" data-pkg="${b.std_pkg}" data-units="${b.no_of_unit || ""}" data-avail="${b.available_qty}">${frappe.utils.escape_html(
+				`<option value="${frappe.utils.escape_html(b.batch_no)}" data-pkg="${b.std_pkg}" data-units="${b.no_of_unit || ""}" data-avail="${b.available_qty}" data-remark="${frappe.utils.escape_html(b.qc_remark || "")}">${frappe.utils.escape_html(
 					b.batch_no
 				)} · ${__("std")} ${format_number(b.std_pkg)}${
 					b.no_of_unit ? ` · ${format_number(b.no_of_unit)} ${__("units")}` : ""
@@ -305,11 +307,12 @@ function batch_area_html(it) {
 	<div class="wo-tr-batches" style="margin-top:10px;">
 		<table class="table table-bordered" style="margin-bottom:6px;font-size:13px;">
 			<thead><tr>
-				<th style="width:34%">${__("Batch")}</th>
-				<th style="width:20%">${__("Std Pkg Qty")}</th>
-				<th style="width:18%">${__("No of Units")}</th>
-				<th style="width:18%">${__("Qty")}</th>
-				<th style="width:10%"></th>
+				<th style="width:28%">${__("Batch")}</th>
+				<th style="width:16%">${__("QC Remark")}</th>
+				<th style="width:16%">${__("Std Pkg Qty")}</th>
+				<th style="width:16%">${__("No of Units")}</th>
+				<th style="width:16%">${__("Qty")}</th>
+				<th style="width:8%"></th>
 			</tr></thead>
 			<tbody class="wo-tr-rows"></tbody>
 		</table>
@@ -362,6 +365,7 @@ function wire_item_block(frm, dialog, ctx, $body, it) {
 				<td><select class="form-control input-xs wo-b-batch"><option value="">${__(
 					"Select…"
 				)}</option>${optsHtml}</select></td>
+				<td><span class="wo-b-remark text-muted"></span></td>
 				<td><input type="number" class="form-control input-xs wo-b-pkg" min="0" step="any"></td>
 				<td><input type="number" class="form-control input-xs wo-b-units text-right" min="0" step="any"></td>
 				<td><input type="number" class="form-control input-xs wo-b-qty text-right" min="0" step="any"></td>
@@ -373,6 +377,8 @@ function wire_item_block(frm, dialog, ctx, $body, it) {
 			$tr.find(".wo-b-pkg").val(data.std_pkg || "");
 			$tr.find(".wo-b-units").val(data.units || "");
 			$tr.find(".wo-b-qty").val(data.qty || "");
+			// Show the picked batch's QC remark (from its selected dropdown option).
+			$tr.find(".wo-b-remark").text($tr.find(".wo-b-batch option:selected").data("remark") || "");
 		}
 	};
 
@@ -407,6 +413,7 @@ function wire_item_block(frm, dialog, ctx, $body, it) {
 		// Package Ledger); if "Select…" is chosen, clear both. Qty is then recomputed.
 		$tr.find(".wo-b-pkg").val(picked && pkg ? pkg : "");
 		$tr.find(".wo-b-units").val(picked && units ? units : "");
+		$tr.find(".wo-b-remark").text(picked ? ($sel.data("remark") || "") : "");
 		recalc_row($tr, "units");
 	});
 	$item.on("input", ".wo-b-pkg", function () {
@@ -690,7 +697,7 @@ function rework_batch_opts(batches) {
 	return (batches || [])
 		.map(
 			(b) =>
-				`<option value="${frappe.utils.escape_html(b.batch_no)}" data-pkg="${b.std_pkg}" data-units="${b.no_of_unit || ""}" data-avail="${b.available_qty}">${frappe.utils.escape_html(
+				`<option value="${frappe.utils.escape_html(b.batch_no)}" data-pkg="${b.std_pkg}" data-units="${b.no_of_unit || ""}" data-avail="${b.available_qty}" data-remark="${frappe.utils.escape_html(b.qc_remark || "")}">${frappe.utils.escape_html(
 					b.batch_no
 				)} · ${__("std")} ${format_number(b.std_pkg)}${
 					b.no_of_unit ? ` · ${format_number(b.no_of_unit)} ${__("units")}` : ""
@@ -711,11 +718,12 @@ function rework_item_html(qc, it) {
 		: `<div class="wo-rw-input">
 			<table class="table table-bordered" style="margin:8px 0 6px;font-size:13px;">
 				<thead><tr>
-					<th style="width:34%">${__("Batch")}</th>
-					<th style="width:20%">${__("Std Pkg Qty")}</th>
-					<th style="width:18%">${__("No of Units")}</th>
-					<th style="width:18%">${__("Qty")}</th>
-					<th style="width:10%"></th>
+					<th style="width:28%">${__("Batch")}</th>
+					<th style="width:16%">${__("QC Remark")}</th>
+					<th style="width:16%">${__("Std Pkg Qty")}</th>
+					<th style="width:16%">${__("No of Units")}</th>
+					<th style="width:16%">${__("Qty")}</th>
+					<th style="width:8%"></th>
 				</tr></thead>
 				<tbody class="wo-rw-rows"></tbody>
 			</table>
@@ -892,6 +900,7 @@ function rework_add_row($item, prefill) {
 	const $tr = $(
 		`<tr>
 			<td><select class="form-control input-xs wo-rwb-batch"><option value="">${__("Select…")}</option>${opts}</select></td>
+			<td><span class="wo-rwb-remark text-muted"></span></td>
 			<td><input type="number" class="form-control input-xs wo-rwb-pkg" min="0" step="any"></td>
 			<td><input type="number" class="form-control input-xs wo-rwb-units text-right" min="0" step="any"></td>
 			<td><input type="number" class="form-control input-xs wo-rwb-qty text-right" min="0" step="any"></td>
@@ -906,6 +915,7 @@ function rework_add_row($item, prefill) {
 		$tr.find(".wo-rwb-pkg").val(prefill.std_pkg || "");
 		$tr.find(".wo-rwb-units").val(prefill.units || "");
 		$tr.find(".wo-rwb-qty").val(prefill.qty || "");
+		$tr.find(".wo-rwb-remark").text($tr.find(".wo-rwb-batch option:selected").data("remark") || "");
 	}
 }
 
@@ -963,9 +973,11 @@ function wire_rework(frm, dialog, ctx) {
 		$(this).closest("tr").remove();
 	});
 	$body.on("change", ".wo-rwb-batch", function () {
-		const pkg = $(this).find("option:selected").data("pkg");
+		const $sel = $(this).find("option:selected");
+		const pkg = $sel.data("pkg");
 		const $tr = $(this).closest("tr");
 		$tr.find(".wo-rwb-pkg").val($(this).val() && pkg ? pkg : "");
+		$tr.find(".wo-rwb-remark").text($(this).val() ? ($sel.data("remark") || "") : "");
 		rework_recalc($tr, "units");
 	});
 	$body.on("input", ".wo-rwb-pkg, .wo-rwb-units", function () {

@@ -719,6 +719,10 @@ def _available_batches(item_code, warehouse):
 		if remaining <= 0.0001:
 			continue
 
+		# QC Remark captured during this batch's QC — carried onto every pack option so it
+		# shows (read-only) next to the batch in the selection rows, not just after transfer.
+		qc_remark = frappe.db.get_value("Batch", batch_no, "custom_qc_remark") or ""
+
 		# Pack breakdown from the ledger, each row capped at what is really in stock.
 		for lr in get_available_rows(batch_no, warehouse):
 			if remaining <= 0.0001:
@@ -730,6 +734,7 @@ def _available_batches(item_code, warehouse):
 			out.append(
 				{
 					"batch_no": batch_no,
+					"qc_remark": qc_remark,
 					"std_pkg": pkg,
 					"no_of_unit": flt(take / pkg, 3) if pkg else 0,
 					"available_qty": flt(take, 3),
@@ -747,6 +752,7 @@ def _available_batches(item_code, warehouse):
 			out.append(
 				{
 					"batch_no": batch_no,
+					"qc_remark": qc_remark,
 					"std_pkg": pkg,
 					"no_of_unit": flt(remaining / pkg, 3) if pkg else 0,
 					"available_qty": flt(remaining, 3),
@@ -776,12 +782,16 @@ def _item_transfers(work_order, item_code):
 	default_pkg = _item_default_pkg_qty(item_code)
 	out = []
 	for r in rows:
-		std = flt(frappe.db.get_value("Batch", r.batch_no, "custom_standard_pkg_qty")) or default_pkg or 1
+		std, qc_remark = frappe.db.get_value(
+			"Batch", r.batch_no, ["custom_standard_pkg_qty", "custom_qc_remark"]
+		) or (None, None)
+		std = flt(std) or default_pkg or 1
 		out.append(
 			{
 				"stock_entry": r.stock_entry,
 				"posting_date": str(r.posting_date or ""),
 				"batch_no": r.batch_no,
+				"qc_remark": qc_remark or "",
 				"qty": flt(r.qty, 3),
 				"std_pkg": flt(std, 3),
 				"units": flt(r.qty / std, 3) if std else 0,
@@ -1063,12 +1073,16 @@ def _rework_item_transfers(work_order, qc_name, item_code):
 	default_pkg = _item_default_pkg_qty(item_code)
 	out = []
 	for r in rows:
-		std = flt(frappe.db.get_value("Batch", r.batch_no, "custom_standard_pkg_qty")) or default_pkg or 1
+		std, qc_remark = frappe.db.get_value(
+			"Batch", r.batch_no, ["custom_standard_pkg_qty", "custom_qc_remark"]
+		) or (None, None)
+		std = flt(std) or default_pkg or 1
 		out.append(
 			{
 				"stock_entry": r.stock_entry,
 				"posting_date": str(r.posting_date or ""),
 				"batch_no": r.batch_no,
+				"qc_remark": qc_remark or "",
 				"qty": flt(r.qty, 3),
 				"std_pkg": flt(std, 3),
 				"units": flt(r.qty / std, 3) if std else 0,
@@ -1098,9 +1112,13 @@ def _qc_transfer_items(wo, qc):
 		qc_batch = rm.get("custom_batch")
 		if qc_batch and not any(b.get("batch_no") == qc_batch for b in batches):
 			avail = flt(rm.get("custom_batch_qty"))
-			std = flt(frappe.db.get_value("Batch", qc_batch, "custom_standard_pkg_qty")) or 1
+			std_val, qc_remark = frappe.db.get_value(
+				"Batch", qc_batch, ["custom_standard_pkg_qty", "custom_qc_remark"]
+			) or (None, None)
+			std = flt(std_val) or 1
 			batches.insert(0, {
 				"batch_no": qc_batch,
+				"qc_remark": qc_remark or "",
 				"std_pkg": std,
 				"no_of_unit": flt(avail / std, 3) if std else 0,
 				"available_qty": avail,

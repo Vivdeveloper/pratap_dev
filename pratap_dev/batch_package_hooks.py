@@ -189,36 +189,34 @@ def get_item_package_options(item_code, warehouse):
 	if not item_code or not warehouse:
 		return []
 
-	# Actual batch-wise stock in the warehouse (fallback for batches with no pack ledger).
-	from erpnext.stock.doctype.serial_and_batch_bundle.serial_and_batch_bundle import (
-		get_available_batches,
-	)
+	# Real batch-wise stock in the warehouse (fallback for batches with no pack ledger).
+	# Use the SLE-based batch balance (same source the Batch page "Stock Levels" shows), so
+	# stock that arrived WITHOUT a package breakdown (e.g. a plain Stock Entry / batch_no
+	# column, not a Serial & Batch Bundle) is still picked up.
+	from erpnext.stock.doctype.batch.batch import get_batch_qty
 
-	stock_by_batch = {}
-	try:
-		avail = get_available_batches(
-			frappe._dict({"item_code": item_code, "warehouse": warehouse})
-		) or []
-		for d in avail:
-			bn = d.get("batch_no")
-			if bn:
-				stock_by_batch[bn] = stock_by_batch.get(bn, 0.0) + flt(d.get("qty"))
-	except Exception:
-		frappe.log_error(
-			title="get_item_package_options stock fallback failed",
-			message=frappe.get_traceback(),
-		)
+	def _batch_stock(batch_no):
+		try:
+			return flt(get_batch_qty(batch_no=batch_no, warehouse=warehouse, item_code=item_code))
+		except Exception:
+			frappe.log_error(
+				title="get_item_package_options batch stock lookup failed",
+				message=frappe.get_traceback(),
+			)
+			return 0.0
 
 	# FIFO: oldest manufacturing date first, then creation.
 	batches = frappe.get_all(
 		"Batch",
 		filters={"item": item_code, "disabled": 0},
-		fields=["name"],
+		fields=["name", "custom_qc_remark"],
 		order_by="manufacturing_date asc, creation asc",
 	)
 
 	options = []
 	for b in batches:
+		# QC Remark captured during the batch's QC — shown (read-only) in the SE dialog.
+		qc_remark = b.get("custom_qc_remark") or ""
 		rows = get_available_rows(b.name, warehouse)
 		if rows:
 			# Package ledger has a defined pack size -> use it as-is.
@@ -226,18 +224,21 @@ def get_item_package_options(item_code, warehouse):
 				options.append(
 					{
 						"batch_no": b.name,
+						"qc_remark": qc_remark,
 						"standard_pkg_qty": bal["standard_pkg_qty"],
 						"no_of_unit": bal["no_of_unit"],
 						"total_qty": bal["total_qty"],
 					}
 				)
 		else:
-			# No package ledger -> fall back to real stock at Pack Qty = 1.
-			qty = flt(stock_by_batch.get(b.name))
+			# No package ledger / no pack size defined -> fall back to the batch's real
+			# warehouse stock at Pack Qty = 1 (one-unit-each), so it is always selectable.
+			qty = _batch_stock(b.name)
 			if qty > 0.0001:
 				options.append(
 					{
 						"batch_no": b.name,
+						"qc_remark": qc_remark,
 						"standard_pkg_qty": 1.0,
 						"no_of_unit": qty,
 						"total_qty": qty,

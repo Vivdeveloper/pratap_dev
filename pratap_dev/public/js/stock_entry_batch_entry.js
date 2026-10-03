@@ -106,9 +106,10 @@ function fifo_prefill(rows, target_qty) {
 function alloc_table_fields() {
 	return [
 		{ fieldname: "batch_no", fieldtype: "Data", label: __("Batch"), in_list_view: 1, read_only: 1, columns: 2 },
+		{ fieldname: "qc_remark", fieldtype: "Data", label: __("QC Remark"), in_list_view: 1, read_only: 1, columns: 2 },
 		{ fieldname: "standard_pkg_qty", fieldtype: "Float", label: __("Pack Qty"), in_list_view: 1, read_only: 1, columns: 1 },
-		{ fieldname: "available_units", fieldtype: "Float", label: __("Available Units"), in_list_view: 1, read_only: 1, columns: 2 },
-		{ fieldname: "available", fieldtype: "Float", label: __("Available Qty"), in_list_view: 1, read_only: 1, columns: 2 },
+		{ fieldname: "available_units", fieldtype: "Float", label: __("Available Units"), in_list_view: 1, read_only: 1, columns: 1 },
+		{ fieldname: "available", fieldtype: "Float", label: __("Available Qty"), in_list_view: 1, read_only: 1, columns: 1 },
 		{
 			fieldname: "no_of_unit",
 			fieldtype: "Float",
@@ -124,7 +125,7 @@ function alloc_table_fields() {
 			fieldtype: "Float",
 			label: __("Take Total Qty"),
 			in_list_view: 1,
-			columns: 2,
+			columns: 1,
 			onchange() {
 				setTimeout(() => recompute_all_se_alloc("total_qty"), 0);
 			},
@@ -209,6 +210,7 @@ function open_se_multi_package_dialog(frm, item_rows) {
 				}
 				let data = opts.map((o) => ({
 					batch_no: o.batch_no,
+					qc_remark: o.qc_remark || "",
 					standard_pkg_qty: flt(o.standard_pkg_qty),
 					available_units: flt(o.no_of_unit),
 					available: flt(o.total_qty),
