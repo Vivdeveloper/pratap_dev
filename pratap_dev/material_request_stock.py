@@ -382,3 +382,24 @@ def move_fulfilled_items(doc, method=None):
         for i, row in enumerate(keep, start=1):
             row.idx = i
         doc.set("items", keep)
+
+
+def set_item_required_by_from_lead_time(doc, method=None):
+    """Set each item's Required By (schedule_date):
+
+      * row HAS a Lead Time in Days -> Transaction Date + lead days
+      * otherwise                   -> the MR header's Required By (schedule_date)
+
+    So an item with a 7-day lead on a 03-Oct MR gets Required By = 10-Oct, while rows with
+    no lead time keep the header Required By. Runs on validate (every save, drafts included).
+    """
+    from frappe.utils import add_days, getdate, cint
+
+    txn = doc.get("transaction_date")
+    header_required_by = doc.get("schedule_date")
+    for row in doc.get("items") or []:
+        lead = cint(row.get("custom_lead_time_in_days"))
+        if lead > 0 and txn:
+            row.schedule_date = add_days(getdate(txn), lead)
+        elif header_required_by:
+            row.schedule_date = header_required_by

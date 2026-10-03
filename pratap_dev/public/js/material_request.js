@@ -87,6 +87,15 @@ frappe.ui.form.on("Material Request", {
 		configure_items_grid(frm);
 	},
 
+	// Required By (header) or Transaction Date changed -> recompute each row's Required By:
+	// Transaction Date + Lead Time in Days when the row has a lead time, else the header date.
+	schedule_date(frm) {
+		apply_required_by_from_lead_time(frm);
+	},
+	transaction_date(frm) {
+		apply_required_by_from_lead_time(frm);
+	},
+
 	after_save(frm) {
 		// The server (move_fulfilled_items) removes already-fulfilled rows from the Items
 		// table during validate and snapshots them to custom_fulfilled_items_json. That
@@ -208,6 +217,34 @@ const MR_OTHER_TABLE_COLS = [
 ];
 
 const MR_ITEM_DT = "Material Request Item";
+
+// Live preview of per-item Required By: Transaction Date + Lead Time in Days when the row has
+// a lead time, else the MR header's Required By. The server (set_item_required_by_from_lead_time)
+// is the authoritative compute on save; this just keeps the grid in sync before saving.
+function apply_required_by_from_lead_time(frm) {
+	const txn = frm.doc.transaction_date;
+	const header = frm.doc.schedule_date;
+	let changed = false;
+	(frm.doc.items || []).forEach((row) => {
+		const lead = cint(row.custom_lead_time_in_days);
+		let target = null;
+		if (lead > 0 && txn) {
+			target = frappe.datetime.add_days(txn, lead);
+		} else if (header) {
+			target = header;
+		}
+		if (target && row.schedule_date !== target) {
+			row.schedule_date = target;
+			changed = true;
+		}
+	});
+	if (changed) {
+		frm.refresh_field("items");
+		if (frm.doc.material_request_type) {
+			render_custom_items_table(frm, current_mr_cols(frm));
+		}
+	}
+}
 
 // The column set that matches the CURRENT purpose. Used so every render (including stale/late
 // timer-driven re-renders) always shows the right columns for the current material_request_type.
@@ -797,6 +834,14 @@ frappe.ui.form.on("Material Request Item", {
 		set_rm_warehouse_qty(frm, cdt, cdn);
 		set_supplier_if_single_vendor(frm, cdt, cdn);
 		set_material_rfq_metrics(frm, cdt, cdn);
+		// Lead Time in Days is fetched from the item (async) -> once it lands, recompute the
+		// row's Required By (Transaction Date + lead days, else header Required By).
+		setTimeout(() => apply_required_by_from_lead_time(frm), 700);
+	},
+	// Fires when the fetched Lead Time in Days lands (or is edited) -> recompute Required By
+	// live on the client, so the grid shows it immediately without waiting for save.
+	custom_lead_time_in_days(frm, cdt, cdn) {
+		apply_required_by_from_lead_time(frm);
 	},
 	custom_packing_qty(frm, cdt, cdn) {
 		calculate_quantity(frm, cdt, cdn);

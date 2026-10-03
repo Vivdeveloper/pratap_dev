@@ -410,6 +410,8 @@ doc_events = {
             # runs AFTER pipeline fields are computed: removes already-fulfilled items from
             # the Items table (snapshotting them for the "Already Fulfilled" box below).
             "pratap_dev.material_request_stock.move_fulfilled_items",
+            # Per-item Required By = Transaction Date + Lead Time in Days (fallback: header Required By).
+            "pratap_dev.material_request_stock.set_item_required_by_from_lead_time",
         ],
         "before_update_after_submit": "pratap_dev.material_request_stock.update_pipeline_fields",
     },

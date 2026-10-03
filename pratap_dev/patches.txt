@@ -9,3 +9,4 @@ pratap_dev.patches.backfill_grn_qc_status
 pratap_dev.patches.add_grn_qc_status_list_column
 pratap_dev.patches.rename_rate_in_kg_to_rate_per_unit
 pratap_dev.patches.add_batch_qc_remark_field
+pratap_dev.patches.disable_mr_required_date_copy_script
