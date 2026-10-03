@@ -790,6 +790,8 @@ function serialize_batch_qc_rows(rows) {
 				density,
 				accepted_density_qty: batch_qty_by_density(normalized.accepted_qty, density),
 				rejected_density_qty: batch_qty_by_density(normalized.rejected_qty, density),
+				// Free-text QC remark per batch.
+				qc_remark: normalized.qc_remark || "",
 			};
 		})
 	);
@@ -858,6 +860,8 @@ function normalize_grn_batch_row(row, saved = {}) {
 		no_of_unit,
 		accepted_unit,
 		density,
+		// Free-text QC remark per batch (saved value wins, else any GRN-side value).
+		qc_remark: (saved.qc_remark ?? row.qc_remark ?? ""),
 	};
 
 	return sync_row_from_accepted_unit(normalized).row;
@@ -982,6 +986,7 @@ function render_grn_batch_html(frm) {
 					<td class="grn-batch-col-qty grn-batch-col-density">${format_batch_display(row_density)}</td>
 					<td class="grn-batch-col-qty grn-batch-col-accepted">${accepted_qty}</td>
 					<td class="grn-batch-col-qty grn-batch-col-rejected">${rejected_qty}</td>
+					<td class="grn-batch-col-qty grn-batch-col-remark">${frappe.utils.escape_html(row.qc_remark || "")}</td>
 				</tr>`;
 			}
 
@@ -1010,6 +1015,10 @@ function render_grn_batch_html(frm) {
 				</td>
 				<td class="grn-batch-col-qty grn-batch-col-rejected">
 					<span class="grn-batch-rejected-display" data-batch-index="${index}">${rejected_qty}</span>
+				</td>
+				<td class="grn-batch-col-input grn-batch-col-remark">
+					<input type="text" class="grn-batch-input grn-batch-remark"
+						data-batch-index="${index}" value="${frappe.utils.escape_html(row.qc_remark || "")}" placeholder="${__("Remark")}">
 				</td>
 			</tr>`;
 		})
@@ -1053,6 +1062,7 @@ function render_grn_batch_html(frm) {
 							<th class="grn-batch-col-input grn-batch-col-density">${__("Density")}</th>
 							<th class="grn-batch-col-input grn-batch-col-accepted">${__("Accepted Qty")}</th>
 							<th class="grn-batch-col-input grn-batch-col-rejected">${__("Rejected Qty")}</th>
+							<th class="grn-batch-col-input grn-batch-col-remark">${__("QC Remark")}</th>
 						</tr>
 					</thead>
 					<tbody>${table_rows}</tbody>
@@ -1067,6 +1077,7 @@ function render_grn_batch_html(frm) {
 							<td class="grn-batch-col-qty grn-batch-col-density"></td>
 							<td class="grn-batch-col-qty grn-batch-col-accepted grn-batch-total-accepted-qty">${format_batch_display(total_accepted_density)}</td>
 							<td class="grn-batch-col-qty grn-batch-col-rejected grn-batch-total-rejected-qty">${format_batch_display(total_rejected_density)}</td>
+							<td class="grn-batch-col-qty grn-batch-col-remark"></td>
 						</tr>
 					</tfoot>
 				</table>
@@ -1094,6 +1105,22 @@ function bind_grn_batch_html_events(frm, $wrapper) {
 		.on("input blur", ".grn-batch-density", function () {
 			sync_grn_batch_density_input(frm, $wrapper, $(this));
 		});
+	$wrapper
+		.off("input blur", ".grn-batch-remark")
+		.on("input blur", ".grn-batch-remark", function () {
+			sync_grn_batch_remark_input(frm, $(this));
+		});
+}
+
+// Per-batch QC Remark edit: store it on the row and re-serialize the JSON.
+function sync_grn_batch_remark_input(frm, $changed_input) {
+	const index = parseInt($changed_input.attr("data-batch-index"), 10);
+	const row = frm._grn_batch_rows?.[index];
+	if (!row) {
+		return;
+	}
+	row.qc_remark = $changed_input.val() || "";
+	frm.set_value("batch_qc_json", serialize_batch_qc_rows(frm._grn_batch_rows));
 }
 
 function calc_rejected_qty(row) {

@@ -40,6 +40,20 @@ def get_template_parameters(template):
 
 
 class PratapQualityInspection(Document):
+	def _sync_batch_qc_remarks(self):
+		"""Write the per-batch QC Remark (from the Batch QC Details table / batch_qc_json) onto
+		each Batch's QC Remark field. Runs on save so the remark shows on the Batch immediately."""
+		if (self.get("reference_type") or "") != "GRN":
+			return
+		from pratap_dev.purchase_receipt_batch_qc import parse_batch_qc_json
+
+		for row in parse_batch_qc_json(self.get("batch_qc_json")):
+			batch_no = row.get("batch_no")
+			remark = (row.get("qc_remark") or "").strip()
+			if not batch_no or not remark or not frappe.db.exists("Batch", batch_no):
+				continue
+			frappe.db.set_value("Batch", batch_no, "custom_qc_remark", remark, update_modified=False)
+
 	def before_submit(self):
 		self._validate_required_before_submit()
 		self._ensure_density_for_submit()
@@ -127,6 +141,9 @@ class PratapQualityInspection(Document):
 	def on_update(self):
 		if self.status == "Rework" and self.reference_type == "Work Order":
 			self._update_rework_qc_in_work_order()
+		# Mirror each batch's QC Remark onto its Batch record on every SAVE (even while the QC
+		# is still a draft / QC Pending) — no need to wait for submit.
+		self._sync_batch_qc_remarks()
 
 	def validate(self):
 		self._set_inspector()

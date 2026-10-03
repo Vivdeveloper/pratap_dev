@@ -61,6 +61,8 @@ def parse_batch_qc_json(value):
 				"density": flt(row.get("density")),
 				"accepted_density_qty": flt(row.get("accepted_density_qty")),
 				"rejected_density_qty": flt(row.get("rejected_density_qty")),
+				# Free-text QC remark entered per batch; mirrored onto the Batch record.
+				"qc_remark": (row.get("qc_remark") or "").strip(),
 			}
 		)
 
@@ -369,17 +371,30 @@ def _cancel_linked_bundle(bundle_name):
 
 
 def _update_batch_density_from_qc(batch_rows, custom_density):
-	"""Write each batch's density onto its Batch record (per-batch, else the fallback)."""
+	"""Write each batch's density + QC remark onto its Batch record (per-batch, else fallback)."""
 	for row in batch_rows:
 		batch_no = row.get("batch_no")
-		density = flt(row.get("density")) or flt(custom_density)
-		if not batch_no or density <= 0 or not frappe.db.exists("Batch", batch_no):
+		if not batch_no or not frappe.db.exists("Batch", batch_no):
 			continue
 
-		frappe.db.set_value(
-			"Batch",
-			batch_no,
-			"custom_density",
-			density,
-			update_modified=False,
-		)
+		density = flt(row.get("density")) or flt(custom_density)
+		if density > 0:
+			frappe.db.set_value(
+				"Batch",
+				batch_no,
+				"custom_density",
+				density,
+				update_modified=False,
+			)
+
+		# QC Remark entered in the Batch QC Details table -> mirror onto the Batch. Only when a
+		# remark was entered, so a blank doesn't wipe an existing one.
+		remark = (row.get("qc_remark") or "").strip()
+		if remark:
+			frappe.db.set_value(
+				"Batch",
+				batch_no,
+				"custom_qc_remark",
+				remark,
+				update_modified=False,
+			)
