@@ -934,7 +934,21 @@ function load_grn_batch_details(frm) {
 		});
 }
 
+// One-time CSS so long QC Remark text stays readable by scrolling inside a fixed-size cell.
+function ensure_qc_remark_scroll_style() {
+	if (document.getElementById("qc-remark-scroll-style")) {
+		return;
+	}
+	const s = document.createElement("style");
+	s.id = "qc-remark-scroll-style";
+	s.textContent =
+		".qc-remark-scroll{display:block;min-width:220px;max-width:260px;max-height:52px;" +
+		"overflow-y:auto;overflow-x:hidden;white-space:normal;word-break:break-word;line-height:1.35;}";
+	document.head.appendChild(s);
+}
+
 function render_grn_batch_html(frm) {
+	ensure_qc_remark_scroll_style();
 	const $wrapper = frm.fields_dict.batch_html?.$wrapper;
 	if (!$wrapper) {
 		return;
@@ -986,7 +1000,7 @@ function render_grn_batch_html(frm) {
 					<td class="grn-batch-col-qty grn-batch-col-density">${format_batch_display(row_density)}</td>
 					<td class="grn-batch-col-qty grn-batch-col-accepted">${accepted_qty}</td>
 					<td class="grn-batch-col-qty grn-batch-col-rejected">${rejected_qty}</td>
-					<td class="grn-batch-col-qty grn-batch-col-remark">${frappe.utils.escape_html(row.qc_remark || "")}</td>
+					<td class="grn-batch-col-qty grn-batch-col-remark"><div class="qc-remark-scroll" title="${frappe.utils.escape_html(row.qc_remark || "")}">${frappe.utils.escape_html(row.qc_remark || "")}</div></td>
 				</tr>`;
 			}
 

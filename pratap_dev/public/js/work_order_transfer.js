@@ -42,7 +42,21 @@ function open_wo_transfer_dialog(frm) {
 	});
 }
 
+// One-time CSS so long QC Remark text stays readable by scrolling inside a fixed-size cell.
+function ensure_qc_remark_scroll_style() {
+	if (document.getElementById("qc-remark-scroll-style")) {
+		return;
+	}
+	const s = document.createElement("style");
+	s.id = "qc-remark-scroll-style";
+	s.textContent =
+		".qc-remark-scroll{display:block;min-width:220px;max-width:260px;max-height:52px;" +
+		"overflow-y:auto;overflow-x:hidden;white-space:normal;word-break:break-word;line-height:1.35;}";
+	document.head.appendChild(s);
+}
+
 function render_wo_transfer_dialog(frm, ctx) {
+	ensure_qc_remark_scroll_style();
 	const dialog = new frappe.ui.Dialog({
 		title: __("Material Transfer for Manufacture — by Item / Batch"),
 		size: "extra-large",
@@ -230,7 +244,7 @@ function transfers_table_html(transfers) {
 			(t) =>
 				`<tr>
 					<td>${frappe.utils.escape_html(t.batch_no)}</td>
-					<td>${frappe.utils.escape_html(t.qc_remark || "")}</td>
+					<td><div class="qc-remark-scroll" title="${frappe.utils.escape_html(t.qc_remark || "")}">${frappe.utils.escape_html(t.qc_remark || "")}</div></td>
 					<td class="text-right">${format_number(t.std_pkg)}</td>
 					<td class="text-right">${format_number(t.units)}</td>
 					<td class="text-right">${format_number(t.qty)}</td>
@@ -365,7 +379,7 @@ function wire_item_block(frm, dialog, ctx, $body, it) {
 				<td><select class="form-control input-xs wo-b-batch"><option value="">${__(
 					"Select…"
 				)}</option>${optsHtml}</select></td>
-				<td><span class="wo-b-remark text-muted"></span></td>
+				<td><span class="wo-b-remark text-muted qc-remark-scroll"></span></td>
 				<td><input type="number" class="form-control input-xs wo-b-pkg" min="0" step="any"></td>
 				<td><input type="number" class="form-control input-xs wo-b-units text-right" min="0" step="any"></td>
 				<td><input type="number" class="form-control input-xs wo-b-qty text-right" min="0" step="any"></td>
@@ -378,7 +392,9 @@ function wire_item_block(frm, dialog, ctx, $body, it) {
 			$tr.find(".wo-b-units").val(data.units || "");
 			$tr.find(".wo-b-qty").val(data.qty || "");
 			// Show the picked batch's QC remark (from its selected dropdown option).
-			$tr.find(".wo-b-remark").text($tr.find(".wo-b-batch option:selected").data("remark") || "");
+			$tr.find(".wo-b-remark")
+				.text($tr.find(".wo-b-batch option:selected").data("remark") || "")
+				.attr("title", $tr.find(".wo-b-batch option:selected").data("remark") || "");
 		}
 	};
 
@@ -413,7 +429,9 @@ function wire_item_block(frm, dialog, ctx, $body, it) {
 		// Package Ledger); if "Select…" is chosen, clear both. Qty is then recomputed.
 		$tr.find(".wo-b-pkg").val(picked && pkg ? pkg : "");
 		$tr.find(".wo-b-units").val(picked && units ? units : "");
-		$tr.find(".wo-b-remark").text(picked ? ($sel.data("remark") || "") : "");
+		$tr.find(".wo-b-remark")
+			.text(picked ? ($sel.data("remark") || "") : "")
+			.attr("title", picked ? ($sel.data("remark") || "") : "");
 		recalc_row($tr, "units");
 	});
 	$item.on("input", ".wo-b-pkg", function () {
@@ -900,7 +918,7 @@ function rework_add_row($item, prefill) {
 	const $tr = $(
 		`<tr>
 			<td><select class="form-control input-xs wo-rwb-batch"><option value="">${__("Select…")}</option>${opts}</select></td>
-			<td><span class="wo-rwb-remark text-muted"></span></td>
+			<td><span class="wo-rwb-remark text-muted qc-remark-scroll"></span></td>
 			<td><input type="number" class="form-control input-xs wo-rwb-pkg" min="0" step="any"></td>
 			<td><input type="number" class="form-control input-xs wo-rwb-units text-right" min="0" step="any"></td>
 			<td><input type="number" class="form-control input-xs wo-rwb-qty text-right" min="0" step="any"></td>
@@ -915,7 +933,9 @@ function rework_add_row($item, prefill) {
 		$tr.find(".wo-rwb-pkg").val(prefill.std_pkg || "");
 		$tr.find(".wo-rwb-units").val(prefill.units || "");
 		$tr.find(".wo-rwb-qty").val(prefill.qty || "");
-		$tr.find(".wo-rwb-remark").text($tr.find(".wo-rwb-batch option:selected").data("remark") || "");
+		$tr.find(".wo-rwb-remark")
+			.text($tr.find(".wo-rwb-batch option:selected").data("remark") || "")
+			.attr("title", $tr.find(".wo-rwb-batch option:selected").data("remark") || "");
 	}
 }
 
@@ -977,7 +997,9 @@ function wire_rework(frm, dialog, ctx) {
 		const pkg = $sel.data("pkg");
 		const $tr = $(this).closest("tr");
 		$tr.find(".wo-rwb-pkg").val($(this).val() && pkg ? pkg : "");
-		$tr.find(".wo-rwb-remark").text($(this).val() ? ($sel.data("remark") || "") : "");
+		$tr.find(".wo-rwb-remark")
+			.text($(this).val() ? ($sel.data("remark") || "") : "")
+			.attr("title", $(this).val() ? ($sel.data("remark") || "") : "");
 		rework_recalc($tr, "units");
 	});
 	$body.on("input", ".wo-rwb-pkg, .wo-rwb-units", function () {

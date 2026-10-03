@@ -351,6 +351,10 @@ function mr_pc_populate_row(frm, name, cols) {
 	}
 	// re-render to reflect the (async) stock + pending fills
 	setTimeout(() => render_custom_items_table(frm, cols), 600);
+	// Once the item's Lead Time in Days has been fetched, recompute this row's Required By
+	// live (Transaction Date + lead days, else header Required By) — works on new/unsaved MRs
+	// too, no save needed.
+	setTimeout(() => apply_required_by_from_lead_time(frm), 800);
 }
 
 function render_custom_items_table(frm, cols) {

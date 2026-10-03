@@ -103,10 +103,36 @@ function fifo_prefill(rows, target_qty) {
 	return rows;
 }
 
+// One-time CSS so a long QC Remark stays readable by scrolling inside the (native grid) cell.
+function ensure_se_qc_remark_scroll_style() {
+	if (document.getElementById("qc-remark-pkg-style")) {
+		return;
+	}
+	const s = document.createElement("style");
+	s.id = "qc-remark-pkg-style";
+	s.textContent =
+		// Give the row a little more height so the thin horizontal scrollbar sits BELOW
+		// the text instead of covering it.
+		".qc-remark-pkg-dialog .grid-body .data-row," +
+		".qc-remark-pkg-dialog .grid-body .data-row .col{height:auto !important;}" +
+		".qc-remark-pkg-dialog .grid-body .data-row{min-height:46px;align-items:center;}" +
+		// Remark stays on one line and scrolls horizontally; scrollbar shown permanently.
+		'.qc-remark-pkg-dialog [data-fieldname="qc_remark"] .static-area{' +
+		"white-space:nowrap;overflow-x:scroll;overflow-y:hidden;height:38px;" +
+		"line-height:26px;text-overflow:clip;}" +
+		// Thin, always-visible horizontal scrollbar (just tall enough, never hides text).
+		'.qc-remark-pkg-dialog [data-fieldname="qc_remark"] .static-area::-webkit-scrollbar{height:6px;}' +
+		'.qc-remark-pkg-dialog [data-fieldname="qc_remark"] .static-area::-webkit-scrollbar-thumb{' +
+		"background:#b9b9b9;border-radius:3px;}" +
+		'.qc-remark-pkg-dialog [data-fieldname="qc_remark"] .static-area::-webkit-scrollbar-track{' +
+		"background:#eee;border-radius:3px;}";
+	document.head.appendChild(s);
+}
+
 function alloc_table_fields() {
 	return [
 		{ fieldname: "batch_no", fieldtype: "Data", label: __("Batch"), in_list_view: 1, read_only: 1, columns: 2 },
-		{ fieldname: "qc_remark", fieldtype: "Data", label: __("QC Remark"), in_list_view: 1, read_only: 1, columns: 2 },
+		{ fieldname: "qc_remark", fieldtype: "Data", label: __("QC Remark"), in_list_view: 1, read_only: 1, columns: 3 },
 		{ fieldname: "standard_pkg_qty", fieldtype: "Float", label: __("Pack Qty"), in_list_view: 1, read_only: 1, columns: 1 },
 		{ fieldname: "available_units", fieldtype: "Float", label: __("Available Units"), in_list_view: 1, read_only: 1, columns: 1 },
 		{ fieldname: "available", fieldtype: "Float", label: __("Available Qty"), in_list_view: 1, read_only: 1, columns: 1 },
@@ -115,7 +141,7 @@ function alloc_table_fields() {
 			fieldtype: "Float",
 			label: __("Take No of Unit"),
 			in_list_view: 1,
-			columns: 2,
+			columns: 1,
 			onchange() {
 				setTimeout(() => recompute_all_se_alloc("no_of_unit"), 0);
 			},
@@ -193,6 +219,8 @@ function open_se_multi_package_dialog(frm, item_rows) {
 	});
 
 	se_pkg_state.dialog = d;
+	ensure_se_qc_remark_scroll_style();
+	d.$wrapper.addClass("qc-remark-pkg-dialog");
 	d.show();
 
 	// Load FIFO options for each section's item in its source warehouse.
