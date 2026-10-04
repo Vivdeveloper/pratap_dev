@@ -310,6 +310,7 @@ doctype_js = {
     "BOM": [
         "public/js/bom.js",
         "public/js/bom_batch_sheet.js",
+        "public/js/bom_default_warning.js",
     ],
     "Batch": "public/js/batch.js",
     "Stock Entry": [
