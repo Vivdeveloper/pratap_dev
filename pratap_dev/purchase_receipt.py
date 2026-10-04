@@ -1048,3 +1048,74 @@ def _grn_item_row_for_qc(row):
         "stock_uom": row.stock_uom,
         "work_order": row.get("work_order"),
     }
+
+
+# --------------------------------------------------------------------------- #
+# Gate Pass -> Purchase Receipt (GRN) Transporter Details autofill
+# --------------------------------------------------------------------------- #
+# Fields that line up (same meaning + compatible type) between a Gate Pass and the
+# Purchase Receipt "Transporter Details" tab. Key = Purchase Receipt fieldname,
+# value = Gate Pass fieldname. No new fields are created; we only copy matching ones.
+GATE_PASS_TO_PR_TRANSPORTER = {
+	"transporter": "custom_transporter_id",   # Transporter (Link Supplier) <- Transporter ID (Link Supplier)
+	"transporter_name": "transporter_name",   # Transporter Name  -> Transporter Name
+	"vehicle_no": "vehicle_no",               # Vehicle No        -> Vehicle No
+	"driver": "driver_name",                  # Driver (Link)     -> Driver ID (Link Driver)
+	"driver_name": "driver_full_name",        # Driver Name       -> Driver Full Name
+}
+
+
+@frappe.whitelist()
+def get_transporter_from_gate_pass(purchase_orders=None, gate_pass=None):
+	"""Return the Transporter Details for a GRN, pulled from the LATEST Gate Pass linked
+	to the GRN's Purchase Order(s).
+
+	`purchase_orders` is a JSON list (the distinct POs on the GRN items). `gate_pass`, if
+	given, is only used to discover its PO; selection is always "latest Gate Pass for the
+	PO(s)" so that when a PO has several gate passes the most recent one wins.
+	Returns a dict of {purchase_receipt_fieldname: value} for non-empty matched fields,
+	plus `_gate_pass` (the source name).
+	"""
+	import json
+
+	pos = purchase_orders
+	if isinstance(pos, str):
+		try:
+			pos = json.loads(pos)
+		except (ValueError, TypeError):
+			pos = [pos]
+	pos = [p for p in (pos or []) if p]
+
+	if gate_pass:
+		po = frappe.db.get_value("Gate Pass", gate_pass, "purchase_order_po_no")
+		if po:
+			pos.append(po)
+
+	pos = list(dict.fromkeys(pos))  # de-dupe, keep order
+	if not pos:
+		return {}
+
+	latest = frappe.get_all(
+		"Gate Pass",
+		filters={"purchase_order_po_no": ["in", pos], "docstatus": ["<", 2]},
+		order_by="creation desc",
+		limit=1,
+		pluck="name",
+	)
+	if not latest:
+		return {}
+
+	gp = frappe.db.get_value(
+		"Gate Pass",
+		latest[0],
+		["custom_transporter_id", "transporter_name", "vehicle_no", "driver_name", "driver_full_name"],
+		as_dict=True,
+	)
+
+	out = {}
+	for pr_field, gp_field in GATE_PASS_TO_PR_TRANSPORTER.items():
+		val = gp.get(gp_field)
+		if val not in (None, ""):
+			out[pr_field] = val
+	out["_gate_pass"] = latest[0]
+	return out
