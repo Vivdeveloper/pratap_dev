@@ -280,6 +280,12 @@ def update_pipeline_fields(doc, method=None):
         if not row.item_code:
             continue
 
+        # Qty mirrors Actual Requirement by default but is user-editable. Detect a manual
+        # override (Qty differs from the previously-stored Actual Requirement) so the recompute
+        # below doesn't overwrite the user's Qty. Mirrors the same guard on the client.
+        prev_actual_req = flt(row.get("custom_actual_requirement_rfq_po"))
+        qty_was_manual = flt(row.qty) > 0 and abs(flt(row.qty) - prev_actual_req) > 0.0001
+
         # Progress / stock columns always refresh (draft AND submitted) so the pipeline and
         # on-hand figures stay current.
         pipe = get_item_pipeline_status(row.item_code, doc.company)
@@ -316,8 +322,9 @@ def update_pipeline_fields(doc, method=None):
             # the Month - Pipe Line (PO/GRN pending), floored at 0.
             row.custom_actual_requirement_rfq_po = max(0.0, flt(cons["max_3m"]) + required - pending_pr)
 
-            # Qty to order = Actual Requirement for RFQ/P.O (read-only column mirrors it).
-            row.qty = flt(row.custom_actual_requirement_rfq_po)
+            # Qty defaults to Actual Requirement for RFQ/P.O, but keep a user-entered override.
+            if not qty_was_manual:
+                row.qty = flt(row.custom_actual_requirement_rfq_po)
             row.stock_qty = flt(row.qty) * flt(row.get("conversion_factor") or 1)
 
         # Pending PO Qty = (frozen) Qty - qty already ordered against this row. Always refreshes
@@ -354,7 +361,11 @@ def move_fulfilled_items(doc, method=None):
     for row in doc.get("items") or []:
         expected = flt(row.get("custom_expected_qty")) or flt(row.qty)
         stock = flt(row.get("custom_total_stock_qty"))
-        is_fulfilled = expected > 0 and stock + 1e-9 >= expected
+        # "No PO needed": warehouse stock already covers the expected qty, OR there is nothing
+        # to order (Actual Requirement / Qty <= 0). Either way the row must not block submit —
+        # snapshot it to the "Already Fulfilled — No PO" box and drop it from Items.
+        no_qty = flt(row.qty) <= 1e-9
+        is_fulfilled = (expected > 0 and stock + 1e-9 >= expected) or no_qty
         if is_fulfilled and row.item_code:
             snapshot[row.item_code] = {
                 "item_code": row.item_code,

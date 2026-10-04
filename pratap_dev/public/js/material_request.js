@@ -196,7 +196,7 @@ const MR_PURCHASE_TABLE_COLS = [
 	{ fn: "custom_pending_pr_for_grn", label: "Pipe Line P.O / GRN Pending etc.", ro: true, num: true },
 	{ fn: "custom_pending_po_qty", label: "Pending PO Qty", ro: true, num: true },
 	{ fn: "custom_actual_requirement_rfq_po", label: "Actual Requirement for RFQ/P.O", ro: true, num: true },
-	{ fn: "qty", label: "Qty", ro: true, num: true },
+	{ fn: "qty", label: "Qty", ctrl: { fieldtype: "Float" } },
 	{ fn: "uom", label: "UOM", ctrl: { fieldtype: "Link", options: "UOM" } },
 	{ fn: "schedule_date", label: "Required By", ctrl: { fieldtype: "Date" } },
 	// Lead Time in Days — fetched from the Item master (item_code.lead_time_days), i.e. the
@@ -244,6 +244,22 @@ function apply_required_by_from_lead_time(frm) {
 			render_custom_items_table(frm, current_mr_cols(frm));
 		}
 	}
+}
+
+// After a picker (Sales Forecast / Work Order / Packaging) bulk-inserts items, run the SAME
+// per-row population as a manual add, so Lead Time in Days, Required By, stock and Actual
+// Requirement are all computed live on the client — no save needed.
+function repopulate_mr_rows(frm) {
+	const cols = current_mr_cols(frm);
+	if (!cols) {
+		return;
+	}
+	(frm.doc.items || []).forEach((row) => {
+		if (row.item_code) {
+			mr_pc_populate_row(frm, row.name, cols);
+		}
+	});
+	apply_required_by_from_lead_time(frm);
 }
 
 // The column set that matches the CURRENT purpose. Used so every render (including stale/late
@@ -318,6 +334,16 @@ function mr_pc_populate_row(frm, name, cols) {
 	const row = (frm.doc.items || []).find((r) => r.name === name);
 	if (!row) {
 		return;
+	}
+	// Lead Time in Days — fetch from the Item master live on the client (no save needed),
+	// then recompute this row's Required By (Transaction Date + lead days, else header).
+	if (row.item_code) {
+		frappe.db.get_value("Item", row.item_code, "lead_time_days").then((res) => {
+			const lead = flt((res && res.message && res.message.lead_time_days) || 0);
+			frappe.model.set_value(cdt, name, "custom_lead_time_in_days", lead);
+			apply_required_by_from_lead_time(frm);
+			render_custom_items_table(frm, cols);
+		});
 	}
 	// stock (Plant 1/2 / Main Store / Total) + Required recompute — relevant to every purpose
 	if (typeof set_rm_warehouse_qty === "function") {
@@ -478,6 +504,25 @@ function render_custom_items_table(frm, cols) {
 		if (control.$input) {
 			control.$input.val(val);
 		}
+		// Item cell: add the standard "open linked doc" arrow (like the native grid Link).
+		if (fn === "item_code" && val) {
+			$td.css("position", "relative");
+			const $open = $(
+				`<a class="mr-pc-open-item no-decoration text-muted" title="${__("Open Item")}" ` +
+					`style="position:absolute;right:6px;top:50%;transform:translateY(-50%);` +
+					`z-index:3;cursor:pointer;line-height:1;">` +
+					`${frappe.utils.icon("arrow-right", "xs")}</a>`
+			);
+			$open.on("click", function (e) {
+				e.preventDefault();
+				e.stopPropagation();
+				window.open("/app/item/" + encodeURIComponent(val), "_blank");
+			});
+			$td.append($open);
+			if (control.$input) {
+				control.$input.css("padding-right", "22px");
+			}
+		}
 	});
 
 	// The horizontal-scroll container clips overflow-y, which would cut off the search
@@ -584,16 +629,35 @@ function render_pr_bifurcation(frm) {
 		return;
 	}
 
-	// "Required for PR" = the live Items rows (fulfilled ones are removed from the child
-	// table on save so they don't move forward). "Already Fulfilled" is read from the
-	// snapshot the server stored when it removed them — so they still show below.
-	const required = (frm.doc.items || []).filter((row) => row.item_code);
-	let fulfilled = [];
+	// Split the LIVE Items rows the same way the server's move_fulfilled_items does — so the
+	// bifurcation is correct BEFORE save too: a row is "Already Fulfilled — No PO" when stock
+	// already covers the expected qty OR there's nothing to order (Qty <= 0).
+	const required = [];
+	const live_fulfilled = [];
+	(frm.doc.items || [])
+		.filter((row) => row.item_code)
+		.forEach((row) => {
+			const expected = flt(row.custom_expected_qty) || flt(row.qty);
+			const stock = flt(row.custom_total_stock_qty);
+			const no_qty = flt(row.qty) <= 1e-9;
+			const is_fulfilled = (expected > 0 && stock + 1e-9 >= expected) || no_qty;
+			(is_fulfilled ? live_fulfilled : required).push(row);
+		});
+
+	// Fulfilled = live fulfilled rows + the server snapshot (rows already removed on save),
+	// de-duped by item_code.
+	const fulfilled = live_fulfilled.slice();
+	const seen = new Set(fulfilled.map((r) => r.item_code));
 	if (frm.doc.custom_fulfilled_items_json) {
 		try {
-			fulfilled = JSON.parse(frm.doc.custom_fulfilled_items_json) || [];
+			(JSON.parse(frm.doc.custom_fulfilled_items_json) || []).forEach((s) => {
+				if (s.item_code && !seen.has(s.item_code)) {
+					fulfilled.push(s);
+					seen.add(s.item_code);
+				}
+			});
 		} catch (e) {
-			fulfilled = [];
+			/* ignore malformed snapshot */
 		}
 	}
 
@@ -1195,6 +1259,14 @@ function recompute_required_qty_for_pr(cdt, cdn) {
 		return;
 	}
 
+	// Qty mirrors Actual Requirement by default, but the user may edit it. Detect a manual
+	// override by comparing the CURRENT Qty to the previously-stored Actual Requirement
+	// (captured BEFORE we recompute it below). If they already differ, keep the user's Qty.
+	// This persists across reloads (both values come from the DB) with no extra field.
+	const prev_actual_req = flt(row.custom_actual_requirement_rfq_po);
+	const qty_was_manual =
+		flt(row.qty) > 0 && Math.abs(flt(row.qty) - prev_actual_req) > 0.0001;
+
 	const parent = locals[row.parenttype] && locals[row.parenttype][row.parent];
 	const is_purchase = parent && parent.material_request_type === "Purchase";
 	// Planning columns are computed while DRAFT and frozen at submit (docstatus > 0), so
@@ -1224,8 +1296,9 @@ function recompute_required_qty_for_pr(cdt, cdn) {
 		);
 		set_rm_qty_field(cdt, cdn, "custom_actual_requirement_rfq_po", actual);
 
-		// Purchase MR only: Qty to order = Actual Requirement (read-only, mirrors it).
-		if (is_purchase) {
+		// Purchase MR only: Qty defaults to Actual Requirement but stays user-editable —
+		// only re-sync it when the user hasn't manually overridden it.
+		if (is_purchase && !qty_was_manual) {
 			set_rm_qty_field(cdt, cdn, "qty", actual);
 		}
 	}
@@ -1516,6 +1589,7 @@ function show_sales_forecast_dialog(frm, data, stock_map) {
 			// e.g. Work Order -> Material Transfer) so the columns + new rows are correct, never
 			// the stale set. A second pass catches async stock/metric fills.
 			configure_items_grid(frm);
+			repopulate_mr_rows(frm);
 			setTimeout(() => configure_items_grid(frm), 400);
 			frappe.msgprint(__("Items inserted Successfully"));
 			dialog.hide();
@@ -1698,6 +1772,7 @@ function show_packaging_material_dialog(frm, data, stock_map) {
 			// e.g. Work Order -> Material Transfer) so the columns + new rows are correct, never
 			// the stale set. A second pass catches async stock/metric fills.
 			configure_items_grid(frm);
+			repopulate_mr_rows(frm);
 			setTimeout(() => configure_items_grid(frm), 400);
 			frappe.msgprint(__("Items inserted Successfully"));
 			dialog.hide();
@@ -1914,6 +1989,7 @@ function show_work_order_dialog(frm, data) {
 			// e.g. Work Order -> Material Transfer) so the columns + new rows are correct, never
 			// the stale set. A second pass catches async stock/metric fills.
 			configure_items_grid(frm);
+			repopulate_mr_rows(frm);
 			setTimeout(() => configure_items_grid(frm), 400);
 			frappe.msgprint(__("Items inserted Successfully"));
 			dialog.hide();
