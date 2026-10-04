@@ -314,6 +314,7 @@ doctype_js = {
     "Stock Entry": [
         "public/js/stock_entry_batch_entry.js",
         "public/js/stock_entry_bundle_details.js",
+        "public/js/stock_entry_item_columns.js",
     ],
 }
 
