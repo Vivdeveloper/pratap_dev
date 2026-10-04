@@ -361,11 +361,11 @@ def move_fulfilled_items(doc, method=None):
     for row in doc.get("items") or []:
         expected = flt(row.get("custom_expected_qty")) or flt(row.qty)
         stock = flt(row.get("custom_total_stock_qty"))
-        # "No PO needed": warehouse stock already covers the expected qty, OR there is nothing
-        # to order (Actual Requirement / Qty <= 0). Either way the row must not block submit —
-        # snapshot it to the "Already Fulfilled — No PO" box and drop it from Items.
-        no_qty = flt(row.qty) <= 1e-9
-        is_fulfilled = (expected > 0 and stock + 1e-9 >= expected) or no_qty
+        # "Already Fulfilled — No PO": warehouse stock already covers the expected qty
+        # (i.e. Required for PR = 0). These are snapshotted and dropped from Items so they
+        # don't move to a PO. (We intentionally do NOT remove Qty=0 rows here — that was too
+        # aggressive on draft saves and could empty the MR.)
+        is_fulfilled = expected > 0 and stock + 1e-9 >= expected
         if is_fulfilled and row.item_code:
             snapshot[row.item_code] = {
                 "item_code": row.item_code,

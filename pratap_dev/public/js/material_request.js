@@ -639,8 +639,9 @@ function render_pr_bifurcation(frm) {
 		.forEach((row) => {
 			const expected = flt(row.custom_expected_qty) || flt(row.qty);
 			const stock = flt(row.custom_total_stock_qty);
-			const no_qty = flt(row.qty) <= 1e-9;
-			const is_fulfilled = (expected > 0 && stock + 1e-9 >= expected) || no_qty;
+			// Same rule as the server: fulfilled when stock already covers the expected qty
+			// (Required for PR = 0).
+			const is_fulfilled = expected > 0 && stock + 1e-9 >= expected;
 			(is_fulfilled ? live_fulfilled : required).push(row);
 		});
 
