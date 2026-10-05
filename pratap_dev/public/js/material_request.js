@@ -315,7 +315,26 @@ function inject_mr_pc_style() {
 		box-shadow: inset 0 0 0 1px var(--primary, #2490ef);
 	}
 	/* the search dropdown floats ABOVE everything and is not clipped by the scroll container */
-	.mr-purchase-custom .awesomplete > ul { z-index: 1050 !important; }`;
+	.mr-purchase-custom .awesomplete > ul { z-index: 1050 !important; }
+
+	/* ---- Frozen header + first 3 columns (Sr. No / Item Code / Product Name) ---- */
+	/* make the scroll box scroll BOTH ways so sticky header/columns have something to stick to */
+	.mr-purchase-custom .mr-pc-scroll { max-height: 70vh; overflow-y: auto; }
+	/* header row stays put on vertical scroll */
+	.mr-purchase-custom .mr-pc-scroll thead th { position: sticky; top: 0; z-index: 2; background: #e9ecef; }
+	/* first three columns stay put on horizontal scroll */
+	.mr-purchase-custom .mr-pc-scroll tr > :nth-child(1),
+	.mr-purchase-custom .mr-pc-scroll tr > :nth-child(2),
+	.mr-purchase-custom .mr-pc-scroll tr > :nth-child(3) { position: sticky; z-index: 1; background: #fff; }
+	.mr-purchase-custom .mr-pc-scroll tr > :nth-child(1) { left: 0 !important; width: 50px !important; min-width: 50px !important; max-width: 50px !important; }
+	.mr-purchase-custom .mr-pc-scroll tr > :nth-child(2) { left: 50px !important; width: 130px !important; min-width: 130px !important; max-width: 130px !important; }
+	.mr-purchase-custom .mr-pc-scroll tr > :nth-child(3) { left: 180px !important; width: 200px !important; min-width: 200px !important; max-width: 200px !important; overflow: hidden; text-overflow: ellipsis; border-right: 2px solid var(--border-color, #d1d8dd); }
+	/* keep the greyed read-only look on the frozen Product Name cell */
+	.mr-purchase-custom .mr-pc-scroll tbody td.mr-pc-ro:nth-child(3) { background: var(--gray-100, #f4f5f6); }
+	/* the top-left corner cells must sit above both the sticky header and sticky columns */
+	.mr-purchase-custom .mr-pc-scroll thead th:nth-child(1),
+	.mr-purchase-custom .mr-pc-scroll thead th:nth-child(2),
+	.mr-purchase-custom .mr-pc-scroll thead th:nth-child(3) { z-index: 3; background: #e9ecef; }`;
 	const style = document.createElement("style");
 	style.id = "mr-pc-style";
 	style.textContent = css;
