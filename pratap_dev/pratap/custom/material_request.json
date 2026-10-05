@@ -461,7 +461,7 @@
    "property": "options",
    "property_type": "Text",
    "row_name": null,
-   "value": "Purchase\nMaterial Transfer\nMaterial Issue\nManufacture\nCustomer Provided\nRework Material Transfer"
+   "value": "Purchase\nMaterial Transfer\nMaterial Issue\nRework Material Transfer"
   }
  ],
  "sync_on_migrate": 1
