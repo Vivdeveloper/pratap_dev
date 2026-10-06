@@ -331,7 +331,10 @@ doc_events = {
         "before_save": "pratap_dev.calculation.po_calculation_by_weight"
     },
     "Sales Order": {
-        "before_save": "pratap_dev.calculation.po_calculation_by_weight"
+        "before_save": "pratap_dev.calculation.po_calculation_by_weight",
+        "before_submit": "pratap_dev.sales_order_reservation.before_submit",
+        "on_submit": "pratap_dev.sales_order_reservation.reserve_stock_on_submit",
+        "on_cancel": "pratap_dev.sales_order_reservation.reset_reservation_status_on_cancel",
     },
      "Sales Invoice": {
         "before_save": "pratap_dev.calculation.po_calculation_by_weight"
