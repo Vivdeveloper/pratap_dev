@@ -135,31 +135,21 @@ function render_wo_transfer_dialog(frm, ctx) {
 	);
 	// "In Process QC" — open a new partial (Basic Testing) Pratap QC for this WO, so a
 	// sample can be sent for testing mid-process. Basic Testing creates/submits nothing.
+	// Gating (disable while another is unfinished) is applied in apply_qc_action_gates()
+	// AFTER dialog.show(), once these custom-action buttons are in the DOM.
 	dialog.add_custom_action(
 		__("In Process QC"),
-		() => create_basic_testing_qc(frm, dialog),
+		() => create_basic_testing_qc(frm, dialog, ctx),
 		"wo-inprocess-qc-btn"
 	);
-	dialog.$wrapper.find(".wo-inprocess-qc-btn").css("margin-left", "10px");
-	// Only ONE unfinished In Process QC at a time: while any in-process (rework) QC item is
-	// still not transferred + finished, disable the button so another can't be started.
-	if (rework_pending(ctx)) {
-		dialog.$wrapper
-			.find(".wo-inprocess-qc-btn")
-			.prop("disabled", true)
-			.attr(
-				"title",
-				__("Finish the current In Process QC (transfer & finish every item) before starting another.")
-			);
-	}
 	// "Final QC" — same as the form's "Create Pratap QC": opens a new In Process Pratap QC
-	// for this Work Order (prefilled), sitting right beside the In Process QC button.
+	// for this Work Order (prefilled). Only shown once every In Process QC record is finished
+	// (see apply_qc_action_gates).
 	dialog.add_custom_action(
 		__("Final QC"),
-		() => create_final_qc(frm, dialog),
+		() => create_final_qc(frm, dialog, ctx),
 		"wo-final-qc-btn"
 	);
-	dialog.$wrapper.find(".wo-final-qc-btn").css("margin-left", "10px");
 	// Recompute the button's enabled state as the draft changes.
 	$body.on("input change", ".wo-b-batch, .wo-b-pkg, .wo-b-units, .wo-b-qty", () =>
 		update_set_plan_state(dialog, ctx)
@@ -171,6 +161,8 @@ function render_wo_transfer_dialog(frm, ctx) {
 	dialog.show();
 	dialog.$wrapper.find(".modal-dialog").css("max-width", "min(1100px, 96vw)");
 	update_set_plan_state(dialog, ctx);
+	// Buttons are now in the DOM -> apply the In Process QC / Final QC gates.
+	apply_qc_action_gates(dialog, ctx);
 	// First Start with a complete FIFO prefill -> persist the blueprint automatically.
 	maybe_auto_set_plan(frm, dialog, ctx);
 	// "Start Batch" control in the dialog header (stamps the batch start time once).
@@ -579,6 +571,38 @@ function rework_pending(ctx) {
 	return (ctx.rework_qcs || []).some((qc) =>
 		(qc.items || []).some((it) => !((it.transfers || []).length && it.finished))
 	);
+}
+
+// An In Process QC is "pending" (unfinished) when EITHER a rework item is not yet
+// transferred + finished, OR an In Process (Basic Testing) QC is still awaiting its result
+// (status "Pending"). Used to gate the "In Process QC" button to one unfinished at a time.
+function inprocess_qc_pending(ctx) {
+	if (rework_pending(ctx)) return true;
+	return (ctx.basic_testing_qcs || []).some((qc) => qc.status === "Pending");
+}
+
+// Enable/disable the footer QC action buttons based on whether every In Process QC record
+// is finished. Must run AFTER dialog.show() so the custom-action buttons exist in the DOM.
+//  - In Process QC: disabled while any In Process QC is unfinished (one at a time).
+//  - Final QC: shown ONLY when every In Process QC record (Basic Testing + rework) is
+//    finished — i.e. no Pending Basic Testing and all rework transferred + finished.
+function apply_qc_action_gates(dialog, ctx) {
+	const pending = inprocess_qc_pending(ctx);
+	const $ip = dialog.$wrapper.find(".wo-inprocess-qc-btn");
+	const $final = dialog.$wrapper.find(".wo-final-qc-btn");
+
+	$ip.css("margin-left", "10px");
+	$final.css("margin-left", "10px");
+
+	$ip.prop("disabled", pending).attr(
+		"title",
+		pending
+			? __("Finish the current In Process QC (resolve it / transfer & finish every rework item) before starting another.")
+			: ""
+	);
+
+	// Only available once ALL In Process QC records are finished.
+	$final.toggle(!pending);
 }
 
 function apply_batch_gate(dialog, ctx) {
@@ -1386,7 +1410,14 @@ function maybe_auto_set_plan(frm, dialog, ctx) {
 // Open a new Basic Testing (partial / in-process) Pratap QC for this Work Order, with
 // the reference + inspection type pre-filled — same prefill as the WO's "Create Pratap QC"
 // button but inspection_type = "Basic Testing".
-function create_basic_testing_qc(frm, dialog) {
+function create_basic_testing_qc(frm, dialog, ctx) {
+	// Only one unfinished In Process QC at a time (defensive — the button is also disabled).
+	if (ctx && inprocess_qc_pending(ctx)) {
+		frappe.msgprint(
+			__("Finish the current In Process QC (resolve it / transfer & finish every rework item) before starting another.")
+		);
+		return;
+	}
 	// Blocked while an item is in progress (transferred but not finished) — no active
 	// transaction may be open when starting In Process QC.
 	if (dialog._blocker_row) {
@@ -1411,7 +1442,14 @@ function create_basic_testing_qc(frm, dialog) {
 
 // "Final QC" — identical to the form's "Create Pratap QC" button: opens a new In Process
 // Pratap QC for this Work Order (same prefilled values, same page/clicks).
-function create_final_qc(frm, dialog) {
+function create_final_qc(frm, dialog, ctx) {
+	// Final QC only once every In Process QC record is finished (defensive — button hidden).
+	if (ctx && inprocess_qc_pending(ctx)) {
+		frappe.msgprint(
+			__("Complete all In Process QC (resolve every Basic Testing and finish all rework) before doing Final QC.")
+		);
+		return;
+	}
 	dialog._allow_close = true; // leaving for the QC page — don't nag about unsaved batches
 	dialog.hide();
 	frappe.new_doc("Pratap Quality Inspection", {
