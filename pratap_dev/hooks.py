@@ -281,6 +281,7 @@ override_whitelisted_methods = {
 
 doctype_js = {
     "Opportunity": "public/js/opportunity_override.js",
+    "Sales Order": "public/js/sales_order.js",
     "Pratap Quality Inspection": "public/js/pratap_quality_inspection.js",
     "Item": "public/js/item.js",
     "Work Order": [
@@ -331,6 +332,7 @@ doc_events = {
         "before_save": "pratap_dev.calculation.po_calculation_by_weight"
     },
     "Sales Order": {
+        "validate": "pratap_dev.sales_order_financials.set_financials_snapshot",
         "before_save": "pratap_dev.calculation.po_calculation_by_weight",
         "before_submit": "pratap_dev.sales_order_reservation.before_submit",
         "on_submit": "pratap_dev.sales_order_reservation.reserve_stock_on_submit",
