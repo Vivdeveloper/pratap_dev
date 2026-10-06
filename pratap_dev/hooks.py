@@ -332,7 +332,7 @@ doc_events = {
         "before_save": "pratap_dev.calculation.po_calculation_by_weight"
     },
     "Sales Order": {
-        "validate": "pratap_dev.sales_order_financials.set_financials_snapshot",
+        "validate": "pratap_dev.sales_order_financials.on_validate",
         "before_save": "pratap_dev.calculation.po_calculation_by_weight",
         "before_submit": "pratap_dev.sales_order_reservation.before_submit",
         "on_submit": "pratap_dev.sales_order_reservation.reserve_stock_on_submit",

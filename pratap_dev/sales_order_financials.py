@@ -12,7 +12,8 @@ on save so they are available in list view / reports.
 """
 
 import frappe
-from frappe.utils import flt
+from frappe import _
+from frappe.utils import flt, fmt_money
 
 
 def get_financials(customer, company, sales_order=None):
@@ -60,9 +61,55 @@ def get_sales_order_financials(customer, company, sales_order=None):
 	return get_financials(customer, company, sales_order)
 
 
-def set_financials_snapshot(doc, method=None):
-	"""Persist a snapshot of the three values on save (validate hook)."""
+def on_validate(doc, method=None):
+	"""Snapshot the credit/payment fields and enforce the credit-limit check on save."""
 	data = get_financials(doc.customer, doc.company, doc.name)
 	doc.custom_credit_limit = data["credit_limit"]
 	doc.custom_current_outstanding = data["current_outstanding"]
 	doc.custom_payment_received_against_order = data["payment_received"]
+
+	_validate_credit_limit(doc, data)
+
+
+def _validate_credit_limit(doc, data):
+	"""Block save when (this order + current outstanding) exceeds the credit limit,
+	unless the 'Allow Access Order' override is ticked."""
+
+	# Override ticked -> skip the check entirely.
+	if doc.get("custom_allow_access_order"):
+		return
+
+	credit_limit = flt(data["credit_limit"])
+	if credit_limit <= 0:
+		# No credit limit configured -> nothing to enforce.
+		return
+
+	this_order = flt(doc.grand_total)
+	outstanding = flt(data["current_outstanding"])
+	total_exposure = this_order + outstanding
+
+	if total_exposure <= credit_limit:
+		return
+
+	currency = doc.currency or frappe.get_cached_value("Company", doc.company, "default_currency")
+
+	def money(amount):
+		return fmt_money(amount, currency=currency)
+
+	frappe.throw(
+		_(
+			"This order exceeds the credit limit for <b>{customer}</b>.<br><br>"
+			"Credit Limit: <b>{limit}</b><br>"
+			"Current Outstanding: <b>{outstanding}</b><br>"
+			"This Order: <b>{order}</b><br>"
+			"Total Exposure: <b>{exposure}</b><br><br>"
+			"Tick <b>Allow Access Order</b> (below Has Dispatch Intimation) to override and proceed."
+		).format(
+			customer=doc.customer_name or doc.customer,
+			limit=money(credit_limit),
+			outstanding=money(outstanding),
+			order=money(this_order),
+			exposure=money(total_exposure),
+		),
+		title=_("Credit Limit Exceeded"),
+	)
