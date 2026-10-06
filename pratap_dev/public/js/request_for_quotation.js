@@ -24,11 +24,43 @@ frappe.ui.form.on("Request for Quotation Item", {
 });
 
 frappe.ui.form.on("Request for Quotation Supplier", {
-	supplier(frm) {
+	supplier(frm, cdt, cdn) {
 		// Supplier drives the lookup — (re)fill every item row that's still blank.
 		(frm.doc.items || []).forEach((row) => rfq_fill_pack_size(frm, row.doctype, row.name));
+		// Auto-fill the supplier's primary contact + email in this Suppliers row.
+		rfq_fill_primary_contact(cdt, cdn);
 	},
 });
+
+// Fill Contact + Email ID from the supplier's primary contact (first linked contact if
+// none is marked primary). Runs with a short delay so it wins over ERPNext's native
+// get_party_details handler, which leaves the fields blank when no primary contact is set.
+function rfq_fill_primary_contact(cdt, cdn) {
+	const row = locals[cdt][cdn];
+	if (!row || !row.supplier) {
+		return;
+	}
+	const supplier = row.supplier;
+	frappe.call({
+		method: "pratap_dev.request_for_quotation.get_supplier_primary_contact",
+		args: { supplier: supplier },
+		callback(r) {
+			if (!r.message || !r.message.contact) {
+				return;
+			}
+			setTimeout(() => {
+				const cur = locals[cdt][cdn];
+				if (!cur || cur.supplier !== supplier) {
+					return; // row / supplier changed in the meantime
+				}
+				frappe.model.set_value(cdt, cdn, "contact", r.message.contact);
+				if (r.message.email_id) {
+					frappe.model.set_value(cdt, cdn, "email_id", r.message.email_id);
+				}
+			}, 700);
+		},
+	});
+}
 
 function rfq_current_supplier(frm) {
 	if (frm.doc.custom_supplier_code) {
