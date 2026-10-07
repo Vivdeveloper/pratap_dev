@@ -488,13 +488,24 @@ function render_custom_items_table(frm, cols) {
 		}
 		const is_num = (col.ctrl.fieldtype === "Float" || col.ctrl.fieldtype === "Int" || col.ctrl.fieldtype === "Currency");
 		let control;
+		// While we seed this control's value (control.set_value below), its onchange fires even
+		// though nothing really changed. For Link/Date cells control.get_value() does not always
+		// round-trip the stored value (a date reformats, a link resolves differently), so the
+		// no-op guard misses it and the else-branch schedules another render -> re-seed -> onchange
+		// -> ... every 150ms forever (the continuous validate_link / get_item_details flood seen on
+		// large Material Requests). `seeding` makes onchange ignore the seed; it is released as soon
+		// as set_value settles, with a hard fallback timer so a never-settling promise can never
+		// permanently block real user edits.
+		let seeding = true;
 		control = frappe.ui.form.make_control({
 			df: Object.assign({ fieldname: fn, label: "", placeholder: col.label }, col.ctrl, {
 				onchange() {
+					if (seeding) {
+						return;
+					}
 					const v = control.get_value();
 					const cur = row[fn];
-					// Ignore no-op changes — programmatic set_value() below also fires onchange,
-					// which would otherwise loop (re-render -> set_value -> onchange -> ...).
+					// Ignore no-op changes (defensive).
 					const same = is_num ? flt(v) === flt(cur) : (v || "") === (cur || "");
 					if (same) {
 						return;
@@ -518,7 +529,28 @@ function render_custom_items_table(frm, cols) {
 			only_input: true,
 		});
 		const val = row[fn] == null ? "" : row[fn];
-		control.set_value(val);
+		// Hard fallback: release `seeding` even if set_value's promise never settles, so user
+		// edits to this cell are never permanently suppressed.
+		setTimeout(() => {
+			seeding = false;
+		}, 1500);
+		try {
+			const seed_result = control.set_value(val);
+			if (seed_result && typeof seed_result.then === "function") {
+				seed_result.then(
+					() => {
+						seeding = false;
+					},
+					() => {
+						seeding = false;
+					}
+				);
+			} else {
+				seeding = false;
+			}
+		} catch (e) {
+			seeding = false;
+		}
 		// ensure the displayed value shows immediately (Link/Data don't always paint on set_value)
 		if (control.$input) {
 			control.$input.val(val);
