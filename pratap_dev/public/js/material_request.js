@@ -114,8 +114,19 @@ frappe.ui.form.on("Material Request", {
 		}
 		// reload_doc re-reads the saved doc from the server (dropped rows gone, dirty state
 		// cleared). after_save does not fire on reload, so there is no loop.
+		//
+		// IMPORTANT: only reload when a fulfilled row ACTUALLY STILL LINGERS in the Items
+		// table — i.e. the server removed it this save but the browser copy didn't drop it
+		// (the real desync we need to fix). The fulfilled snapshot persists across saves, so
+		// reloading whenever it is merely non-empty means EVERY subsequent save triggers a
+		// reload + full re-render, which leaves the form showing "Not Saved" even though the
+		// record saved fine. Skipping the needless reload keeps the save clean.
 		if (snapshot.length) {
-			frm.reload_doc();
+			const snap_codes = new Set(snapshot.map((s) => s.item_code));
+			const lingers = (frm.doc.items || []).some((it) => snap_codes.has(it.item_code));
+			if (lingers) {
+				frm.reload_doc();
+			}
 		}
 	},
 });
@@ -557,7 +568,11 @@ function render_custom_items_table(frm, cols) {
 		}
 		// Item cell: add the standard "open linked doc" arrow (like the native grid Link).
 		if (fn === "item_code" && val) {
-			$td.css("position", "relative");
+			// NOTE: do NOT set position:relative here. The item_code cell is the frozen
+			// 2nd column (position:sticky from the stylesheet); an inline position:relative
+			// would override sticky and the Item Code column would stop freezing in draft.
+			// position:sticky is itself a positioned value, so the absolutely-positioned
+			// arrow below still anchors to this cell correctly.
 			const $open = $(
 				`<a class="mr-pc-open-item no-decoration text-muted" title="${__("Open Item")}" ` +
 					`style="position:absolute;right:6px;top:50%;transform:translateY(-50%);` +
