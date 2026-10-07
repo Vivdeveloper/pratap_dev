@@ -442,6 +442,11 @@ function render_custom_items_table(frm, cols) {
 		$c = $('<div class="mr-purchase-custom" style="margin-top:8px;"></div>').appendTo(field.$wrapper);
 	}
 
+	// Preserve the horizontal scroll position across re-renders: rebuilding the table HTML
+	// below recreates the .mr-pc-scroll box, which would otherwise snap back to the start
+	// (left:0) after an edit. Capture it now and restore it after the rebuild.
+	const prev_scroll_left = $c.find(".mr-pc-scroll").scrollLeft() || 0;
+
 	const rows = frm.doc.items || [];
 	const editable = frm.doc.docstatus === 0;
 	const esc = frappe.utils.escape_html;
@@ -592,6 +597,24 @@ function render_custom_items_table(frm, cols) {
 			if (control.$input) {
 				control.$input.css("padding-right", "22px");
 			}
+		}
+	});
+
+	// Restore the horizontal scroll position captured before the rebuild — done AFTER the
+	// controls are mounted so the table is at full width (restoring earlier would clamp to the
+	// narrower, control-less width and only partly restore). Keeps the table put after an edit.
+	if (prev_scroll_left) {
+		$c.find(".mr-pc-scroll").scrollLeft(prev_scroll_left);
+	}
+
+	// Enter inside a cell should just COMMIT the value (like clicking away), not bubble up to
+	// trigger a form-level action (which was dimming/freezing the screen). Blur fires the
+	// control's onchange, so the value + recompute still happen.
+	$c.off("keydown.mrpcenter").on("keydown.mrpcenter", "input", function (e) {
+		if (e.key === "Enter") {
+			e.preventDefault();
+			e.stopPropagation();
+			this.blur();
 		}
 	});
 
