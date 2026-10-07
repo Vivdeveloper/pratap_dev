@@ -491,10 +491,20 @@ function render_custom_items_table(frm, cols) {
 		control = frappe.ui.form.make_control({
 			df: Object.assign({ fieldname: fn, label: "", placeholder: col.label }, col.ctrl, {
 				onchange() {
+					// CRITICAL: ignore the onchange fired by the programmatic set_value() used to
+					// seed this control during render. These standalone controls aren't bound to
+					// the row model, so set_value() always fires onchange; for a Link cell
+					// (item_code / custom_supplier_) control.get_value() may not echo the seeded
+					// value, so the no-op guard below fails and item_code seeding would call
+					// mr_pc_populate_row -> re-render -> re-seed -> ... forever (the continuous
+					// flicker + validate_link / get_item_details flood). Only real user edits
+					// must run the cascade.
+					if (control.__mr_seeding) {
+						return;
+					}
 					const v = control.get_value();
 					const cur = row[fn];
-					// Ignore no-op changes — programmatic set_value() below also fires onchange,
-					// which would otherwise loop (re-render -> set_value -> onchange -> ...).
+					// Ignore no-op changes too (defensive).
 					const same = is_num ? flt(v) === flt(cur) : (v || "") === (cur || "");
 					if (same) {
 						return;
@@ -518,7 +528,13 @@ function render_custom_items_table(frm, cols) {
 			only_input: true,
 		});
 		const val = row[fn] == null ? "" : row[fn];
-		control.set_value(val);
+		// Seed the control's displayed value WITHOUT triggering the onchange cascade above.
+		// set_value() is async for Link cells (validate_link), and its onchange fires within
+		// that promise chain — so clear the flag only after the promise settles.
+		control.__mr_seeding = true;
+		Promise.resolve(control.set_value(val)).finally(() => {
+			control.__mr_seeding = false;
+		});
 		// ensure the displayed value shows immediately (Link/Data don't always paint on set_value)
 		if (control.$input) {
 			control.$input.val(val);
