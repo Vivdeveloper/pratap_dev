@@ -301,8 +301,12 @@ doctype_js = {
         "public/js/purchase_receipt_dates.js",
         "public/js/purchase_receipt_gate_pass.js",
         "public/js/purchase_receipt_reject_grn.js",
+        "public/js/grn_attachment_ui.js",
     ],
-    "Purchase Invoice": "public/js/pratap_quality_inspection_reference_override.js",
+    "Purchase Invoice": [
+        "public/js/pratap_quality_inspection_reference_override.js",
+        "public/js/grn_attachment_ui.js",
+    ],
     "Delivery Note": "public/js/pratap_quality_inspection_reference_override.js",
     "Sales Invoice": [
         "public/js/pratap_quality_inspection_reference_override.js",
@@ -447,6 +451,10 @@ doc_events = {
         "on_update": "pratap_dev.item_supplier_pack.capture_pack_sizes",
     },
     "Purchase Invoice": {
-        "validate": "pratap_dev.purchase_invoice.set_grn_group_id_from_receipt",
+        "validate": [
+            "pratap_dev.purchase_invoice.set_grn_group_id_from_receipt",
+            "pratap_dev.purchase_invoice.copy_grn_attachment_from_receipt",
+        ],
+        "before_submit": "pratap_dev.purchase_invoice.require_grn_attachment_on_submit",
     },
 }
