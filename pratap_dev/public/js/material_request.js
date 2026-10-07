@@ -237,6 +237,10 @@ function apply_required_by_from_lead_time(frm) {
 	const header = frm.doc.schedule_date;
 	let changed = false;
 	(frm.doc.items || []).forEach((row) => {
+		// User manually set this row's Required By -> leave it untouched (final).
+		if (cint(row.custom_required_date_overridden)) {
+			return;
+		}
 		const lead = cint(row.custom_lead_time_in_days);
 		let target = null;
 		if (lead > 0 && txn) {
@@ -977,6 +981,16 @@ frappe.ui.form.on("Material Request Item", {
 	// live on the client, so the grid shows it immediately without waiting for save.
 	custom_lead_time_in_days(frm, cdt, cdn) {
 		apply_required_by_from_lead_time(frm);
+	},
+	// A MANUAL edit to Required By (schedule_date) — from the grid popup or the custom table —
+	// marks the row as overridden, so the lead-time / header auto-fill stops touching it on
+	// both the client and the server. Programmatic fills set row.schedule_date directly (not
+	// via set_value), so they never reach this handler and never flip the flag.
+	schedule_date(frm, cdt, cdn) {
+		const row = locals[cdt][cdn];
+		if (row && !cint(row.custom_required_date_overridden)) {
+			frappe.model.set_value(cdt, cdn, "custom_required_date_overridden", 1);
+		}
 	},
 	custom_packing_qty(frm, cdt, cdn) {
 		calculate_quantity(frm, cdt, cdn);

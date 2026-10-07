@@ -409,6 +409,9 @@ def set_item_required_by_from_lead_time(doc, method=None):
     txn = doc.get("transaction_date")
     header_required_by = doc.get("schedule_date")
     for row in doc.get("items") or []:
+        # User manually overrode this row's Required By -> keep it final, don't recompute.
+        if cint(row.get("custom_required_date_overridden")):
+            continue
         lead = cint(row.get("custom_lead_time_in_days"))
         if lead > 0 and txn:
             row.schedule_date = add_days(getdate(txn), lead)
