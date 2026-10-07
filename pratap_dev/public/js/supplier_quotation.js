@@ -38,10 +38,34 @@ frappe.ui.form.on("Supplier Quotation", {
 
 frappe.ui.form.on("Supplier Quotation Item", {
 	item_code(frm, cdt, cdn) {
-		const row = locals[cdt][cdn];
-		frm.model.set_value(cdt, cdn, "rate", "");
+		// Copy Standard Pkg Qty from an existing row with the same item (manager's request).
+		// Run first so it isn't skipped by anything below.
+		copy_std_pkg_from_existing_row(frm, cdt, cdn);
+		// Clear the rate so the user re-enters it for this quote.
+		// NOTE: must be frappe.model.set_value — `frm.model` does not exist, so the old
+		// `frm.model.set_value(...)` threw a TypeError here and aborted the whole handler
+		// (which is why the pkg-qty copy above never ran).
+		frappe.model.set_value(cdt, cdn, "rate", "");
 	},
 });
+
+// When the selected item is ALREADY present elsewhere in the Items table, copy the
+// Standard Pkg Qty (custom_packing_qty) from that item's FIRST occurrence into this row —
+// so the planner just edits Required Date / qty instead of re-entering the pack size.
+// If the item appears multiple times, the first occurrence (table order) that carries a
+// Standard Pkg Qty wins.
+function copy_std_pkg_from_existing_row(frm, cdt, cdn) {
+	const row = locals[cdt][cdn];
+	if (!row || !row.item_code) {
+		return;
+	}
+	const first = (frm.doc.items || []).find(
+		(d) => d.name !== cdn && d.item_code === row.item_code && d.custom_packing_qty
+	);
+	if (first) {
+		frappe.model.set_value(cdt, cdn, "custom_packing_qty", first.custom_packing_qty);
+	}
+}
 // On a freshly-created SQ (from RFQ), the Required Date column is blank until the
 // save-time hook runs. Fill it immediately, client-side, from each item's RFQ link so
 // the user sees the date without having to save first. Runs once per unsaved doc.
