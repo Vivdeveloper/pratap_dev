@@ -84,7 +84,17 @@ function show_create_grn_dialog(frm) {
 		callback(r) {
 			const items = r.message || [];
 			if (!items.length) {
-				frappe.msgprint(__("No pending balance found for GRN on this Purchase Order."));
+				// Fully received already — instead of a dead-end popup, take the user to this
+				// PO's GRNs (Purchase Receipt list filtered by this Purchase Order) so they can
+				// review every GRN raised against it.
+				frappe.show_alert(
+					{
+						message: __("No pending quantity to receive — showing this PO's GRNs."),
+						indicator: "blue",
+					},
+					5
+				);
+				frappe.set_route("List", "Purchase Receipt", { purchase_order: frm.doc.name });
 				return;
 			}
 			open_create_grn_dialog(frm, items);
