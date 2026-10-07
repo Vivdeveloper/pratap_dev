@@ -13,6 +13,8 @@ frappe.ui.form.on("Purchase Order", {
 				__("Tools")
 			);
 		}
+
+		update_grn_created_display(frm);
 	},
 
 	async before_save(frm) {
@@ -33,6 +35,29 @@ function show_last_buying_rates(frm) {
 		rate_column_label: __("PO Rate"),
 		current_po: frm.doc.name,
 	});
+}
+
+// Read-only "GRN Created" flag: Yes if any submitted GRN references this PO, else No.
+// Recomputed on view so it is always current (even for POs saved before the flag existed);
+// the server keeps the stored value in sync on GRN submit/cancel.
+function update_grn_created_display(frm) {
+	if (frm.is_new() || !frm.doc.name || !frm.fields_dict.custom_grn_created) {
+		return;
+	}
+	frappe.db
+		.get_value(
+			"Purchase Receipt Item",
+			{ purchase_order: frm.doc.name, docstatus: 1 },
+			"name"
+		)
+		.then((r) => {
+			const has_grn = !!(r && r.message && r.message.name);
+			const val = has_grn ? "Yes" : "No";
+			if (frm.doc.custom_grn_created !== val) {
+				frm.doc.custom_grn_created = val;
+				frm.refresh_field("custom_grn_created");
+			}
+		});
 }
 
 function remove_default_purchase_receipt_button(frm) {

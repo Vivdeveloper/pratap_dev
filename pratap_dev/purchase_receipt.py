@@ -10,6 +10,14 @@ from erpnext.stock.doctype.purchase_receipt.purchase_receipt import PurchaseRece
 from pratap_dev.purchase_receipt_batch import _set_batch_from_insert_batch_number
 
 
+def _update_po_grn_created_flags(doc):
+    """Keep each linked Purchase Order's 'GRN Created' flag in sync when a GRN is
+    submitted or cancelled."""
+    from pratap_dev.purchase_order_variant import update_po_grn_created_flags
+
+    update_po_grn_created_flags(doc)
+
+
 def _repoint_bundle_warehouse(bundle_name, warehouse, is_rejected=0):
     """Point a Serial and Batch Bundle (and all its entries) at a different warehouse — used by
     the Reject GRN flow to move an accepted bundle to the rejected warehouse (and back)."""
@@ -137,12 +145,14 @@ class PratapPurchaseReceipt(PurchaseReceipt):
             return
         create_grouped_purchase_invoice_if_ready(self)
         create_rejection_documents_if_any(self)
+        _update_po_grn_created_flags(self)
 
     def on_cancel(self):
         super().on_cancel()
         # Back to Draft so a re-amended GRN starts the QC lifecycle fresh.
         if self.meta.has_field("custom_qc_status"):
             self.db_set("custom_qc_status", "Draft", update_modified=False)
+        _update_po_grn_created_flags(self)
 
     def on_update(self):
         if self.items:

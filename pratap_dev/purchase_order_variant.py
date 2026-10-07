@@ -30,7 +30,44 @@ def _base_item(item_code):
 	return parent or item_code
 
 
+def _po_has_grn(po_name):
+	"""True if at least one submitted GRN (Purchase Receipt) references this Purchase Order."""
+	return bool(
+		frappe.db.exists("Purchase Receipt Item", {"purchase_order": po_name, "docstatus": 1})
+	)
+
+
+def set_grn_created_flag(po_doc):
+	"""Set custom_grn_created on the PO doc (in-memory) from its current GRN state."""
+	if not po_doc.meta.has_field("custom_grn_created") or not po_doc.name:
+		return
+	po_doc.custom_grn_created = "Yes" if _po_has_grn(po_doc.name) else "No"
+
+
+def update_po_grn_created_flags(purchase_receipt_doc):
+	"""Refresh custom_grn_created on every Purchase Order referenced by this GRN — called when a
+	GRN is submitted or cancelled so the flag stays correct after the PO itself is submitted."""
+	po_names = {
+		row.get("purchase_order")
+		for row in (purchase_receipt_doc.get("items") or [])
+		if row.get("purchase_order")
+	}
+	for po in po_names:
+		if frappe.db.has_column("Purchase Order", "custom_grn_created"):
+			frappe.db.set_value(
+				"Purchase Order",
+				po,
+				"custom_grn_created",
+				"Yes" if _po_has_grn(po) else "No",
+				update_modified=False,
+			)
+
+
 class PratapPurchaseOrder(PurchaseOrder):
+	def validate(self):
+		super().validate()
+		set_grn_created_flag(self)
+
 	def validate_with_previous_doc(self):
 		# Identical to core PurchaseOrder.validate_with_previous_doc EXCEPT the
 		# Material Request Item compare drops ["item_code", "="] — that case is
