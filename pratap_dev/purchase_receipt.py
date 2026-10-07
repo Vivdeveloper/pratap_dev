@@ -10,6 +10,20 @@ from erpnext.stock.doctype.purchase_receipt.purchase_receipt import PurchaseRece
 from pratap_dev.purchase_receipt_batch import _set_batch_from_insert_batch_number
 
 
+def _repoint_bundle_warehouse(bundle_name, warehouse, is_rejected=0):
+    """Point a Serial and Batch Bundle (and all its entries) at a different warehouse — used by
+    the Reject GRN flow to move an accepted bundle to the rejected warehouse (and back)."""
+    bundle = frappe.get_doc("Serial and Batch Bundle", bundle_name)
+    bundle.warehouse = warehouse
+    if bundle.meta.has_field("is_rejected"):
+        bundle.is_rejected = is_rejected
+    for entry in bundle.entries:
+        entry.warehouse = warehouse
+    bundle.flags.ignore_links = True
+    bundle.flags.ignore_validate_update_after_submit = True
+    bundle.save(ignore_permissions=True)
+
+
 def set_item_fields(doc, method=None):
 	"""Mirror the FIRST item's code and name from the Items child table into header
 	fields (custom_item_code / custom_item_name), so they can be shown as columns in the
@@ -46,12 +60,61 @@ QC_GRN_OK_STATUSES = {"Accepted", "Partially Accepted", "Partially Rejected"}
 
 class PratapPurchaseReceipt(PurchaseReceipt):
     def validate(self):
+        # Reject GRN: move Accepted -> Rejected (qty AND serial/batch bundle) BEFORE ERPNext's
+        # stock validation runs, so the accepted-bundle-vs-accepted-qty check doesn't fail.
+        if not self.is_return:
+            if self.get("custom_reject_grn"):
+                self._apply_reject_grn()
+            else:
+                self._undo_reject_grn()
+
         super().validate()
         if self.is_return:
             return
 
         self._validate_items_pratap_quality_inspection()
         self._sync_density_from_pratap_qc_on_items()
+
+    def _apply_reject_grn(self):
+        """Whole receipt rejected: per item move Accepted Qty + its accepted serial/batch bundle
+        onto the Rejected side (rejected warehouse), leaving Accepted Qty = 0."""
+        header_rejected_wh = self.get("rejected_warehouse")
+        for row in self.get("items") or []:
+            rejected_wh = row.get("rejected_warehouse") or header_rejected_wh
+            if not rejected_wh:
+                frappe.throw(
+                    _(
+                        "Row {0}: set a Rejected Warehouse before using Reject GRN — rejected stock needs a warehouse."
+                    ).format(row.idx)
+                )
+            row.rejected_warehouse = rejected_wh
+
+            accepted = flt(row.qty)
+            if accepted > 0:
+                row.rejected_qty = flt(row.rejected_qty) + accepted
+                row.qty = 0
+
+            # Serial/batch item tracked via a bundle: repoint the accepted bundle to the
+            # rejected side and move its stock to the rejected warehouse.
+            bundle = row.get("serial_and_batch_bundle")
+            if bundle and not row.get("rejected_serial_and_batch_bundle"):
+                _repoint_bundle_warehouse(bundle, rejected_wh, is_rejected=1)
+                row.rejected_serial_and_batch_bundle = bundle
+                row.serial_and_batch_bundle = None
+
+    def _undo_reject_grn(self):
+        """Reject GRN was switched off: if a row's stock was previously moved wholly to the
+        rejected side (rejected_qty back to 0, bundle still on the rejected link), move it back
+        to the accepted side so the accepted-bundle-vs-qty check passes again."""
+        accepted_wh_default = self.get("set_warehouse")
+        for row in self.get("items") or []:
+            rej_bundle = row.get("rejected_serial_and_batch_bundle")
+            if rej_bundle and flt(row.rejected_qty) <= 0 and not row.get("serial_and_batch_bundle"):
+                accepted_wh = row.get("warehouse") or accepted_wh_default
+                if accepted_wh:
+                    _repoint_bundle_warehouse(rej_bundle, accepted_wh, is_rejected=0)
+                row.serial_and_batch_bundle = rej_bundle
+                row.rejected_serial_and_batch_bundle = None
 
     def before_save(self):
         for row in self.items:
@@ -157,6 +220,11 @@ class PratapPurchaseReceipt(PurchaseReceipt):
 
     def _validate_pratap_quality_inspection_on_items(self):
         if self.is_return:
+            return
+
+        # Reject GRN: the whole receipt is rejected (Accepted Qty moved to Rejected Qty), so
+        # nothing is accepted into stock and no Pratap Quality Inspection is needed to submit.
+        if self.get("custom_reject_grn"):
             return
 
         errors = _get_grn_qc_submit_errors(self)
@@ -786,6 +854,10 @@ def get_grn_qc_submit_status(purchase_receipt):
     if grn.meta.has_field("custom_ignore_quality_inspection") and grn.get(
         "custom_ignore_quality_inspection"
     ):
+        return {"can_submit": True, "pending_items": [], "message": ""}
+
+    # Reject GRN: whole receipt rejected (nothing accepted into stock) -> no QC needed.
+    if grn.get("custom_reject_grn"):
         return {"can_submit": True, "pending_items": [], "message": ""}
 
     errors = _get_grn_qc_submit_errors(grn)

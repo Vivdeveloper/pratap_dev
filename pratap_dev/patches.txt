@@ -17,3 +17,4 @@ pratap_dev.patches.add_so_stock_reservation_status_field
 pratap_dev.patches.add_so_financial_fields
 pratap_dev.patches.add_so_allow_access_order_field
 pratap_dev.patches.add_mr_item_required_date_override_flag
+pratap_dev.patches.add_pr_reject_grn_field

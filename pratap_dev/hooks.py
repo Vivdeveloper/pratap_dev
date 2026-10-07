@@ -300,6 +300,7 @@ doctype_js = {
         "public/js/purchase_receipt_batch_entry.js",
         "public/js/purchase_receipt_dates.js",
         "public/js/purchase_receipt_gate_pass.js",
+        "public/js/purchase_receipt_reject_grn.js",
     ],
     "Purchase Invoice": "public/js/pratap_quality_inspection_reference_override.js",
     "Delivery Note": "public/js/pratap_quality_inspection_reference_override.js",
