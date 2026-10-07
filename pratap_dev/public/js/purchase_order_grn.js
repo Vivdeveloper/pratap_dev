@@ -244,13 +244,24 @@ function open_create_grn_dialog(frm, items) {
 	dialog.show();
 	bind_grn_grid_events(dialog);
 
-	// Auto-link the Gate Pass that references this PO, if one exists.
+	// Auto-link the Gate Pass that references this PO, if one exists — and carry its Supplier
+	// Invoice No / Date into the Sales Invoice Number / Invoice Date fields of this dialog.
 	frappe.db
-		.get_value("Gate Pass", { purchase_order_po_no: frm.doc.name }, "name")
+		.get_value(
+			"Gate Pass",
+			{ purchase_order_po_no: frm.doc.name },
+			["name", "supplier_invoice_no", "supplier_invoice_date"]
+		)
 		.then((r) => {
-			const gp = r && r.message && r.message.name;
-			if (gp) {
-				dialog.set_value("gate_pass", gp);
+			const gp = r && r.message;
+			if (gp && gp.name) {
+				dialog.set_value("gate_pass", gp.name);
+				if (gp.supplier_invoice_no) {
+					dialog.set_value("sales_invoice_number", gp.supplier_invoice_no);
+				}
+				if (gp.supplier_invoice_date) {
+					dialog.set_value("sales_invoice_date", gp.supplier_invoice_date);
+				}
 			}
 		});
 }
