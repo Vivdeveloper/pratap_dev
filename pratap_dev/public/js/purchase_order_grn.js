@@ -44,11 +44,25 @@ function update_grn_created_display(frm) {
 	if (frm.is_new() || !frm.doc.name || !frm.fields_dict.custom_grn_created) {
 		return;
 	}
+	// Only recompute if this user can read Purchase Receipts. Users who can see POs but
+	// not GRNs would otherwise trigger a "Not permitted" (PermissionError) from the
+	// frappe.client.get_value endpoint. For them we trust the stored value, which the
+	// server keeps in sync on GRN submit/cancel.
+	if (!frappe.model.can_read("Purchase Receipt")) {
+		return;
+	}
+	// NOTE: pass the parent doctype ("Purchase Receipt") as the 5th arg. frappe.client.get_value
+	// raises PermissionError unconditionally when a child table is queried without a parent
+	// (check_parent_permission), so querying "Purchase Receipt Item" on its own would throw
+	// "Not permitted" for EVERY user. With the parent supplied, the check runs against
+	// Purchase Receipt (already gated by the can_read guard above).
 	frappe.db
 		.get_value(
 			"Purchase Receipt Item",
 			{ purchase_order: frm.doc.name, docstatus: 1 },
-			"name"
+			"name",
+			null,
+			"Purchase Receipt"
 		)
 		.then((r) => {
 			const has_grn = !!(r && r.message && r.message.name);
