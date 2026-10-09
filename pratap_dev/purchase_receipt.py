@@ -1,6 +1,8 @@
 # Copyright (c) 2026, pratap_dev contributors
 # License: MIT
 
+import json
+
 import frappe
 from frappe import _
 from frappe.utils import flt, getdate, today
@@ -923,16 +925,24 @@ def get_grn_qc_submit_status(purchase_receipt):
 
 
 @frappe.whitelist()
-def send_grn_for_qc(purchase_receipt):
+def send_grn_for_qc(purchase_receipt, sample_qty_by_item=None):
     """One-click "Send for QC": auto-create + save a draft Pratap QC for each
     QC-required GRN item (one per item, matching the picker's de-dup), link each to
     its GRN line, and move the GRN to the "QC Pending" state.
 
     The QCs then appear in the Pratap Quality Inspection list; filling and submitting
     a QC still auto-submits the GRN (existing logic), which flips it to "Submitted".
+
+    sample_qty_by_item: optional {purchase_receipt_item: sample_qty} — when present, the
+    QC's "Sample Issued Qty for QC" (inspected_qty) is set to the given sample qty
+    instead of defaulting to the received qty. Used by the PO Create-GRN auto flow.
     """
     if not frappe.db.exists("Purchase Receipt", purchase_receipt):
         frappe.throw(_("Purchase Receipt {0} does not exist.").format(purchase_receipt))
+
+    if isinstance(sample_qty_by_item, str):
+        sample_qty_by_item = json.loads(sample_qty_by_item)
+    sample_qty_by_item = sample_qty_by_item or {}
 
     grn = frappe.get_doc("Purchase Receipt", purchase_receipt)
     if grn.docstatus != 0:
@@ -950,7 +960,8 @@ def send_grn_for_qc(purchase_receipt):
 
     created = []
     for entry in items_need_create:
-        created.append(_create_grn_pratap_qc(grn, entry))
+        sample_qty = flt(sample_qty_by_item.get(entry.get("name"))) if entry.get("name") else 0
+        created.append(_create_grn_pratap_qc(grn, entry, sample_qty=sample_qty))
 
     # Mark the GRN as QC Pending (stays a draft until the QC is submitted).
     if grn.meta.has_field("custom_qc_status"):
@@ -965,8 +976,11 @@ def send_grn_for_qc(purchase_receipt):
     return {"qcs": all_qcs, "created": created}
 
 
-def _create_grn_pratap_qc(grn, entry):
-    """Create + insert a draft Pratap QC for one GRN item and link it to the row."""
+def _create_grn_pratap_qc(grn, entry, sample_qty=0):
+    """Create + insert a draft Pratap QC for one GRN item and link it to the row.
+
+    sample_qty: when > 0, becomes the QC's "Sample Issued Qty for QC" (inspected_qty);
+    otherwise it defaults to the received qty (legacy behaviour)."""
     item_code = entry.get("item_code")
     qc = frappe.new_doc("Pratap Quality Inspection")
     meta = qc.meta
@@ -989,9 +1003,9 @@ def _create_grn_pratap_qc(grn, entry):
     _set("production_item", item_code or "")
     _set("item_name", entry.get("item_name") or "")
     _set("reference_qty", reference_qty)
-    # Default the inspected qty to the received qty so the draft QC saves; the
-    # inspector adjusts the actual readings while filling it.
-    _set("inspected_qty", reference_qty)
+    # "Sample Issued Qty for QC" (inspected_qty): use the sample qty entered in the PO
+    # Create-GRN flow when provided, else default to the received qty so the draft saves.
+    _set("inspected_qty", flt(sample_qty) or reference_qty)
     _set("sales_uom", sales_uom)
     _set("purchase_uom", purchase_uom or "")
     _set("status", "Pending")

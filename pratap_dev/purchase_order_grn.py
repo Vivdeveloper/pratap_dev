@@ -7,7 +7,7 @@ import frappe
 from frappe import _
 from frappe.model.mapper import get_mapped_doc
 from frappe.model.naming import make_autoname
-from frappe.utils import flt
+from frappe.utils import cint, cstr, flt
 
 # Running series for the GRN group id, e.g. PRG-26-00001, PRG-26-00002 ...
 # `.YY.` = 2-digit year, `.#####` = zero-padded incrementing counter (kept in `tabSeries`).
@@ -230,6 +230,7 @@ def get_po_grn_dialog_items(purchase_order):
 				"po_item": row.name,
 				"item_code": row.item_code,
 				"item_name": row.item_name,
+				"has_batch_no": cint(frappe.db.get_value("Item", row.item_code, "has_batch_no")),
 				"custom_packing_qty": packing_qty,
 				"po_no_of_unit": balance["po_no_of_unit"],
 				"custom_total_qty": balance_units,
@@ -460,3 +461,144 @@ def make_purchase_receipt_from_po(
 		purchase_order, items, sales_invoice_number, sales_invoice_date
 	)
 	return receipts[0] if len(receipts) == 1 else receipts
+
+
+@frappe.whitelist()
+def create_grn_with_batches_and_qc(
+	purchase_order,
+	items=None,
+	batches=None,
+	sales_invoice_number=None,
+	sales_invoice_date=None,
+	gate_pass=None,
+):
+	"""PO "Create GRN" one-shot flow.
+
+	Creates the GRN(s), auto-builds the Serial-and-Batch Bundle for every batch-tracked
+	item (so the user never opens "Add Batch Nos"), captures the sample qty on the GRN
+	item, and sends the GRN for QC (passing the sample qty into each QC's
+	"Sample Issued Qty for QC"). Returns {"grns": [...], "qcs": [...]}.
+
+	items   : [{po_item, item_code, has_batch_no, custom_packing_qty,
+	            custom_total_qty (= GRN Unit to receive), qty, grn_qty}, ...]
+	batches : [{po_item, item_code, supplier_batch, batch_no, standard_pkg_qty,
+	            no_of_unit, total_qty, expiry_date, sample_qty}, ...]
+
+	All completeness is validated BEFORE anything is created — if a batch-tracked item is
+	missing/incomplete batch rows, nothing is created and the caller gets a clear error.
+	"""
+	from pratap_dev.purchase_receipt import (
+		get_pratap_qc_status_for_grn,
+		send_grn_for_qc,
+	)
+	from pratap_dev.purchase_receipt_batch_entry import add_batches_to_grn_item
+
+	if isinstance(items, str):
+		items = json.loads(items)
+	if isinstance(batches, str):
+		batches = json.loads(batches)
+	items = items or []
+	batches = batches or []
+
+	# Group batch rows by their PO item so each GRN item row can find its own batches.
+	batches_by_po_item = {}
+	for b in batches:
+		batches_by_po_item.setdefault(b.get("po_item"), []).append(b)
+
+	# ---- Validate completeness up-front (block if incomplete) ----
+	for it in items:
+		if not cint(it.get("has_batch_no")):
+			continue
+		grn_units = flt(it.get("custom_total_qty"))
+		rows = batches_by_po_item.get(it.get("po_item")) or []
+		if not rows:
+			frappe.throw(
+				_("Item {0}: add batch details before creating the GRN.").format(it.get("item_code"))
+			)
+		total_units = 0
+		for r in rows:
+			if not (cstr(r.get("supplier_batch")).strip() or cstr(r.get("batch_no")).strip()):
+				frappe.throw(
+					_("Item {0}: Supplier Batch is required for every batch row.").format(
+						it.get("item_code")
+					)
+				)
+			if flt(r.get("no_of_unit")) <= 0:
+				frappe.throw(
+					_("Item {0}: batch No of Unit must be greater than 0.").format(it.get("item_code"))
+				)
+			total_units += flt(r.get("no_of_unit"))
+		if abs(total_units - grn_units) > 0.0001:
+			frappe.throw(
+				_(
+					"Item {0}: the batch No of Unit total ({1}) must equal the GRN Unit ({2})."
+				).format(it.get("item_code"), total_units, grn_units)
+			)
+
+	# ---- Create the GRN(s) ----
+	receipts = make_purchase_receipts_from_po(
+		purchase_order,
+		items=items,
+		sales_invoice_number=sales_invoice_number,
+		sales_invoice_date=sales_invoice_date,
+		gate_pass=gate_pass,
+	)
+
+	pr_item_meta = frappe.get_meta("Purchase Receipt Item")
+	has_sample_field = pr_item_meta.has_field("custom_sample_qty")
+
+	all_grns = []
+	all_qcs = []
+	for pr in receipts:
+		grn_name = pr.name
+		grn = frappe.get_doc("Purchase Receipt", grn_name)
+		sample_qty_by_item = {}
+
+		for item_row in grn.items:
+			rows = batches_by_po_item.get(item_row.purchase_order_item) or []
+			if not rows:
+				continue
+			if not cint(frappe.db.get_value("Item", item_row.item_code, "has_batch_no")):
+				continue
+
+			add_batches_to_grn_item(
+				grn_name,
+				item_row.name,
+				[
+					{
+						"batch_no": cstr(r.get("batch_no")).strip(),
+						"supplier_batch": cstr(r.get("supplier_batch")).strip(),
+						"standard_pkg_qty": flt(r.get("standard_pkg_qty"))
+						or flt(item_row.get("custom_packing_qty"))
+						or 1,
+						"no_of_unit": flt(r.get("no_of_unit")),
+						"total_qty": flt(r.get("total_qty")),
+						"expiry_date": r.get("expiry_date") or None,
+					}
+					for r in rows
+				],
+			)
+
+			sample_total = sum(flt(r.get("sample_qty")) for r in rows)
+			if has_sample_field:
+				frappe.db.set_value(
+					"Purchase Receipt Item",
+					item_row.name,
+					"custom_sample_qty",
+					sample_total,
+					update_modified=False,
+				)
+			if sample_total > 0:
+				sample_qty_by_item[item_row.name] = sample_total
+
+		# Send for QC only when the GRN actually has items that need it; otherwise
+		# send_grn_for_qc would throw and abort an otherwise-valid GRN.
+		all_grns.append(grn_name)
+		status = get_pratap_qc_status_for_grn(grn_name)
+		if status.get("skip"):
+			continue
+		if (status.get("items_need_create") or []) or (status.get("open_qcs") or []):
+			qc_result = send_grn_for_qc(grn_name, sample_qty_by_item=sample_qty_by_item)
+			all_qcs.extend(qc_result.get("qcs") or [])
+
+	return {"grns": all_grns, "qcs": all_qcs}
