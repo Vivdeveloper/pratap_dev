@@ -463,6 +463,55 @@ def make_purchase_receipt_from_po(
 	return receipts[0] if len(receipts) == 1 else receipts
 
 
+def _supplier_batches_for_bundle(bundle):
+	"""Comma-joined Supplier Batch refs for a Serial-and-Batch Bundle (falls back to the
+	internal Batch No when a batch has no stored supplier reference)."""
+	if not bundle:
+		return ""
+	batch_nos = frappe.get_all(
+		"Serial and Batch Entry", filters={"parent": bundle}, pluck="batch_no"
+	)
+	seen, out = set(), []
+	for bn in batch_nos:
+		if not bn:
+			continue
+		ref = frappe.db.get_value("Batch", bn, "custom_supplier_batch") or bn
+		if ref not in seen:
+			seen.add(ref)
+			out.append(ref)
+	return ", ".join(out)
+
+
+@frappe.whitelist()
+def get_po_grn_history(purchase_order):
+	"""GRN history for the Create-GRN dialog's "History" tab: every GRN line raised
+	against this PO (draft + submitted), newest first, with the data that was filled."""
+	if not purchase_order:
+		return []
+
+	rows = frappe.db.sql(
+		"""
+		select pri.parent as grn, pr.docstatus, pr.creation,
+		       pr.custom_supplier_invoice_no as sales_invoice,
+		       pr.custom_supplier_invoice_date as invoice_date,
+		       pri.item_code, pri.qty, pri.custom_sample_qty as sample_qty,
+		       pri.serial_and_batch_bundle as bundle
+		from `tabPurchase Receipt Item` pri
+		join `tabPurchase Receipt` pr on pr.name = pri.parent
+		where pri.purchase_order = %s
+		order by pr.creation desc, pri.idx asc
+		""",
+		(purchase_order,),
+		as_dict=True,
+	)
+
+	labels = {0: "Draft", 1: "Submitted", 2: "Cancelled"}
+	for r in rows:
+		r["supplier_batches"] = _supplier_batches_for_bundle(r.get("bundle"))
+		r["docstatus_label"] = labels.get(r.get("docstatus"), "")
+	return rows
+
+
 @frappe.whitelist()
 def create_grn_with_batches_and_qc(
 	purchase_order,
@@ -591,9 +640,12 @@ def create_grn_with_batches_and_qc(
 			if sample_total > 0:
 				sample_qty_by_item[item_row.name] = sample_total
 
-		# Send for QC only when the GRN actually has items that need it; otherwise
-		# send_grn_for_qc would throw and abort an otherwise-valid GRN.
+		# QC is only raised when a Sample Qty was entered. No sample qty -> no QC; the
+		# user simply lands on the GRN. (Also guard the "needs QC" / skip cases so
+		# send_grn_for_qc never throws and aborts an otherwise-valid GRN.)
 		all_grns.append(grn_name)
+		if not sample_qty_by_item:
+			continue
 		status = get_pratap_qc_status_for_grn(grn_name)
 		if status.get("skip"):
 			continue

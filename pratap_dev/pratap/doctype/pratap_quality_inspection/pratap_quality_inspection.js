@@ -1725,6 +1725,10 @@ function render_batch_readings_matrix(frm) {
 			const reading_field = `reading_${col + 1}`;
 			const cell_val = frappe.utils.escape_html(reading[reading_field] || "");
 			const name = frappe.utils.escape_html(reading.specification || __("(unnamed)"));
+			const spec = frappe.utils.escape_html(reading.specifications || "");
+			const spec_html = spec
+				? `<span class="bread-param-spec">${spec}</span>`
+				: `<span class="text-muted">—</span>`;
 			const is_numeric = cint(reading.numeric);
 			const type_label = cint(reading.formula_based_criteria) ? __("Formula") : is_numeric ? __("Numeric") : __("Text");
 			const type_badge = `<span class="bread-type-badge ${is_numeric ? "bread-type-numeric" : "bread-type-text"}">${type_label}</span>`;
@@ -1739,6 +1743,7 @@ function render_batch_readings_matrix(frm) {
 				  )}">`;
 			return `<tr>
 				<td class="bread-entry-param"><span class="bread-param-name">${name}</span> ${type_badge}</td>
+				<td class="bread-entry-spec">${spec_html}</td>
 				<td class="bread-entry-criteria">${criteria_html}</td>
 				<td class="bread-entry-value">${input_html}</td>
 			</tr>`;
@@ -1754,6 +1759,7 @@ function render_batch_readings_matrix(frm) {
 			<table class="bread-entry-table">
 				<thead><tr>
 					<th>${__("Parameter")}</th>
+					<th>${__("Specifications")}</th>
 					<th>${__("Criteria")}</th>
 					<th>${__("Observed Value")}</th>
 				</tr></thead>

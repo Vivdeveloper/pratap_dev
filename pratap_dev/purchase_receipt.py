@@ -1009,10 +1009,13 @@ def _create_grn_pratap_qc(grn, entry, sample_qty=0):
     _set("sales_uom", sales_uom)
     _set("purchase_uom", purchase_uom or "")
     _set("status", "Pending")
+    # Default "Tested By" (inspector) to the creator; "Approved By" is left blank for the
+    # user to fill before saving. Both are mandatory, so bypass mandatory on this auto-draft.
+    _set("inspector", frappe.session.user)
     if purchase_uom and sales_uom and purchase_uom.lower() == sales_uom.lower():
         _set("custom_density", 1)
 
-    qc.insert(ignore_permissions=True)
+    qc.insert(ignore_permissions=True, ignore_mandatory=True)
 
     # Link the created QC back to its GRN line (draft GRN -> direct row update).
     if entry.get("name"):

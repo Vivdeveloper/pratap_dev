@@ -15,6 +15,7 @@ frappe.ui.form.on("Purchase Order", {
 		}
 
 		update_grn_created_display(frm);
+		update_gate_pass_display(frm);
 	},
 
 	async before_save(frm) {
@@ -70,6 +71,28 @@ function update_grn_created_display(frm) {
 			if (frm.doc.custom_grn_created !== val) {
 				frm.doc.custom_grn_created = val;
 				frm.refresh_field("custom_grn_created");
+			}
+		});
+}
+
+// Read-only "Gate Pass" flag: Yes if any Gate Pass references this PO, else No.
+// Recomputed on view so it is always current; the server keeps the stored value in sync
+// on PO validate.
+function update_gate_pass_display(frm) {
+	if (frm.is_new() || !frm.doc.name || !frm.fields_dict.custom_gate_pass_available) {
+		return;
+	}
+	if (!frappe.model.can_read("Gate Pass")) {
+		return;
+	}
+	frappe.db
+		.get_value("Gate Pass", { purchase_order_po_no: frm.doc.name }, "name")
+		.then((r) => {
+			const has_gp = !!(r && r.message && r.message.name);
+			const val = has_gp ? "Yes" : "No";
+			if (frm.doc.custom_gate_pass_available !== val) {
+				frm.doc.custom_gate_pass_available = val;
+				frm.refresh_field("custom_gate_pass_available");
 			}
 		});
 }
@@ -207,6 +230,21 @@ function open_create_grn_dialog(frm, items) {
 		});
 	}
 
+	// History — past GRNs raised from this PO (draft + submitted). Collapsible section
+	// (Tab Break is unreliable inside frappe.ui.Dialog, so we use a section instead).
+	fields.push({
+		fieldtype: "Section Break",
+		fieldname: "history_section",
+		label: __("History (previous GRNs for this PO)"),
+		collapsible: 1,
+		collapsible_depends_on: "eval:true",
+	});
+	fields.push({
+		fieldtype: "HTML",
+		fieldname: "history_html",
+		options: `<div class="text-muted" style="padding:8px">${__("Loading history…")}</div>`,
+	});
+
 	const dialog = new frappe.ui.Dialog({
 		title: __("Create GRN from {0}", [frm.doc.name]),
 		size: "extra-large",
@@ -220,6 +258,8 @@ function open_create_grn_dialog(frm, items) {
 	grn_dialog_state.dialog = dialog;
 	dialog.show();
 	bind_grn_grid_events(dialog);
+	setup_batch_detail_grid(dialog, batch_items);
+	load_grn_history(frm, dialog);
 
 	// Auto-link the Gate Pass that references this PO, if one exists — and carry its Supplier
 	// Invoice No / Date into the Sales Invoice Number / Invoice Date fields of this dialog.
@@ -241,6 +281,71 @@ function open_create_grn_dialog(frm, items) {
 				}
 			}
 		});
+}
+
+function load_grn_history(frm, dialog) {
+	frappe.call({
+		method: "pratap_dev.purchase_order_grn.get_po_grn_history",
+		args: { purchase_order: frm.doc.name },
+		callback(r) {
+			render_grn_history(dialog, r.message || []);
+		},
+	});
+}
+
+function render_grn_history(dialog, rows) {
+	const field = dialog.fields_dict.history_html;
+	if (!field) {
+		return;
+	}
+	if (!rows.length) {
+		field.$wrapper.html(
+			`<div class="text-muted" style="padding:8px">${__(
+				"No GRNs have been created from this PO yet."
+			)}</div>`
+		);
+		return;
+	}
+
+	const body = rows
+		.map((r) => {
+			const grn_link = `<a href="/app/purchase-receipt/${encodeURIComponent(
+				r.grn
+			)}" target="_blank">${frappe.utils.escape_html(r.grn || "")}</a>`;
+			const created = r.creation ? frappe.datetime.str_to_user(r.creation) : "";
+			const inv_date = r.invoice_date ? frappe.datetime.str_to_user(r.invoice_date) : "";
+			return `<tr>
+				<td>${grn_link}<div class="text-muted" style="font-size:11px">${frappe.utils.escape_html(
+					r.docstatus_label || ""
+				)}</div></td>
+				<td>${frappe.utils.escape_html(r.sales_invoice || "")}</td>
+				<td>${inv_date}</td>
+				<td>${frappe.utils.escape_html(r.item_code || "")}</td>
+				<td style="text-align:right">${flt(r.qty)}</td>
+				<td>${frappe.utils.escape_html(r.supplier_batches || "")}</td>
+				<td style="text-align:right">${flt(r.sample_qty)}</td>
+				<td>${created}</td>
+			</tr>`;
+		})
+		.join("");
+
+	field.$wrapper.html(`
+		<div style="overflow-x:auto">
+			<table class="table table-bordered" style="font-size:12px; margin-bottom:0">
+				<thead><tr>
+					<th>${__("GRN")}</th>
+					<th>${__("Sales Invoice #")}</th>
+					<th>${__("Invoice Date")}</th>
+					<th>${__("Item")}</th>
+					<th style="text-align:right">${__("GRN Qty")}</th>
+					<th>${__("Supplier Batch")}</th>
+					<th style="text-align:right">${__("Sample Qty")}</th>
+					<th>${__("Created On")}</th>
+				</tr></thead>
+				<tbody>${body}</tbody>
+			</table>
+		</div>
+	`);
 }
 
 // One pre-seeded batch row per batch-tracked item — Std Pkg Qty from the item's Packing
@@ -337,6 +442,65 @@ function get_batch_detail_table_fields(batch_items) {
 			columns: 1,
 		},
 	];
+}
+
+// Auto-fill newly added batch rows. When an item's stock arrives in more than one batch,
+// the user clicks "Add Row" to split it — the new row is pre-filled with the same item as
+// the row above (its PO link + Standard Pkg Qty) and the REMAINING No of Unit for that item
+// (GRN Unit minus what its other batch rows already consume), so only Supplier Batch /
+// Expiry / Sample Qty need typing.
+function setup_batch_detail_grid(dialog, batch_items) {
+	const grid = dialog?.fields_dict?.batch_details?.grid;
+	if (!grid || grid._pratap_prefill_bound) {
+		return;
+	}
+	const original_add = grid.add_new_row.bind(grid);
+	grid.add_new_row = function (...args) {
+		const result = original_add(...args);
+		const data = grid.data || [];
+		const new_row = data[data.length - 1];
+		if (new_row) {
+			prefill_batch_row(new_row, grid, batch_items);
+			grid.refresh();
+		}
+		return result;
+	};
+	grid._pratap_prefill_bound = true;
+}
+
+function prefill_batch_row(row, grid, batch_items) {
+	const data = grid.data || [];
+	// Default to the item of the nearest row above that has one; else the first batch item.
+	let src_code = null;
+	for (let i = data.length - 2; i >= 0; i--) {
+		if (data[i].item_code) {
+			src_code = data[i].item_code;
+			break;
+		}
+	}
+	if (!src_code && batch_items.length) {
+		src_code = batch_items[0].item_code;
+	}
+	const match = batch_items.find((b) => b.item_code === src_code);
+	if (!match) {
+		return;
+	}
+	const packing = flt(match.custom_packing_qty) || 1;
+	// Units already allocated to this item across its other batch rows.
+	const allocated = data
+		.filter((r) => r !== row && r.item_code === match.item_code)
+		.reduce((sum, r) => sum + flt(r.no_of_unit), 0);
+	const remaining = Math.max(flt(match.grn_unit) - allocated, 0);
+
+	row.item_code = match.item_code;
+	row.po_item = match.po_item;
+	row.standard_pkg_qty = packing;
+	row.no_of_unit = remaining;
+	row.qty = packing * remaining;
+	row.supplier_batch = "";
+	row.batch_no = "";
+	row.expiry_date = null;
+	row.sample_qty = 0;
 }
 
 // When Item Code is (re)chosen on a batch row (e.g. a new split row), bind it to the

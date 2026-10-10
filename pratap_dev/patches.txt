@@ -22,3 +22,4 @@ pratap_dev.patches.add_pr_grn_attachment_field
 pratap_dev.patches.add_pi_grn_attachment_field
 pratap_dev.patches.add_po_grn_created_field
 pratap_dev.patches.add_pr_item_sample_qty_field
+pratap_dev.patches.add_po_gate_pass_field

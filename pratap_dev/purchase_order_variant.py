@@ -44,6 +44,18 @@ def set_grn_created_flag(po_doc):
 	po_doc.custom_grn_created = "Yes" if _po_has_grn(po_doc.name) else "No"
 
 
+def _po_has_gate_pass(po_name):
+	"""True if at least one Gate Pass references this Purchase Order."""
+	return bool(frappe.db.exists("Gate Pass", {"purchase_order_po_no": po_name}))
+
+
+def set_gate_pass_flag(po_doc):
+	"""Set custom_gate_pass_available on the PO doc (in-memory) from Gate Pass state."""
+	if not po_doc.meta.has_field("custom_gate_pass_available") or not po_doc.name:
+		return
+	po_doc.custom_gate_pass_available = "Yes" if _po_has_gate_pass(po_doc.name) else "No"
+
+
 def update_po_grn_created_flags(purchase_receipt_doc):
 	"""Refresh custom_grn_created on every Purchase Order referenced by this GRN — called when a
 	GRN is submitted or cancelled so the flag stays correct after the PO itself is submitted."""
@@ -67,6 +79,7 @@ class PratapPurchaseOrder(PurchaseOrder):
 	def validate(self):
 		super().validate()
 		set_grn_created_flag(self)
+		set_gate_pass_flag(self)
 
 	def validate_with_previous_doc(self):
 		# Identical to core PurchaseOrder.validate_with_previous_doc EXCEPT the

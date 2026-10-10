@@ -313,11 +313,12 @@ function batch_area_html(it) {
 	<div class="wo-tr-batches" style="margin-top:10px;">
 		<table class="table table-bordered" style="margin-bottom:6px;font-size:13px;">
 			<thead><tr>
-				<th style="width:28%">${__("Batch")}</th>
-				<th style="width:16%">${__("QC Remark")}</th>
-				<th style="width:16%">${__("Std Pkg Qty")}</th>
-				<th style="width:16%">${__("No of Units")}</th>
-				<th style="width:16%">${__("Qty")}</th>
+				<th style="width:24%">${__("Batch")}</th>
+				<th style="width:12%" class="text-right">${__("Available Qty")}</th>
+				<th style="width:14%">${__("QC Remark")}</th>
+				<th style="width:14%">${__("Std Pkg Qty")}</th>
+				<th style="width:14%">${__("No of Units")}</th>
+				<th style="width:14%">${__("Qty")}</th>
 				<th style="width:8%"></th>
 			</tr></thead>
 			<tbody class="wo-tr-rows"></tbody>
@@ -371,7 +372,8 @@ function wire_item_block(frm, dialog, ctx, $body, it) {
 				<td><select class="form-control input-xs wo-b-batch"><option value="">${__(
 					"Select…"
 				)}</option>${optsHtml}</select></td>
-				<td><span class="wo-b-remark text-muted qc-remark-scroll"></span></td>
+				<td class="text-right"><span class="wo-b-avail text-muted"></span></td>
+					<td><span class="wo-b-remark text-muted qc-remark-scroll"></span></td>
 				<td><input type="number" class="form-control input-xs wo-b-pkg" min="0" step="any"></td>
 				<td><input type="number" class="form-control input-xs wo-b-units text-right" min="0" step="any"></td>
 				<td><input type="number" class="form-control input-xs wo-b-qty text-right" min="0" step="any"></td>
@@ -387,7 +389,16 @@ function wire_item_block(frm, dialog, ctx, $body, it) {
 			$tr.find(".wo-b-remark")
 				.text($tr.find(".wo-b-batch option:selected").data("remark") || "")
 				.attr("title", $tr.find(".wo-b-batch option:selected").data("remark") || "");
+			set_row_avail($tr);
 		}
+	};
+
+	// Show the selected batch's available qty (from its dropdown option's data-avail).
+	const set_row_avail = ($tr) => {
+		const av = $tr.find(".wo-b-batch option:selected").data("avail");
+		$tr.find(".wo-b-avail").text(
+			av === undefined || av === "" ? "" : format_number(flt(av))
+		);
 	};
 
 	// Resume a saved draft as-is; otherwise FIFO-prefill the required qty as the default
@@ -424,6 +435,7 @@ function wire_item_block(frm, dialog, ctx, $body, it) {
 		$tr.find(".wo-b-remark")
 			.text(picked ? ($sel.data("remark") || "") : "")
 			.attr("title", picked ? ($sel.data("remark") || "") : "");
+		set_row_avail($tr);
 		recalc_row($tr, "units");
 	});
 	$item.on("input", ".wo-b-pkg", function () {
