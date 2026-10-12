@@ -1,5 +1,24 @@
 const MR_DEFAULT_SOURCE_WAREHOUSE = "Plant 1 WIP FG - PTPL";
 
+// Remove "Request for Quotation" and "Supplier Quotation" from the Create dropdown — only
+// Purchase Order stays. ERPNext re-adds them in its own refresh, so poll briefly to strip.
+function remove_mr_create_buttons(frm) {
+	const group = __("Create");
+	const labels = [__("Request for Quotation"), __("Supplier Quotation")];
+	let attempts = 0;
+	const timer = setInterval(() => {
+		attempts++;
+		labels.forEach((label) => {
+			if (frm.custom_buttons?.[label]) {
+				frm.remove_custom_button(label, group);
+			}
+		});
+		if (attempts >= 30) {
+			clearInterval(timer);
+		}
+	}, 100);
+}
+
 frappe.ui.form.on("Material Request", {
 	onload(frm) {
 		// Default the Set Source Warehouse to Plant 1 WIP FG on new Material Requests.
@@ -9,6 +28,11 @@ frappe.ui.form.on("Material Request", {
 	},
 
 	refresh(frm) {
+		// Hide "Request for Quotation" and "Supplier Quotation" from the Create dropdown —
+		// only Purchase Order should remain (management). ERPNext re-adds them in its own
+		// refresh, so remove shortly after.
+		remove_mr_create_buttons(frm);
+
 		frm.add_fetch(
 			"custom_supplier_",
 			"supplier_name",

@@ -1,5 +1,22 @@
+// Remove "Quotation" from the Create dropdown — only Purchase Order stays (management).
+// ERPNext re-adds it in its own refresh, so poll briefly to strip it.
+function remove_sq_create_buttons(frm) {
+	const group = __("Create");
+	let attempts = 0;
+	const timer = setInterval(() => {
+		attempts++;
+		if (frm.custom_buttons?.[__("Quotation")]) {
+			frm.remove_custom_button(__("Quotation"), group);
+		}
+		if (attempts >= 30) {
+			clearInterval(timer);
+		}
+	}, 100);
+}
+
 frappe.ui.form.on("Supplier Quotation", {
 	refresh(frm) {
+		remove_sq_create_buttons(frm);
 		fill_required_dates_from_rfq(frm);
 
 		if (pratap_dev.last_buying_rates.should_show(frm)) {

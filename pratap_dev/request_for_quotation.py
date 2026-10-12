@@ -13,6 +13,18 @@ import frappe
 
 
 @frappe.whitelist()
+def get_default_contact(doctype, name):
+	"""Whitelisted wrapper around frappe's (un-whitelisted) get_default_contact, wired via
+	hooks.override_whitelisted_methods so the RFQ / Address-&-Contact render stops throwing
+	'Method Not Allowed'. Pure read-only lookup."""
+	from frappe.contacts.doctype.contact.contact import (
+		get_default_contact as _get_default_contact,
+	)
+
+	return _get_default_contact(doctype, name)
+
+
+@frappe.whitelist()
 def get_supplier_primary_contact(supplier):
 	"""Return {contact, email_id} for the supplier's primary contact, falling back to the
 	first linked contact when none is marked primary. Empty dict if the supplier has none."""

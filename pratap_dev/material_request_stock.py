@@ -263,10 +263,12 @@ def update_pipeline_fields(doc, method=None):
       * custom_total_stock_qty     — on-hand across the 3 RM warehouses (excl. JOB WORK).
       * custom_required_qty_for_pr — expected − stock − pending PR − pending GRN (floored 0).
 
-    Hooked on validate (drafts) and before_update_after_submit (submitted), so the columns
-    reflect the POs raised for the order in every state. The fields are allow_on_submit so
-    the after-submit recompute persists.
+    Hooked on validate (drafts). After submit these columns are frozen (allow_on_submit
+    removed) so the "Update" button no longer appears — so we skip recompute once the MR
+    is submitted to avoid "cannot change after submission" errors.
     """
+    if getattr(doc, "docstatus", 0) == 1:
+        return
     if (doc.get("material_request_type") or "") != "Purchase":
         return
 
@@ -417,3 +419,23 @@ def set_item_required_by_from_lead_time(doc, method=None):
             row.schedule_date = add_days(getdate(txn), lead)
         elif header_required_by:
             row.schedule_date = header_required_by
+
+
+def set_source_document(doc, method=None):
+	"""Set the MR's read-only 'Source Document' from its items' linked source doc.
+
+	When items are pulled from a Sales Forecast Club (Material Request Item.custom_forecast_club),
+	the header shows e.g. "Forecast Club: FC00045". Extensible to other source doctypes later.
+	Skipped after submit so it never dirties a submitted MR."""
+	if getattr(doc, "docstatus", 0) == 1:
+		return
+	if not doc.meta.has_field("custom_source_document"):
+		return
+	clubs = []
+	for row in doc.get("items") or []:
+		fc = row.get("custom_forecast_club")
+		if fc and fc not in clubs:
+			clubs.append(fc)
+	doc.custom_source_document = (
+		"Forecast Club: " + ", ".join(clubs) if clubs else ""
+	)

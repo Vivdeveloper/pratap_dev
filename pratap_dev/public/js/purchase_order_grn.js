@@ -184,6 +184,8 @@ function open_create_grn_dialog(frm, items) {
 			fieldtype: "Date",
 			label: __("Invoice Date"),
 			reqd: 1,
+			// Invoice Date must not be a future (front-dated) date — cap the picker at today.
+			max_date: frappe.datetime.str_to_obj(frappe.datetime.get_today()),
 		},
 		{
 			fieldname: "gate_pass",
@@ -550,6 +552,12 @@ function submit_create_grn(frm, dialog) {
 
 	if (!rows.length) {
 		frappe.throw(__("Please tick at least one item checkbox to create GRN."));
+	}
+
+	// Invoice Date must not be a future (front-dated) date.
+	const inv_date = dialog.get_value("sales_invoice_date");
+	if (inv_date && inv_date > frappe.datetime.get_today()) {
+		frappe.throw(__("Invoice Date cannot be a future date."));
 	}
 
 	const items_payload = [];

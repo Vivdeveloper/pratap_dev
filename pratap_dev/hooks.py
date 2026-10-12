@@ -277,6 +277,10 @@ override_whitelisted_methods = {
 	"get_last_buying_rate": "pratap_dev.purchase_order_grn.get_last_buying_rate",
 	# RFQ supplier portal: persist Std Pkg Qty / No of Unit onto the created SQ.
 	"erpnext.buying.doctype.request_for_quotation.request_for_quotation.create_supplier_quotation": "pratap_dev.supplier_quotation_portal.create_supplier_quotation",
+	# frappe.contacts…get_default_contact is NOT whitelisted in this Frappe version, so the
+	# RFQ / Address-&-Contact render throws "Method Not Allowed". Route it to a whitelisted
+	# wrapper so the call succeeds (read-only lookup).
+	"frappe.contacts.doctype.contact.contact.get_default_contact": "pratap_dev.request_for_quotation.get_default_contact",
 }
 
 doctype_js = {
@@ -293,6 +297,7 @@ doctype_js = {
         "public/js/work_order_time_log.js",
         "public/js/work_order_hide_fields.js",
         "public/js/work_order_stop_reason.js",
+        "public/js/work_order_packing_requirement.js",
     ],
     "Purchase Order": "public/js/purchase_order_grn.js",
     "Request for Quotation": "public/js/request_for_quotation.js",
@@ -427,8 +432,12 @@ doc_events = {
             "pratap_dev.material_request_stock.move_fulfilled_items",
             # Per-item Required By = Transaction Date + Lead Time in Days (fallback: header Required By).
             "pratap_dev.material_request_stock.set_item_required_by_from_lead_time",
+            # Show which source doc (e.g. Forecast Club) the items were fetched from.
+            "pratap_dev.material_request_stock.set_source_document",
         ],
-        "before_update_after_submit": "pratap_dev.material_request_stock.update_pipeline_fields",
+        # NOTE: no before_update_after_submit — the computed warehouse/qty columns are frozen
+        # after submit (allow_on_submit removed), so they must NOT be recomputed post-submit.
+        # This keeps the "Update" button from appearing on a submitted Material Request.
     },
     "Request for Quotation": {
         "validate": [
