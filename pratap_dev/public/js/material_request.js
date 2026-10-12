@@ -473,6 +473,10 @@ function render_custom_items_table(frm, cols) {
 
 	const rows = frm.doc.items || [];
 	const editable = frm.doc.docstatus === 0;
+	// Reject-select column: shown only when this user is at the Approve/Reject decision point
+	// (frm._mr_can_reject is set async by setup_reject_button). Lets the approver tick the
+	// item rows to reject straight from the custom table.
+	const show_reject = !!frm._mr_can_reject;
 	const esc = frappe.utils.escape_html;
 	const cell = (v, num) => {
 		// Numeric columns always show a number (0 when unset) — never blank — matching the
@@ -487,13 +491,14 @@ function render_custom_items_table(frm, cols) {
 	let html = `<div class="mr-pc-scroll" style="overflow-x:auto;border:1px solid var(--border-color, #d1d8dd);border-radius:6px;transition:padding-bottom .1s;">
 		<table class="table table-bordered" style="margin:0;white-space:nowrap;min-width:max-content;">
 		<thead><tr style="background-color:#e9ecef;font-weight:600;">
+			${show_reject ? `<th style="min-width:34px;text-align:center;" title="${__("Select to reject")}"><input type="checkbox" class="mr-pc-reject-all"></th>` : ""}
 			<th style="min-width:40px;">Sr. No</th>
 			${cols.map((c) => `<th style="min-width:130px;white-space:normal;">${esc(c.label)}</th>`).join("")}
 			${editable ? `<th style="min-width:70px;"></th>` : ""}
 		</tr></thead><tbody>`;
 
 	rows.forEach((row, i) => {
-		html += `<tr data-name="${esc(row.name)}"><td>${i + 1}</td>`;
+		html += `<tr data-name="${esc(row.name)}">${show_reject ? `<td style="text-align:center;"><input type="checkbox" class="mr-pc-reject-check" data-name="${esc(row.name)}"></td>` : ""}<td>${i + 1}</td>`;
 		cols.forEach((c) => {
 			if (c.ctrl && editable) {
 				// placeholder cell -> a real Frappe control is mounted after insert
@@ -512,13 +517,24 @@ function render_custom_items_table(frm, cols) {
 		html += `</tr>`;
 	});
 	if (!rows.length) {
-		html += `<tr><td colspan="${cols.length + 2}" class="text-muted text-center">No items</td></tr>`;
+		html += `<tr><td colspan="${cols.length + 2 + (show_reject ? 1 : 0)}" class="text-muted text-center">No items</td></tr>`;
 	}
 	html += `</tbody></table></div>`;
 	if (editable) {
 		html += `<div style="margin-top:8px;"><button class="btn btn-xs btn-default mr-pc-add">${__("Add Row")}</button></div>`;
 	}
 	$c.html(html);
+
+	// Reject-select checkboxes -> toggle the Reject button via the shared handler.
+	if (show_reject) {
+		$c.find(".mr-pc-reject-all").off("change").on("change", function () {
+			$c.find(".mr-pc-reject-check").prop("checked", this.checked);
+			if (typeof frm._mr_toggle_reject === "function") frm._mr_toggle_reject();
+		});
+		$c.find(".mr-pc-reject-check").off("change").on("change", function () {
+			if (typeof frm._mr_toggle_reject === "function") frm._mr_toggle_reject();
+		});
+	}
 
 	// Mount a real Frappe control in each editable cell (Link = searchable dropdown, etc.).
 	$c.find(".mr-pc-ctrl").each(function () {
@@ -916,18 +932,17 @@ function setup_reject_button(frm) {
 	};
 	hide_bottom();
 
-	// Bottom button tracks row selection, but only when rejecting is allowed.
+	// Bottom button tracks row selection in the CUSTOM items table, but only when rejecting
+	// is allowed. Exposed on the form so the table renderer can call it when a box is ticked.
 	const toggle_bottom = () => {
 		const $btn = grid.custom_buttons[__("Reject")];
 		if (!$btn) {
 			return;
 		}
-		const any = grid.wrapper.find(".grid-body .grid-row-check:checked:first").length > 0;
+		const any = checked_reject_names(frm).length > 0;
 		$btn.toggleClass("hidden", !(frm._mr_can_reject && any));
 	};
-	grid.wrapper.off("click.mrreject").on("click.mrreject", ".grid-row-check", () => {
-		setTimeout(toggle_bottom, 50);
-	});
+	frm._mr_toggle_reject = toggle_bottom;
 
 	if (frm.is_new() || frm.doc.docstatus !== 0) {
 		return;
@@ -955,6 +970,13 @@ function setup_reject_button(frm) {
 				return;
 			}
 
+			// Now that rejecting is allowed, re-render the custom table so the per-row
+			// reject checkboxes appear (they are gated on frm._mr_can_reject).
+			const cols = current_mr_cols(frm);
+			if (cols) {
+				render_custom_items_table(frm, cols);
+			}
+
 			// Bottom button (next to Delete).
 			grid
 				.add_custom_button(__("Reject"), () => reject_selected_items(frm, grid))
@@ -968,9 +990,22 @@ function setup_reject_button(frm) {
 		.catch(() => {});
 }
 
+// Names of the item rows ticked for rejection in the custom items table.
+function checked_reject_names(frm) {
+	const names = [];
+	const field = frm.fields_dict.items;
+	if (field && field.$wrapper) {
+		field.$wrapper.find(".mr-pc-reject-check:checked").each(function () {
+			const n = $(this).data("name");
+			if (n) names.push(n);
+		});
+	}
+	return names;
+}
+
 function reject_selected_items(frm, grid) {
-	const selected = grid.get_selected_children();
-	if (!selected.length) {
+	const names = checked_reject_names(frm);
+	if (!names.length) {
 		frappe.msgprint(__("Select at least one item to reject"));
 		return;
 	}
@@ -978,21 +1013,21 @@ function reject_selected_items(frm, grid) {
 		frappe.msgprint(__("Please save the document before rejecting items."));
 		return;
 	}
-	if (selected.length >= (frm.doc.items || []).length) {
+	if (names.length >= (frm.doc.items || []).length) {
 		frappe.msgprint(__("Cannot reject all items — at least one item must remain here."));
 		return;
 	}
 
 	frappe.confirm(
 		__("Move {0} selected item(s) to a new Material Request and remove them from here?", [
-			selected.length,
+			names.length,
 		]),
 		() => {
 			frappe.call({
 				method: "pratap_dev.material_request_reject.reject_items_to_new_mr",
 				args: {
 					source_name: frm.doc.name,
-					item_rows: JSON.stringify(selected.map((d) => d.name)),
+					item_rows: JSON.stringify(names),
 				},
 				freeze: true,
 				freeze_message: __("Rejecting items..."),
