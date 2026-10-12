@@ -15,6 +15,7 @@ end to end without the "not found" error. Drafts keep the standard rebuild behav
 """
 
 import frappe
+from frappe import _
 from frappe.utils import flt
 
 from erpnext.manufacturing.doctype.work_order.work_order import (
@@ -49,3 +50,23 @@ class PratapWorkOrder(WorkOrder):
 			self.set_required_items(reset_only_qty=len(self.get("required_items")))
 			return check_if_scrap_warehouse_mandatory(self.bom_no)
 		return super().get_items_and_operations_from_bom()
+
+
+@frappe.whitelist()
+def stop_work_order_with_reason(work_order, reason):
+	"""Save the mandatory stop reason on the Work Order, then Stop it (ERPNext stop_unstop).
+
+	The reason is required — stopping is refused without it. Returns the new status so the
+	client can refresh, exactly like the core change_work_order_status flow."""
+	from erpnext.manufacturing.doctype.work_order.work_order import stop_unstop
+
+	reason = (reason or "").strip()
+	if not reason:
+		frappe.throw(_("A reason is required to stop the Work Order."))
+
+	if frappe.get_meta("Work Order").has_field("custom_stop_reason"):
+		frappe.db.set_value(
+			"Work Order", work_order, "custom_stop_reason", reason, update_modified=False
+		)
+
+	return stop_unstop(work_order, "Stopped")

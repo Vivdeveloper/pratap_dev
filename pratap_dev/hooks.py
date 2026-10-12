@@ -292,6 +292,7 @@ doctype_js = {
         "public/js/work_order_transfer.js",
         "public/js/work_order_time_log.js",
         "public/js/work_order_hide_fields.js",
+        "public/js/work_order_stop_reason.js",
     ],
     "Purchase Order": "public/js/purchase_order_grn.js",
     "Request for Quotation": "public/js/request_for_quotation.js",
