@@ -396,8 +396,8 @@ function wire_item_block(frm, dialog, ctx, $body, it) {
 		if (data) {
 			$tr.find(".wo-b-batch").val(data.batch_no || "");
 			$tr.find(".wo-b-pkg").val(data.std_pkg || "");
-			$tr.find(".wo-b-units").val(data.units || "");
-			$tr.find(".wo-b-qty").val(data.qty || "");
+			set_units_val($tr.find(".wo-b-units"), data.units); // full precision, 3-dp shown
+			$tr.find(".wo-b-qty").val(fmt3(data.qty));
 			// Show the picked batch's QC remark (from its selected dropdown option).
 			$tr.find(".wo-b-remark")
 				.text($tr.find(".wo-b-batch option:selected").data("remark") || "")
@@ -444,7 +444,7 @@ function wire_item_block(frm, dialog, ctx, $body, it) {
 		// Reset Std Pkg Qty AND No of Units to the newly selected pack option (from the
 		// Package Ledger); if "Select…" is chosen, clear both. Qty is then recomputed.
 		$tr.find(".wo-b-pkg").val(picked && pkg ? pkg : "");
-		$tr.find(".wo-b-units").val(picked && units ? units : "");
+		set_units_val($tr.find(".wo-b-units"), picked && units ? units : 0); // full precision
 		$tr.find(".wo-b-remark")
 			.text(picked ? ($sel.data("remark") || "") : "")
 			.attr("title", picked ? ($sel.data("remark") || "") : "");
@@ -455,7 +455,12 @@ function wire_item_block(frm, dialog, ctx, $body, it) {
 		recalc_row($(this).closest("tr"), "units");
 	});
 	$item.on("input", ".wo-b-units", function () {
+		// User typed No of Units -> that typed value becomes the full-precision source.
+		$(this).data("full", flt($(this).val()));
 		recalc_row($(this).closest("tr"), "units");
+	});
+	$item.on("blur", ".wo-b-units", function () {
+		$(this).val(fmt3(units_full($(this)))); // reformat display to 3 dp, keep full value
 	});
 	$item.on("input", ".wo-b-qty", function () {
 		recalc_row($(this).closest("tr"), "qty");
@@ -522,15 +527,29 @@ function apply_timer_buttons($item, running, finished) {
 }
 
 // Directional two-way calc, capped at 3 decimals.
+// No of Units is DISPLAYED at 3 dp (clean) but the FULL-precision value is kept in the
+// input's data-full attribute, so every Qty = Std Pkg x No of Units calculation uses the
+// exact number and never drifts from rounding.
+function fmt3(v) {
+	return v || v === 0 ? String(flt(v, 3)) : "";
+}
+function set_units_val($u, full) {
+	$u.data("full", flt(full));
+	$u.val(fmt3(full));
+}
+function units_full($u) {
+	const d = $u.data("full");
+	return d === undefined || d === null ? flt($u.val()) : flt(d);
+}
+
 function recalc_row($tr, from_field) {
 	const pkg = flt($tr.find(".wo-b-pkg").val());
+	const $u = $tr.find(".wo-b-units");
 	if (from_field === "qty") {
 		const qty = flt($tr.find(".wo-b-qty").val());
-		// Full precision on No of Unit (no 3-dp round) so Qty = Std Pkg x No of Unit is exact.
-		$tr.find(".wo-b-units").val(pkg ? flt(qty / pkg, 9) : 0);
+		set_units_val($u, pkg ? qty / pkg : 0); // full precision stored, 3-dp shown
 	} else {
-		const units = flt($tr.find(".wo-b-units").val());
-		$tr.find(".wo-b-qty").val(flt(pkg * units, 3));
+		$tr.find(".wo-b-qty").val(fmt3(pkg * units_full($u)));
 	}
 }
 
@@ -539,10 +558,11 @@ function collect_rows($item) {
 	$item.find(".wo-tr-rows tr").each(function () {
 		const batch_no = $(this).find(".wo-b-batch").val();
 		const std_pkg = flt($(this).find(".wo-b-pkg").val());
-		const units = flt($(this).find(".wo-b-units").val());
+		// FULL-precision No of Units (data-full), not the 3-dp display, so Qty is exact.
+		const units = units_full($(this).find(".wo-b-units"));
 		const qty = flt($(this).find(".wo-b-qty").val());
 		if (batch_no || std_pkg || units) {
-			rows.push({ batch_no, std_pkg, units, qty: flt(std_pkg * units, 3) || qty });
+			rows.push({ batch_no, std_pkg, units, qty: flt(std_pkg * units, 6) || qty });
 		}
 	});
 	return rows;
@@ -554,27 +574,19 @@ function collect_rows($item) {
 // batch's Std Pkg. This becomes the default plan the planner can just "Set Plan".
 function fifo_prefill_rows(it) {
 	const rows = [];
-	let need = flt(it.required_qty, 3);
+	let need = flt(it.required_qty, 6);
 	(it.batches || []).forEach((b) => {
 		if (need <= 1e-6) return;
 		const pkg = flt(b.std_pkg) || 1;
-		const avail = flt(b.available_qty, 3);
+		const avail = flt(b.available_qty, 6);
 		if (avail <= 0) return;
-		// Never plan more than a batch actually holds: cap units at floor(avail / pkg).
-		const availUnits = Math.floor((avail / pkg) * 1000) / 1000;
-		if (availUnits <= 0) return;
-		let units;
-		if (avail < need - 1e-9) {
-			units = availUnits; // batch can't finish it — take the whole batch, move on
-		} else {
-			// This batch can finish the requirement: round the closing units UP so the
-			// plan total still meets required despite 3-dp rounding, but not past avail.
-			units = Math.ceil((need / pkg) * 1000) / 1000;
-			if (units > availUnits) units = availUnits;
-		}
-		const qty = flt(pkg * units, 3);
-		rows.push({ batch_no: b.batch_no, std_pkg: pkg, units: units, qty: qty });
-		need = flt(need - qty, 3);
+		// Take exactly what's still needed from this batch (capped at what it holds). No 3-dp
+		// rounding of the qty — No of Units carries full precision (displayed at 3 dp), so the
+		// planned Qty equals the required qty exactly instead of overshooting.
+		const take = Math.min(avail, need);
+		const units = pkg ? take / pkg : 0; // full precision
+		rows.push({ batch_no: b.batch_no, std_pkg: pkg, units: units, qty: flt(take, 6) });
+		need = flt(need - take, 6);
 	});
 	return rows;
 }
@@ -958,11 +970,11 @@ function in_process_qc_block_html(qc) {
 
 function rework_recalc($tr, from_field) {
 	const pkg = flt($tr.find(".wo-rwb-pkg").val());
+	const $u = $tr.find(".wo-rwb-units");
 	if (from_field === "qty") {
-		// Full precision on No of Unit (no 3-dp round) so Qty = Std Pkg x No of Unit is exact.
-		$tr.find(".wo-rwb-units").val(pkg ? flt(flt($tr.find(".wo-rwb-qty").val()) / pkg, 9) : 0);
+		set_units_val($u, pkg ? flt($tr.find(".wo-rwb-qty").val()) / pkg : 0); // full precision, 3-dp shown
 	} else {
-		$tr.find(".wo-rwb-qty").val(flt(pkg * flt($tr.find(".wo-rwb-units").val()), 3));
+		$tr.find(".wo-rwb-qty").val(fmt3(pkg * units_full($u)));
 	}
 }
 
@@ -971,11 +983,12 @@ function rework_collect($item) {
 	$item.find(".wo-rw-rows tr").each(function () {
 		const batch_no = $(this).find(".wo-rwb-batch").val();
 		const std_pkg = flt($(this).find(".wo-rwb-pkg").val());
-		const units = flt($(this).find(".wo-rwb-units").val());
+		// FULL-precision No of Units (data-full), not the 3-dp display, so Qty is exact.
+		const units = units_full($(this).find(".wo-rwb-units"));
 		const qty_input = flt($(this).find(".wo-rwb-qty").val());
 		// When Std Pkg Qty is defined, qty = std x units; when it is NOT defined, fall back
 		// to the entered Qty (or Units) so a batch with no standard packaging still transfers.
-		const qty = std_pkg > 0 ? flt(std_pkg * units, 3) : flt(qty_input || units, 3);
+		const qty = std_pkg > 0 ? flt(std_pkg * units, 6) : flt(qty_input || units, 6);
 		if (batch_no || std_pkg || units || qty_input) {
 			rows.push({ batch_no, std_pkg, units, qty });
 		}
@@ -1002,8 +1015,8 @@ function rework_add_row($item, prefill) {
 	if (prefill && prefill.batch_no) {
 		$tr.find(".wo-rwb-batch").val(prefill.batch_no);
 		$tr.find(".wo-rwb-pkg").val(prefill.std_pkg || "");
-		$tr.find(".wo-rwb-units").val(prefill.units || "");
-		$tr.find(".wo-rwb-qty").val(prefill.qty || "");
+		set_units_val($tr.find(".wo-rwb-units"), prefill.units); // full precision, 3-dp shown
+		$tr.find(".wo-rwb-qty").val(fmt3(prefill.qty));
 		$tr.find(".wo-rwb-remark")
 			.text($tr.find(".wo-rwb-batch option:selected").data("remark") || "")
 			.attr("title", $tr.find(".wo-rwb-batch option:selected").data("remark") || "");
@@ -1082,8 +1095,16 @@ function wire_rework(frm, dialog, ctx) {
 		set_rwb_avail($tr);
 		rework_recalc($tr, "units");
 	});
-	$body.on("input", ".wo-rwb-pkg, .wo-rwb-units", function () {
+	$body.on("input", ".wo-rwb-pkg", function () {
 		rework_recalc($(this).closest("tr"), "units");
+	});
+	$body.on("input", ".wo-rwb-units", function () {
+		// User typed No of Units -> that typed value becomes the full-precision source.
+		$(this).data("full", flt($(this).val()));
+		rework_recalc($(this).closest("tr"), "units");
+	});
+	$body.on("blur", ".wo-rwb-units", function () {
+		$(this).val(fmt3(units_full($(this)))); // reformat display to 3 dp, keep full value
 	});
 	$body.on("input", ".wo-rwb-qty", function () {
 		rework_recalc($(this).closest("tr"), "qty");
