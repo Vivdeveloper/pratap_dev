@@ -526,7 +526,8 @@ function recalc_row($tr, from_field) {
 	const pkg = flt($tr.find(".wo-b-pkg").val());
 	if (from_field === "qty") {
 		const qty = flt($tr.find(".wo-b-qty").val());
-		$tr.find(".wo-b-units").val(pkg ? flt(qty / pkg, 3) : 0);
+		// Full precision on No of Unit (no 3-dp round) so Qty = Std Pkg x No of Unit is exact.
+		$tr.find(".wo-b-units").val(pkg ? flt(qty / pkg, 9) : 0);
 	} else {
 		const units = flt($tr.find(".wo-b-units").val());
 		$tr.find(".wo-b-qty").val(flt(pkg * units, 3));
@@ -611,8 +612,19 @@ function inprocess_qc_pending(ctx) {
 //  - In Process QC: disabled while any In Process QC is unfinished (one at a time).
 //  - Final QC: shown ONLY when every In Process QC record (Basic Testing + rework) is
 //    finished — i.e. no Pending Basic Testing and all rework transferred + finished.
+// Every main-tab required item AND every in-process (rework) item must be fully transferred
+// before Final QC is allowed.
+function all_material_transferred(ctx) {
+	const main_done = (ctx.items || []).every((it) => it.is_full);
+	const rework_done = (ctx.rework_qcs || []).every((qc) =>
+		(qc.items || []).every((it) => (it.transfers || []).length > 0)
+	);
+	return main_done && rework_done;
+}
+
 function apply_qc_action_gates(dialog, ctx) {
 	const pending = inprocess_qc_pending(ctx);
+	const transferred = all_material_transferred(ctx);
 	const $ip = dialog.$wrapper.find(".wo-inprocess-qc-btn");
 	const $final = dialog.$wrapper.find(".wo-final-qc-btn");
 
@@ -626,8 +638,15 @@ function apply_qc_action_gates(dialog, ctx) {
 			: ""
 	);
 
-	// Only available once ALL In Process QC records are finished.
+	// Final QC: shown once all In Process QC records are finished, AND clickable only when
+	// ALL material (main-tab items + in-process rework items) is fully transferred.
 	$final.toggle(!pending);
+	$final.prop("disabled", !transferred).attr(
+		"title",
+		transferred
+			? ""
+			: __("Transfer all material (main items and in-process items) before Final QC.")
+	);
 }
 
 function apply_batch_gate(dialog, ctx) {
@@ -940,7 +959,8 @@ function in_process_qc_block_html(qc) {
 function rework_recalc($tr, from_field) {
 	const pkg = flt($tr.find(".wo-rwb-pkg").val());
 	if (from_field === "qty") {
-		$tr.find(".wo-rwb-units").val(pkg ? flt(flt($tr.find(".wo-rwb-qty").val()) / pkg, 3) : 0);
+		// Full precision on No of Unit (no 3-dp round) so Qty = Std Pkg x No of Unit is exact.
+		$tr.find(".wo-rwb-units").val(pkg ? flt(flt($tr.find(".wo-rwb-qty").val()) / pkg, 9) : 0);
 	} else {
 		$tr.find(".wo-rwb-qty").val(flt(pkg * flt($tr.find(".wo-rwb-units").val()), 3));
 	}
@@ -1483,6 +1503,13 @@ function create_final_qc(frm, dialog, ctx) {
 	if (ctx && inprocess_qc_pending(ctx)) {
 		frappe.msgprint(
 			__("Complete all In Process QC (resolve every Basic Testing and finish all rework) before doing Final QC.")
+		);
+		return;
+	}
+	// ...and only once ALL material (main + in-process items) is transferred.
+	if (ctx && !all_material_transferred(ctx)) {
+		frappe.msgprint(
+			__("Transfer all material (main items and in-process items) before doing Final QC.")
 		);
 		return;
 	}

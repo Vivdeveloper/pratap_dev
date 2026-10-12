@@ -736,7 +736,9 @@ def _available_batches(item_code, warehouse):
 					"batch_no": batch_no,
 					"qc_remark": qc_remark,
 					"std_pkg": pkg,
-					"no_of_unit": flt(take / pkg, 3) if pkg else 0,
+					# Full precision (no 3-dp rounding) so Qty = Std Pkg x No of Unit reproduces
+					# the exact available qty — avoids the decimal mismatch on transfer.
+					"no_of_unit": flt(take / pkg, 9) if pkg else 0,
 					"available_qty": flt(take, 3),
 				}
 			)
@@ -754,7 +756,7 @@ def _available_batches(item_code, warehouse):
 					"batch_no": batch_no,
 					"qc_remark": qc_remark,
 					"std_pkg": pkg,
-					"no_of_unit": flt(remaining / pkg, 3) if pkg else 0,
+					"no_of_unit": flt(remaining / pkg, 9) if pkg else 0,
 					"available_qty": flt(remaining, 3),
 				}
 			)
@@ -1120,7 +1122,7 @@ def _qc_transfer_items(wo, qc):
 				"batch_no": qc_batch,
 				"qc_remark": qc_remark or "",
 				"std_pkg": std,
-				"no_of_unit": flt(avail / std, 3) if std else 0,
+				"no_of_unit": flt(avail / std, 9) if std else 0,
 				"available_qty": avail,
 			})
 

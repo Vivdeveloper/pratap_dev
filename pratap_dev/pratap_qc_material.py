@@ -205,6 +205,9 @@ def create_transfer_mr_on_submit(doc, method=None):
 		se = frappe.new_doc("Stock Entry")
 		se.stock_entry_type = REWORK_STOCK_ENTRY_TYPE
 		se.purpose = "Material Transfer"
+		# Rework transfers go via transit by default — keep "Add to Transit" checked.
+		if se.meta.has_field("add_to_transit"):
+			se.add_to_transit = 1
 		# Link back to the QC so it appears under the QC's Connections (and vice-versa).
 		if se.meta.has_field("custom_rework_qc"):
 			se.custom_rework_qc = doc.name
