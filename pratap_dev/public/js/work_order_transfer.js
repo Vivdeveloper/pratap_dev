@@ -213,7 +213,7 @@ function item_block_html(it) {
 			</span>
 			${full ? `<span class="indicator-pill green">${__("Fully Transferred")}</span>` : ""}
 		</div>
-		<div class="wo-tr-taken">${transfers_table_html(it.transfers)}</div>
+		<div class="wo-tr-taken">${transfers_table_html(it.transfers, it.batches)}</div>
 		${full ? "" : batch_area_html(it)}
 		${full ? time_controls_html(it) : ""}
 		<div class="wo-tr-log text-muted small" style="margin-top:8px;white-space:pre-line;">${
@@ -227,15 +227,27 @@ function item_block_html(it) {
 // The item's actual transfers rendered as a table (Batch / Std Pkg / Units / Qty /
 // Stock Entry) — same shape as the input rows, sourced from the submitted Stock
 // Entries so it's the single "what was transferred" view.
-function transfers_table_html(transfers) {
+function transfers_table_html(transfers, batches) {
 	if (!transfers || !transfers.length) {
 		return "";
 	}
+	// Available Qty per batch (summed across its pack-rows) from the item's live batch list,
+	// so the column shows even in the frozen (finished) table and the In Process / Final QC tabs.
+	const avail_map = {};
+	(batches || []).forEach((b) => {
+		if (b && b.batch_no) {
+			avail_map[b.batch_no] = (avail_map[b.batch_no] || 0) + flt(b.available_qty);
+		}
+	});
+	const avail_cell = (batch_no) =>
+		batch_no in avail_map ? format_number(avail_map[batch_no]) : "—";
+
 	const body = transfers
 		.map(
 			(t) =>
 				`<tr>
 					<td>${frappe.utils.escape_html(t.batch_no)}</td>
+					<td class="text-right">${avail_cell(t.batch_no)}</td>
 					<td><div class="qc-remark-scroll" title="${frappe.utils.escape_html(t.qc_remark || "")}">${frappe.utils.escape_html(t.qc_remark || "")}</div></td>
 					<td class="text-right">${format_number(t.std_pkg)}</td>
 					<td class="text-right">${format_number(t.units)}</td>
@@ -252,6 +264,7 @@ function transfers_table_html(transfers) {
 		<table class="table table-bordered" style="font-size:12px;margin-bottom:0;">
 			<thead><tr>
 				<th>${__("Batch")}</th>
+				<th class="text-right">${__("Available Qty")}</th>
 				<th>${__("QC Remark")}</th>
 				<th class="text-right">${__("Std Pkg Qty")}</th>
 				<th class="text-right">${__("No of Units")}</th>
@@ -772,11 +785,12 @@ function rework_item_html(qc, it) {
 		: `<div class="wo-rw-input">
 			<table class="table table-bordered" style="margin:8px 0 6px;font-size:13px;">
 				<thead><tr>
-					<th style="width:28%">${__("Batch")}</th>
-					<th style="width:16%">${__("QC Remark")}</th>
-					<th style="width:16%">${__("Std Pkg Qty")}</th>
-					<th style="width:16%">${__("No of Units")}</th>
-					<th style="width:16%">${__("Qty")}</th>
+					<th style="width:24%">${__("Batch")}</th>
+					<th style="width:12%" class="text-right">${__("Available Qty")}</th>
+					<th style="width:14%">${__("QC Remark")}</th>
+					<th style="width:14%">${__("Std Pkg Qty")}</th>
+					<th style="width:14%">${__("No of Units")}</th>
+					<th style="width:14%">${__("Qty")}</th>
 					<th style="width:8%"></th>
 				</tr></thead>
 				<tbody class="wo-rw-rows"></tbody>
@@ -793,7 +807,7 @@ function rework_item_html(qc, it) {
 			<b>${frappe.utils.escape_html(it.item_code)}</b>
 			<span class="text-muted">${frappe.utils.escape_html(it.item_name || "")}${req}</span>
 		</div>
-		<div class="wo-rw-taken">${transfers_table_html(it.transfers)}</div>
+		<div class="wo-rw-taken">${transfers_table_html(it.transfers, it.batches)}</div>
 		${inputArea}
 		<div class="wo-rw-timer-row" style="display:flex;gap:8px;align-items:center;margin-top:8px;">
 			<button class="btn btn-xs btn-success wo-rw-start">▶ ${__("Start")}</button>
@@ -954,6 +968,7 @@ function rework_add_row($item, prefill) {
 	const $tr = $(
 		`<tr>
 			<td><select class="form-control input-xs wo-rwb-batch"><option value="">${__("Select…")}</option>${opts}</select></td>
+			<td class="text-right"><span class="wo-rwb-avail text-muted"></span></td>
 			<td><span class="wo-rwb-remark text-muted qc-remark-scroll"></span></td>
 			<td><input type="number" class="form-control input-xs wo-rwb-pkg" min="0" step="any"></td>
 			<td><input type="number" class="form-control input-xs wo-rwb-units text-right" min="0" step="any"></td>
@@ -972,7 +987,15 @@ function rework_add_row($item, prefill) {
 		$tr.find(".wo-rwb-remark")
 			.text($tr.find(".wo-rwb-batch option:selected").data("remark") || "")
 			.attr("title", $tr.find(".wo-rwb-batch option:selected").data("remark") || "");
+		set_rwb_avail($tr);
 	}
+}
+
+// Show the selected rework batch's available qty (from its dropdown option's data-avail);
+// left blank when the batch/avail isn't present.
+function set_rwb_avail($tr) {
+	const av = $tr.find(".wo-rwb-batch option:selected").data("avail");
+	$tr.find(".wo-rwb-avail").text(av === undefined || av === "" ? "" : format_number(flt(av)));
 }
 
 // Like the main tab: the timer is only usable AFTER the rework item has been transferred
@@ -1036,6 +1059,7 @@ function wire_rework(frm, dialog, ctx) {
 		$tr.find(".wo-rwb-remark")
 			.text($(this).val() ? ($sel.data("remark") || "") : "")
 			.attr("title", $(this).val() ? ($sel.data("remark") || "") : "");
+		set_rwb_avail($tr);
 		rework_recalc($tr, "units");
 	});
 	$body.on("input", ".wo-rwb-pkg, .wo-rwb-units", function () {
