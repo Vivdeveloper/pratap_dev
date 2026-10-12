@@ -69,6 +69,35 @@ def parse_batch_qc_json(value):
 	return rows
 
 
+def deduct_sample_from_accepted(batch_rows, sample_qty):
+	"""Subtract the QC "Sample Issued Qty" from the ACCEPTED quantity only.
+
+	The sample was physically consumed for testing, so it must not become accepted
+	stock. It is taken out of accepted (never rejected): rejected_qty is left exactly
+	as computed (batch_qty - gross_accepted), so accepted + rejected + sample = batch.
+	The sample (one QC-level value) is allocated across batches that have accepted
+	stock, in order, and never drives a quantity below zero. Rows with accepted_qty = 0
+	are skipped. Returns the batch_rows (mutated in place)."""
+	remaining = flt(sample_qty)
+	if remaining <= 0:
+		return batch_rows
+	for row in batch_rows:
+		if remaining <= 0:
+			break
+		accepted = flt(row.get("accepted_qty"))
+		if accepted <= 0:
+			continue
+		take = min(remaining, accepted)
+		net = accepted - take
+		row["accepted_qty"] = net
+		density = flt(row.get("density"))
+		row["accepted_density_qty"] = net / density if density > 0 else net
+		std_pkg = flt(row.get("standard_pkg_qty")) or 1
+		row["accepted_unit"] = flt(net / std_pkg, 3) if std_pkg else net
+		remaining -= take
+	return batch_rows
+
+
 def apply_density_to_batch_qc_rows(rows):
 	"""Recompute accepted_density_qty / rejected_density_qty = qty / (per-batch) density.
 

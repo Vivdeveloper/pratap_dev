@@ -768,7 +768,11 @@ class PratapQualityInspection(Document):
 			self.batch_qc_json = json.dumps(rows)
 
 	def _update_grn_item(self):
-		from pratap_dev.purchase_receipt_batch_qc import parse_batch_qc_json, update_grn_from_batch_qc
+		from pratap_dev.purchase_receipt_batch_qc import (
+			deduct_sample_from_accepted,
+			parse_batch_qc_json,
+			update_grn_from_batch_qc,
+		)
 
 		grn_doc = frappe.get_doc("Purchase Receipt", self.reference_name)
 		# A QC covers every GRN row of the item, so write results back to each row.
@@ -779,6 +783,9 @@ class PratapQualityInspection(Document):
 			return
 
 		batch_rows = parse_batch_qc_json(self.batch_qc_json)
+		# Remove the Sample Issued Qty from ACCEPTED stock (consumed in testing); rejected
+		# is untouched. Done once across all batches before routing to the GRN rows.
+		deduct_sample_from_accepted(batch_rows, frappe.utils.flt(self.inspected_qty))
 
 		if batch_rows:
 			# Route each batch's accept/reject decision to the GRN row that owns it.

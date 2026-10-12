@@ -867,6 +867,22 @@ function normalize_grn_batch_row(row, saved = {}) {
 	return sync_row_from_accepted_unit(normalized).row;
 }
 
+// Allocate the QC's Sample Issued Qty across batches, subtracting it from ACCEPTED qty
+// only (never rejected, never below 0). Returns the net accepted_qty per row index.
+// Mirrors the server-side deduct_sample_from_accepted so the table matches the stock.
+function allocate_sample_accepted(rows, sample_qty) {
+	let remaining = flt(sample_qty);
+	return (rows || []).map((row) => {
+		let accepted = flt(row.accepted_qty);
+		if (accepted > 0 && remaining > 0) {
+			const take = Math.min(remaining, accepted);
+			accepted -= take;
+			remaining -= take;
+		}
+		return accepted;
+	});
+}
+
 function sync_row_from_accepted_unit(row) {
 	const standard_pkg_qty = flt(row.standard_pkg_qty) || 1;
 	const batch_units = get_row_batch_units(row);
@@ -972,6 +988,11 @@ function render_grn_batch_html(frm) {
 	}
 
 	const is_read_only = frm.doc.docstatus === 1;
+	// Sample Issued Qty is consumed in testing, so the ACCEPTED Qty shown (and the
+	// accepted stock) is reduced by it — allocated across batches with accepted > 0,
+	// never below 0, rejected untouched. Derived from the gross each render (not
+	// persisted), so it never double-subtracts.
+	const net_accepted = allocate_sample_accepted(rows, flt(frm.doc.inspected_qty));
 	const table_rows = rows
 		.map((row, index) => {
 			const standard_pkg_qty = format_batch_display(row.standard_pkg_qty);
@@ -983,7 +1004,13 @@ function render_grn_batch_html(frm) {
 			const density_input = format_batch_input(row_density);
 			// Accepted/Rejected Qty are shown divided by this batch's own density
 			// (raw qty when density is 0 — nothing to convert by).
-			const accepted_qty = format_batch_qty_by_density(row.accepted_qty, row_density);
+			const accepted_qty = format_batch_qty_by_density(net_accepted[index], row_density);
+			// Net Accepted Unit (= net accepted qty / std pkg) — shown on the submitted
+			// (read-only) view so the Unit matches the sample-deducted Qty. In edit mode the
+			// input keeps the gross units the inspector entered (the source of truth).
+			const net_accepted_unit = flt(row.standard_pkg_qty)
+				? net_accepted[index] / flt(row.standard_pkg_qty)
+				: net_accepted[index];
 			const rejected_qty = format_batch_qty_by_density(calc_rejected_qty(row), row_density);
 
 			if (is_read_only) {
@@ -995,7 +1022,7 @@ function render_grn_batch_html(frm) {
 					<td class="grn-batch-col-qty">${batch_qty}</td>
 					<td class="grn-batch-col-qty">${standard_pkg_qty}</td>
 					<td class="grn-batch-col-qty">${no_of_unit}</td>
-					<td class="grn-batch-col-qty grn-batch-col-accepted">${format_batch_display(row.accepted_unit)}</td>
+					<td class="grn-batch-col-qty grn-batch-col-accepted">${format_batch_display(net_accepted_unit)}</td>
 					<td class="grn-batch-col-qty grn-batch-col-rejected">${rejected_unit}</td>
 					<td class="grn-batch-col-qty grn-batch-col-density">${format_batch_display(row_density)}</td>
 					<td class="grn-batch-col-qty grn-batch-col-accepted">${accepted_qty}</td>
@@ -1040,12 +1067,19 @@ function render_grn_batch_html(frm) {
 
 	const totals = get_grn_batch_totals(rows);
 	// Accepted/Rejected Qty totals use the per-batch density-divided values (match the rows).
+	// Accepted total uses the sample-deducted (net) accepted qty so it matches the rows.
 	const total_accepted_density = (rows || []).reduce(
-		(sum, row) => sum + batch_qty_by_density(row.accepted_qty, flt(row.density)),
+		(sum, row, index) => sum + batch_qty_by_density(net_accepted[index], flt(row.density)),
 		0
 	);
 	const total_rejected_density = (rows || []).reduce(
 		(sum, row) => sum + batch_qty_by_density(calc_rejected_qty(row), flt(row.density)),
+		0
+	);
+	// Net accepted-unit total (sample-deducted) to match the per-row Accepted Unit display.
+	const total_accepted_unit_net = (rows || []).reduce(
+		(sum, row, index) =>
+			sum + (flt(row.standard_pkg_qty) ? net_accepted[index] / flt(row.standard_pkg_qty) : net_accepted[index]),
 		0
 	);
 
@@ -1086,7 +1120,7 @@ function render_grn_batch_html(frm) {
 							<td class="grn-batch-col-qty grn-batch-total-batch-qty">${format_batch_display(totals.batch_qty)}</td>
 							<td class="grn-batch-col-qty"></td>
 							<td class="grn-batch-col-qty grn-batch-total-no-of-unit">${format_batch_display(totals.no_of_unit)}</td>
-							<td class="grn-batch-col-qty grn-batch-col-accepted grn-batch-total-accepted-unit">${format_batch_display(totals.accepted_unit)}</td>
+							<td class="grn-batch-col-qty grn-batch-col-accepted grn-batch-total-accepted-unit">${format_batch_display(total_accepted_unit_net)}</td>
 							<td class="grn-batch-col-qty grn-batch-col-rejected grn-batch-total-rejected-unit">${format_batch_display(totals.rejected_unit)}</td>
 							<td class="grn-batch-col-qty grn-batch-col-density"></td>
 							<td class="grn-batch-col-qty grn-batch-col-accepted grn-batch-total-accepted-qty">${format_batch_display(total_accepted_density)}</td>
