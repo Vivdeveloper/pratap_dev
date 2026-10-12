@@ -15,6 +15,7 @@ end to end without the "not found" error. Drafts keep the standard rebuild behav
 """
 
 import frappe
+from frappe.utils import flt
 
 from erpnext.manufacturing.doctype.work_order.work_order import (
 	WorkOrder,
@@ -23,6 +24,21 @@ from erpnext.manufacturing.doctype.work_order.work_order import (
 
 
 class PratapWorkOrder(WorkOrder):
+	def get_status(self, status=None):
+		"""Business rule: a Work Order is Completed as soon as ANY quantity has been
+		manufactured (produced_qty > 0) — not only when produced qty fully meets
+		Qty To Manufacture (ERPNext's default, which required produced_qty >= qty).
+		All other states (Draft, Not Started, In Process, Closed, Stopped, Cancelled)
+		stay exactly as ERPNext computes them."""
+		status = super().get_status(status)
+		if (
+			self.docstatus == 1
+			and status not in ("Closed", "Stopped")
+			and flt(self.produced_qty) > 0
+		):
+			status = "Completed"
+		return status
+
 	# Re-apply @frappe.whitelist() — it does not carry over when overriding the base
 	# method, and this is called from the client via frm.call.
 	@frappe.whitelist()
