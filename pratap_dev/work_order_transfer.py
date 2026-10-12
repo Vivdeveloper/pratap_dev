@@ -796,7 +796,7 @@ def _item_transfers(work_order, item_code):
 				"qc_remark": qc_remark or "",
 				"qty": flt(r.qty, 3),
 				"std_pkg": flt(std, 3),
-				"units": flt(r.qty / std, 3) if std else 0,
+				"units": flt(r.qty / std, 9) if std else 0,
 			}
 		)
 	return out
@@ -1087,7 +1087,7 @@ def _rework_item_transfers(work_order, qc_name, item_code):
 				"qc_remark": qc_remark or "",
 				"qty": flt(r.qty, 3),
 				"std_pkg": flt(std, 3),
-				"units": flt(r.qty / std, 3) if std else 0,
+				"units": flt(r.qty / std, 9) if std else 0,
 			}
 		)
 	return out
@@ -1149,8 +1149,10 @@ def _qc_transfer_items(wo, qc):
 				prefill = {
 					"batch_no": batch_no,
 					"std_pkg": std_pkg,
-					"units": flt(qty / std_pkg, 3) if std_pkg else 0,
-					"qty": flt(qty, 3),
+					# Full precision on No of Units (no 3-dp round) so the prefilled Qty equals
+					# the QC's rework quantity EXACTLY (e.g. 1.000), not a rounded-up value (2).
+					"units": flt(qty / std_pkg, 9) if std_pkg else 0,
+					"qty": flt(qty, 6),
 				}
 
 		items.append(
