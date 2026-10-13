@@ -3,10 +3,10 @@
 
 """Helpers for the Request for Quotation form.
 
-Auto-fetch a supplier's contact details for the RFQ Suppliers table. ERPNext's native
-handler only fills the Contact when one is explicitly marked as the supplier's primary
-(or billing) contact; when none is marked, the Contact/Email stay blank. This resolves
-the primary contact and falls back to the first linked contact so the fields always fill.
+Auto-fetch a supplier's PRIMARY contact for the RFQ Suppliers table. We only autofill when
+the supplier has a contact explicitly marked as primary (is_primary_contact = 1): if exactly
+one is primary we use it, if more than one we use the first. When no contact is marked
+primary we leave Contact/Email blank (no autofill) — the user picks manually.
 """
 
 import frappe
@@ -26,29 +26,27 @@ def get_default_contact(doctype, name):
 
 @frappe.whitelist()
 def get_supplier_primary_contact(supplier):
-	"""Return {contact, email_id} for the supplier's primary contact, falling back to the
-	first linked contact when none is marked primary. Empty dict if the supplier has none."""
+	"""Return {contact, email_id} for the supplier's PRIMARY contact only.
+
+	We autofill only from a contact explicitly marked primary (is_primary_contact = 1).
+	If more than one primary contact exists we take the first (by creation). If NO contact
+	is marked primary we return an empty dict so the fields stay blank (no autofill)."""
 	if not supplier:
 		return {}
 
-	from erpnext.accounts.party import get_default_contact
-
-	# Prefer the primary/billing contact (same resolution ERPNext uses natively).
-	contact = get_default_contact("Supplier", supplier)
-
-	# Fall back to the first linked contact so the field never stays empty.
-	if not contact:
-		linked = frappe.get_all(
-			"Contact",
-			filters=[
-				["Dynamic Link", "link_doctype", "=", "Supplier"],
-				["Dynamic Link", "link_name", "=", supplier],
-			],
-			pluck="name",
-			order_by="`tabContact`.creation asc",
-			limit=1,
-		)
-		contact = linked[0] if linked else None
+	# Only consider contacts of this supplier that are marked as primary.
+	primary = frappe.get_all(
+		"Contact",
+		filters=[
+			["Dynamic Link", "link_doctype", "=", "Supplier"],
+			["Dynamic Link", "link_name", "=", supplier],
+			["Contact", "is_primary_contact", "=", 1],
+		],
+		pluck="name",
+		order_by="`tabContact`.creation asc",
+		limit=1,
+	)
+	contact = primary[0] if primary else None
 
 	if not contact:
 		return {}

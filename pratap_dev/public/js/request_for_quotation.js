@@ -32,9 +32,13 @@ frappe.ui.form.on("Request for Quotation Supplier", {
 	},
 });
 
-// Fill Contact + Email ID from the supplier's primary contact (first linked contact if
-// none is marked primary). Runs with a short delay so it wins over ERPNext's native
-// get_party_details handler, which leaves the fields blank when no primary contact is set.
+// Fill Contact + Email ID from the supplier's primary contact (first linked contact when
+// none is marked primary). ERPNext's native supplier handler calls get_party_details, which
+// returns a BLANK contact when no primary is set and then CLEARS Contact/Email via an async
+// callback whose timing is unpredictable (fast on local, slow on prod). A single fixed delay
+// races with it — on prod the native blank lands AFTER ours and wipes it. So we re-assert our
+// value at several delays (covering both fast and slow native callbacks) and only overwrite
+// when the field is blank or wrong, so manual edits are respected.
 function rfq_fill_primary_contact(cdt, cdn) {
 	const row = locals[cdt][cdn];
 	if (!row || !row.supplier) {
@@ -48,16 +52,28 @@ function rfq_fill_primary_contact(cdt, cdn) {
 			if (!r.message || !r.message.contact) {
 				return;
 			}
-			setTimeout(() => {
+			const contact = r.message.contact;
+			const email = r.message.email_id || "";
+
+			const apply = () => {
 				const cur = locals[cdt][cdn];
 				if (!cur || cur.supplier !== supplier) {
 					return; // row / supplier changed in the meantime
 				}
-				frappe.model.set_value(cdt, cdn, "contact", r.message.contact);
-				if (r.message.email_id) {
-					frappe.model.set_value(cdt, cdn, "email_id", r.message.email_id);
+				// Only (re)fill when the native handler cleared it or set a different value —
+				// never clobber a value the user typed that already matches ours.
+				if (!cur.contact || cur.contact !== contact) {
+					frappe.model.set_value(cdt, cdn, "contact", contact);
 				}
-			}, 700);
+				if (email && (!cur.email_id || cur.email_id !== email)) {
+					frappe.model.set_value(cdt, cdn, "email_id", email);
+				}
+			};
+
+			// Re-assert across the window in which the native get_party_details callback may
+			// land and blank the fields. The later ticks guarantee ours wins even when prod
+			// is slow.
+			[150, 700, 1500, 2500].forEach((ms) => setTimeout(apply, ms));
 		},
 	});
 }
