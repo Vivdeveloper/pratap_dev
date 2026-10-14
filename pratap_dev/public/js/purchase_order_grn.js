@@ -192,7 +192,14 @@ function open_create_grn_dialog(frm, items) {
 			fieldtype: "Link",
 			options: "Gate Pass",
 			label: __("Gate Pass"),
+			onchange() {
+				// Picking (or changing) a Gate Pass re-pulls its transporter/vehicle details.
+				fill_vehicle_from_gate_pass(grn_dialog_state.dialog, this.get_value());
+			},
 		},
+		// Supplier & Vehicle Details — mirrors the Gate Pass "Supplier and Vehicle Details"
+		// section. Auto-filled from the selected Gate Pass (editable), stored on the GRN.
+		...get_vehicle_detail_fields(),
 		{
 			fieldname: "invoice_section_break",
 			fieldtype: "Section Break",
@@ -281,8 +288,149 @@ function open_create_grn_dialog(frm, items) {
 				if (gp.supplier_invoice_date) {
 					dialog.set_value("sales_invoice_date", gp.supplier_invoice_date);
 				}
+				// Auto-fill the transporter/vehicle details from this Gate Pass.
+				fill_vehicle_from_gate_pass(dialog, gp.name);
 			}
 		});
+}
+
+// The transporter/vehicle fields shown in the Create-GRN popup. Fieldnames match the GRN
+// (Purchase Receipt) custom fields 1:1 so the payload maps straight through on the server.
+// A Column Break splits them into two columns, mirroring the Gate Pass form. The required
+// ones match the asterisks on the Gate Pass "Supplier and Vehicle Details" section.
+function get_vehicle_detail_fields() {
+	const valid_invalid = "\nValid\nInvalid";
+	return [
+		{
+			fieldname: "custom_supplier_vehicle_section",
+			fieldtype: "Section Break",
+			label: __("Supplier & Vehicle Details"),
+		},
+		{
+			fieldname: "custom_actual_received_qty",
+			fieldtype: "Data",
+			label: __("Actual Received Qty"),
+			reqd: 1,
+		},
+		{
+			fieldname: "custom_transporter_id",
+			fieldtype: "Data",
+			label: __("Transporter ID"),
+			reqd: 1,
+		},
+		{
+			fieldname: "custom_vehicle_no",
+			fieldtype: "Data",
+			label: __("Vehicle No"),
+			reqd: 1,
+		},
+		{
+			fieldname: "custom_driver_id",
+			fieldtype: "Link",
+			options: "Driver",
+			label: __("Driver ID"),
+			reqd: 1,
+			onchange() {
+				fill_driver_details(grn_dialog_state.dialog, this.get_value());
+			},
+		},
+		{
+			fieldname: "custom_driver_full_name",
+			fieldtype: "Data",
+			label: __("Driver Full Name"),
+		},
+		{
+			fieldname: "custom_driver_contact",
+			fieldtype: "Data",
+			label: __("Driver Contact"),
+		},
+		{
+			fieldname: "custom_vehicle_col_break",
+			fieldtype: "Column Break",
+		},
+		{
+			fieldname: "custom_vehicle_fitness_certificate",
+			fieldtype: "Select",
+			label: __("Vehicle Fitness Certificate"),
+			options: valid_invalid,
+			reqd: 1,
+		},
+		{
+			fieldname: "custom_puc",
+			fieldtype: "Select",
+			label: __("PUC"),
+			options: valid_invalid,
+			reqd: 1,
+		},
+		{
+			fieldname: "custom_insurance",
+			fieldtype: "Select",
+			label: __("Insurance"),
+			options: valid_invalid,
+			reqd: 1,
+		},
+	];
+}
+
+// Fieldname on the GRN popup <- fieldname on the Gate Pass doctype.
+const GATE_PASS_VEHICLE_MAP = {
+	custom_actual_received_qty: "actual_received_qty",
+	custom_transporter_id: "transporter_name",
+	custom_vehicle_no: "vehicle_no",
+	custom_driver_id: "driver_name",
+	custom_driver_full_name: "driver_full_name",
+	custom_driver_contact: "driver_contact",
+	custom_vehicle_fitness_certificate: "vehicle_fitness_certificate",
+	custom_puc: "puc",
+	custom_insurance: "insurance",
+};
+
+// Pull the transporter/vehicle details off the chosen Gate Pass and drop them into the popup.
+// Auto-fill but editable: values are set from the Gate Pass, then the user may override any.
+function fill_vehicle_from_gate_pass(dialog, gate_pass) {
+	if (!dialog || !gate_pass) {
+		return;
+	}
+	const gp_fields = Object.values(GATE_PASS_VEHICLE_MAP);
+	frappe.db.get_value("Gate Pass", gate_pass, gp_fields).then((r) => {
+		const gp = (r && r.message) || {};
+		Object.entries(GATE_PASS_VEHICLE_MAP).forEach(([dialog_field, gp_field]) => {
+			const val = gp[gp_field];
+			if (val !== undefined && val !== null && val !== "") {
+				dialog.set_value(dialog_field, val);
+			}
+		});
+	});
+}
+
+// When the Driver is changed by hand, refresh the fetched Full Name / Contact / Transporter.
+function fill_driver_details(dialog, driver) {
+	if (!dialog || !driver) {
+		return;
+	}
+	frappe.db
+		.get_value("Driver", driver, ["full_name", "cell_number", "transporter"])
+		.then((r) => {
+			const d = (r && r.message) || {};
+			if (d.full_name) {
+				dialog.set_value("custom_driver_full_name", d.full_name);
+			}
+			if (d.cell_number) {
+				dialog.set_value("custom_driver_contact", d.cell_number);
+			}
+			if (d.transporter) {
+				dialog.set_value("custom_transporter_id", d.transporter);
+			}
+		});
+}
+
+// Read the popup's transporter/vehicle values into a plain object for the server payload.
+function collect_vehicle_details(dialog) {
+	const out = {};
+	Object.keys(GATE_PASS_VEHICLE_MAP).forEach((f) => {
+		out[f] = dialog.get_value(f);
+	});
+	return out;
 }
 
 function load_grn_history(frm, dialog) {
@@ -547,6 +695,12 @@ function sync_batch_rows_for_item(dialog, upper_row) {
 }
 
 function submit_create_grn(frm, dialog) {
+	// Enforce mandatory header fields (invoice + transporter/vehicle details). get_values()
+	// returns null and highlights the missing fields when any required one is blank.
+	if (!dialog.get_values()) {
+		return;
+	}
+
 	const grid = dialog.fields_dict.items?.grid;
 	const rows = grid?.get_selected_children() || [];
 
@@ -676,6 +830,7 @@ function submit_create_grn(frm, dialog) {
 			sales_invoice_number: dialog.get_value("sales_invoice_number"),
 			sales_invoice_date: dialog.get_value("sales_invoice_date"),
 			gate_pass: dialog.get_value("gate_pass"),
+			vehicle_details: JSON.stringify(collect_vehicle_details(dialog)),
 		},
 		freeze: true,
 		freeze_message: __("Creating GRN, building batches and sending for QC..."),

@@ -299,6 +299,21 @@ def _validate_grn_qty(po_item_name, item_row):
 	return receive_qty, packing_qty, no_of_unit
 
 
+# Transporter/vehicle fields captured in the Create-GRN popup. Fieldnames match the GRN
+# (Purchase Receipt) custom fields 1:1, so the payload is written straight through.
+VEHICLE_DETAIL_FIELDS = (
+	"custom_actual_received_qty",
+	"custom_transporter_id",
+	"custom_vehicle_no",
+	"custom_driver_id",
+	"custom_driver_full_name",
+	"custom_driver_contact",
+	"custom_vehicle_fitness_certificate",
+	"custom_puc",
+	"custom_insurance",
+)
+
+
 def _make_purchase_receipt_for_rows(
 	purchase_order,
 	item_rows,
@@ -306,6 +321,7 @@ def _make_purchase_receipt_for_rows(
 	sales_invoice_number=None,
 	sales_invoice_date=None,
 	gate_pass=None,
+	vehicle_details=None,
 ):
 	"""Create and save one Purchase Receipt containing the given PO item rows.
 
@@ -389,13 +405,25 @@ def _make_purchase_receipt_for_rows(
 	if gate_pass and doc.meta.has_field("custom_gate_pass"):
 		doc.custom_gate_pass = gate_pass
 
+	# Transporter / vehicle details from the dialog (auto-filled from the Gate Pass, editable).
+	if vehicle_details:
+		for fieldname in VEHICLE_DETAIL_FIELDS:
+			value = vehicle_details.get(fieldname)
+			if value not in (None, "") and doc.meta.has_field(fieldname):
+				doc.set(fieldname, value)
+
 	doc.save()
 	return doc
 
 
 @frappe.whitelist()
 def make_purchase_receipts_from_po(
-	purchase_order, items=None, sales_invoice_number=None, sales_invoice_date=None, gate_pass=None
+	purchase_order,
+	items=None,
+	sales_invoice_number=None,
+	sales_invoice_date=None,
+	gate_pass=None,
+	vehicle_details=None,
 ):
 	"""Create and auto-save one Purchase Receipt per PO item row.
 
@@ -404,6 +432,8 @@ def make_purchase_receipts_from_po(
 	"""
 	if isinstance(items, str):
 		items = json.loads(items)
+	if isinstance(vehicle_details, str):
+		vehicle_details = json.loads(vehicle_details) if vehicle_details else None
 
 	valid_items = [
 		row
@@ -446,6 +476,7 @@ def make_purchase_receipts_from_po(
 				sales_invoice_number=sales_invoice_number,
 				sales_invoice_date=sales_invoice_date,
 				gate_pass=gate_pass,
+				vehicle_details=vehicle_details,
 			)
 		)
 
@@ -520,6 +551,7 @@ def create_grn_with_batches_and_qc(
 	sales_invoice_number=None,
 	sales_invoice_date=None,
 	gate_pass=None,
+	vehicle_details=None,
 ):
 	"""PO "Create GRN" one-shot flow.
 
@@ -591,6 +623,7 @@ def create_grn_with_batches_and_qc(
 		sales_invoice_number=sales_invoice_number,
 		sales_invoice_date=sales_invoice_date,
 		gate_pass=gate_pass,
+		vehicle_details=vehicle_details,
 	)
 
 	pr_item_meta = frappe.get_meta("Purchase Receipt Item")
