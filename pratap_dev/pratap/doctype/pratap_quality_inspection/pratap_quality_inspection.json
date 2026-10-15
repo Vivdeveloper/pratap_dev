@@ -7,6 +7,10 @@
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
+  "custom_qc_section",
+  "inspected_qty",
+  "sample_issued_by",
+  "custom_qc_section_end",
   "status",
   "manual_inspection",
   "inspection_type",
@@ -39,9 +43,6 @@
   "batch_html",
   "batch_qc_json",
   "section_break_2",
-  "inspected_qty",
-  "sample_issued_by",
-  "column_break_1",
   "inspector",
   "custom_approved_by",
   "remarks",
@@ -132,8 +133,7 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Inspected Qty",
-   "precision": "6",
-   "reqd": 1
+   "precision": "6"
   },
   {
    "default": "Pending",
@@ -145,24 +145,18 @@
    "options": "Pending\nAccepted\nPartially Accepted\nPartially Rejected\nRejected\nRework"
   },
   {
-   "fieldname": "column_break_1",
-   "fieldtype": "Column Break"
-  },
-  {
    "fieldname": "inspector",
    "fieldtype": "Link",
    "in_standard_filter": 1,
    "label": "Tested By",
-   "options": "User",
-   "reqd": 1
+   "options": "User"
   },
   {
    "fieldname": "custom_approved_by",
    "fieldtype": "Link",
    "in_standard_filter": 1,
    "label": "Approved By",
-   "options": "User",
-   "reqd": 1
+   "options": "User"
   },
   {
    "fieldname": "remarks",
@@ -394,17 +388,28 @@
   {
    "fieldname": "sample_issued_by",
    "fieldtype": "Link",
-   "options": "User",
    "label": "Sample Issued By",
+   "options": "User",
    "reqd": 0
   },
   {
    "fieldname": "custom_rework_transfer_data",
    "fieldtype": "Long Text",
-   "label": "Rework Transfer Data",
    "hidden": 1,
+   "label": "Rework Transfer Data",
    "no_copy": 1,
    "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "collapsible_depends_on": "eval:true",
+   "fieldname": "custom_qc_section",
+   "fieldtype": "Section Break",
+   "label": "Qc Section"
+  },
+  {
+   "fieldname": "custom_qc_section_end",
+   "fieldtype": "Section Break"
   }
  ],
  "grid_page_length": 50,

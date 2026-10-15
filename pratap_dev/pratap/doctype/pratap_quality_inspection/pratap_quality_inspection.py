@@ -65,11 +65,16 @@ class PratapQualityInspection(Document):
 		self._freeze_batch_qc_json()
 
 	def _validate_required_before_submit(self):
-		"""Inspector and Sample Issued By must be set before the QC can be submitted
-		(they stay optional on the draft)."""
+		"""Tested By, Approved By, Sample Issued Qty for QC and Sample Issued By must be set
+		before the QC can be submitted. They stay optional on the draft so earlier stages
+		(save/approve) do not need them — only the final submit (the QC sign-off) does."""
 		missing = []
 		if not self.get("inspector"):
-			missing.append(_("Inspector"))
+			missing.append(_("Tested By"))
+		if not self.get("custom_approved_by"):
+			missing.append(_("Approved By"))
+		if not frappe.utils.flt(self.get("inspected_qty")):
+			missing.append(_("Sample Issued Qty for QC"))
 		if not self.get("sample_issued_by"):
 			missing.append(_("Sample Issued By"))
 		if missing:
