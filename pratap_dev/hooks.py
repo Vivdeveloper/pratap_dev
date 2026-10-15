@@ -202,7 +202,8 @@ override_doctype_class = {
 
 # Request Events
 # ----------------
-# before_request = ["pratap_dev.utils.before_request"]
+# Patch the standard "Stock Ledger" report with our extra columns (idempotent, once/process).
+before_request = ["pratap_dev.stock_ledger_columns.ensure_patched"]
 # after_request = ["pratap_dev.utils.after_request"]
 
 # Job Events

@@ -69,6 +69,10 @@ def parse_batch_qc_json(value):
 	return rows
 
 
+# Dedicated warehouse that the QC sample quantity is received into on QC submit.
+SAMPLE_RND_WAREHOUSE = "Scarp Store RM Hazardous - PTPL"
+
+
 def deduct_sample_from_accepted(batch_rows, sample_qty):
 	"""Subtract the QC "Sample Issued Qty" from the ACCEPTED quantity only.
 
@@ -77,10 +81,15 @@ def deduct_sample_from_accepted(batch_rows, sample_qty):
 	as computed (batch_qty - gross_accepted), so accepted + rejected + sample = batch.
 	The sample (one QC-level value) is allocated across batches that have accepted
 	stock, in order, and never drives a quantity below zero. Rows with accepted_qty = 0
-	are skipped. Returns the batch_rows (mutated in place)."""
+	are skipped. batch_rows is mutated in place.
+
+	Returns the per-batch sample ALLOCATION — [{batch_no, purchase_receipt_item, qty,
+	density}, ...] (qty in purchase UOM taken from each batch) — so the caller can route
+	the sample into the R&D warehouse."""
+	allocation = []
 	remaining = flt(sample_qty)
 	if remaining <= 0:
-		return batch_rows
+		return allocation
 	for row in batch_rows:
 		if remaining <= 0:
 			break
@@ -94,8 +103,112 @@ def deduct_sample_from_accepted(batch_rows, sample_qty):
 		row["accepted_density_qty"] = net / density if density > 0 else net
 		std_pkg = flt(row.get("standard_pkg_qty")) or 1
 		row["accepted_unit"] = flt(net / std_pkg, 3) if std_pkg else net
+		allocation.append(
+			{
+				"batch_no": row.get("batch_no"),
+				"purchase_receipt_item": row.get("purchase_receipt_item"),
+				"qty": take,  # purchase UOM
+				"density": density,
+			}
+		)
 		remaining -= take
-	return batch_rows
+	return allocation
+
+
+def create_sample_rnd_receipt(grn_doc, sample_lines):
+	"""Auto-submit a Material Receipt bringing the QC Sample qty into the dedicated R&D
+	warehouse (SAMPLE_RND_WAREHOUSE), batch-wise.
+
+	sample_lines: [{item_code, stock_uom, batch_no, stock_qty, rate}, ...] — qty/rate in
+	stock UOM. Returns the Stock Entry name, or None when there is nothing to move."""
+	lines = [
+		l
+		for l in (sample_lines or [])
+		if flt(l.get("stock_qty")) > 0 and l.get("batch_no") and l.get("item_code")
+	]
+	if not lines:
+		return None
+
+	if not frappe.db.exists("Warehouse", SAMPLE_RND_WAREHOUSE):
+		frappe.log_error(
+			title="Sample R&D receipt skipped",
+			message="Warehouse {0} not found.".format(SAMPLE_RND_WAREHOUSE),
+		)
+		return None
+
+	from frappe.utils import now_datetime
+
+	# Post at the current moment (QC submit time) — NOT back-dated to the GRN.
+	posting_datetime = now_datetime()
+
+	se = frappe.new_doc("Stock Entry")
+	se.stock_entry_type = "Material Receipt"
+	se.purpose = "Material Receipt"
+	se.company = grn_doc.company
+	se.to_warehouse = SAMPLE_RND_WAREHOUSE
+	se.remarks = _("QC Sample moved to R&D for GRN {0}").format(grn_doc.name)
+
+	for l in lines:
+		qty = flt(l["stock_qty"])
+		# Build the Serial-and-Batch Bundle ourselves (with posting_datetime stamped) rather
+		# than letting use_serial_batch_fields auto-create it — the auto path leaves the bundle
+		# without posting_datetime and crashes ERPNext's future-entries check for the batch.
+		bundle = _make_inward_sample_bundle(
+			company=grn_doc.company,
+			item_code=l["item_code"],
+			warehouse=SAMPLE_RND_WAREHOUSE,
+			batch_no=l["batch_no"],
+			qty=qty,
+			incoming_rate=flt(l.get("rate")),
+			posting_datetime=posting_datetime,
+		)
+		se.append(
+			"items",
+			{
+				"item_code": l["item_code"],
+				"qty": qty,
+				"transfer_qty": qty,
+				"uom": l.get("stock_uom"),
+				"stock_uom": l.get("stock_uom"),
+				"conversion_factor": 1,
+				"t_warehouse": SAMPLE_RND_WAREHOUSE,
+				"serial_and_batch_bundle": bundle.name,
+				"basic_rate": flt(l.get("rate")),
+				"allow_zero_valuation_rate": 1,
+			},
+		)
+
+	se.flags.ignore_permissions = True
+	se.insert(ignore_permissions=True)
+	se.submit()
+	return se.name
+
+
+def _make_inward_sample_bundle(
+	company, item_code, warehouse, batch_no, qty, incoming_rate, posting_datetime
+):
+	"""Draft Inward Serial-and-Batch Bundle (posting_datetime stamped) for the sample receipt,
+	attached to the Stock Entry row before submit. Mirrors _create_bundle's SerialBatchCreation
+	use so the batch's valuation/posting checks pass."""
+	bundle_details = {
+		"item_code": item_code,
+		"posting_datetime": posting_datetime,
+		"voucher_type": "Stock Entry",
+		"company": company,
+		"type_of_transaction": "Inward",
+		"warehouse": warehouse,
+		"qty": qty,
+		"actual_qty": qty,
+		"batches": frappe._dict({batch_no: qty}),
+		"do_not_submit": True,
+	}
+	if incoming_rate:
+		bundle_details["batches_valuation"] = frappe._dict({batch_no: incoming_rate})
+
+	bundle_doc = SerialBatchCreation(bundle_details).make_serial_and_batch_bundle()
+	if not bundle_doc or not bundle_doc.get("name"):
+		frappe.throw(_("Could not create Serial and Batch Bundle for sample {0}.").format(item_code))
+	return bundle_doc
 
 
 def apply_density_to_batch_qc_rows(rows):

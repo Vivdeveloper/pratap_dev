@@ -769,6 +769,7 @@ class PratapQualityInspection(Document):
 
 	def _update_grn_item(self):
 		from pratap_dev.purchase_receipt_batch_qc import (
+			create_sample_rnd_receipt,
 			deduct_sample_from_accepted,
 			parse_batch_qc_json,
 			update_grn_from_batch_qc,
@@ -782,10 +783,16 @@ class PratapQualityInspection(Document):
 		if not item_rows:
 			return
 
+		item_rows_by_name = {r.name: r for r in item_rows}
+
 		batch_rows = parse_batch_qc_json(self.batch_qc_json)
 		# Remove the Sample Issued Qty from ACCEPTED stock (consumed in testing); rejected
 		# is untouched. Done once across all batches before routing to the GRN rows.
-		deduct_sample_from_accepted(batch_rows, frappe.utils.flt(self.inspected_qty))
+		# The returned allocation (per-batch purchase-UOM qty) is routed into the R&D
+		# warehouse after the GRN is saved (below).
+		sample_alloc = deduct_sample_from_accepted(
+			batch_rows, frappe.utils.flt(self.inspected_qty)
+		)
 
 		if batch_rows:
 			# Route each batch's accept/reject decision to the GRN row that owns it.
@@ -819,6 +826,69 @@ class PratapQualityInspection(Document):
 				self._apply_grn_item_qc_meta(item_row, density)
 
 		grn_doc.save(ignore_permissions=True)
+
+		# Route the QC Sample qty into the dedicated R&D warehouse as an auto-submitted
+		# Material Receipt (batch-wise). The sample was deducted from accepted above, so this
+		# keeps the books whole: accepted_net + rejected (on the GRN) + sample (in R&D).
+		self._receive_sample_into_rnd(grn_doc, item_rows_by_name, sample_alloc)
+
+	def _receive_sample_into_rnd(self, grn_doc, item_rows_by_name, sample_alloc):
+		"""Build + submit the sample -> R&D Material Receipt from the per-batch allocation."""
+		if not sample_alloc:
+			return
+
+		from pratap_dev.purchase_receipt_batch_qc import (
+			SAMPLE_RND_WAREHOUSE,
+			create_sample_rnd_receipt,
+		)
+
+		flt = frappe.utils.flt
+		sample_lines = []
+		for a in sample_alloc:
+			owner = item_rows_by_name.get(a.get("purchase_receipt_item"))
+			if not owner and item_rows_by_name:
+				owner = next(iter(item_rows_by_name.values()))
+			if not owner:
+				continue
+			density = flt(a.get("density"))
+			purchase_qty = flt(a.get("qty"))
+			# Convert purchase UOM -> stock UOM by the batch's density (matches the bundles).
+			stock_qty = purchase_qty / density if density > 0 else purchase_qty
+			# Stock-UOM valuation so total value == purchase value: rate_stock = rate * density.
+			rate = flt(owner.get("rate")) * density if density > 0 else flt(owner.get("rate"))
+			sample_lines.append(
+				{
+					"item_code": owner.item_code,
+					"stock_uom": frappe.db.get_value("Item", owner.item_code, "stock_uom"),
+					"batch_no": a.get("batch_no"),
+					"stock_qty": stock_qty,
+					"rate": rate,
+				}
+			)
+
+		try:
+			se_name = create_sample_rnd_receipt(grn_doc, sample_lines)
+		except Exception:
+			frappe.log_error(
+				title="Sample R&D receipt failed", message=frappe.get_traceback()
+			)
+			frappe.msgprint(
+				frappe._(
+					"QC submitted, but the Sample could not be moved to {0} automatically — "
+					"move it manually."
+				).format(SAMPLE_RND_WAREHOUSE),
+				indicator="orange",
+			)
+			return
+
+		if se_name:
+			frappe.msgprint(
+				frappe._("Sample qty received into {0} via {1}.").format(
+					SAMPLE_RND_WAREHOUSE,
+					frappe.utils.get_link_to_form("Stock Entry", se_name),
+				),
+				indicator="green",
+			)
 
 	def _apply_grn_item_qc_meta(self, item_row, density):
 		# Store QC meta only. conversion_factor is owned by the batch path
