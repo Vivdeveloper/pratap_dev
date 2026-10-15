@@ -488,7 +488,7 @@ function render_custom_items_table(frm, cols) {
 		return esc(String(v));
 	};
 
-	let html = `<div class="mr-pc-scroll" style="overflow-x:auto;border:1px solid var(--border-color, #d1d8dd);border-radius:6px;transition:padding-bottom .1s;">
+	let html = `<div class="mr-pc-scroll pratap-scroll" style="overflow-x:auto;border:1px solid var(--border-color, #d1d8dd);border-radius:6px;transition:padding-bottom .1s;">
 		<table class="table table-bordered" style="margin:0;white-space:nowrap;min-width:max-content;">
 		<thead><tr style="background-color:#e9ecef;font-weight:600;">
 			${show_reject ? `<th style="min-width:34px;text-align:center;" title="${__("Select to reject")}"><input type="checkbox" class="mr-pc-reject-all"></th>` : ""}
@@ -2258,7 +2258,7 @@ function show_rfq_matrix_dialog(frm, data) {
 .rfq-card-locked { opacity: 0.75; }
 </style>
 <label class="rfq-select-all"><input type="checkbox" class="rfq-select-all-box"> ${__("Select All")}</label>
-<div class="rfq-cards-wrapper">`;
+<div class="rfq-cards-wrapper pratap-scroll">`;
 
 	items.forEach((i) => {
 		const mapped_suppliers = suppliers.filter((s) =>

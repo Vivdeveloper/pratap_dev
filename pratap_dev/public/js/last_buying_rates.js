@@ -103,7 +103,7 @@ pratap_dev.last_buying_rates = {
 					{
 						fieldtype: "HTML",
 						fieldname: "rates_html",
-						options: `<div class="table-responsive">
+						options: `<div class="table-responsive pratap-scroll">
 							<table class="table table-bordered">
 								<thead>
 									<tr>

@@ -1,0 +1,56 @@
+/* Pratap: always-visible, grabbable scrollbars for our custom popup scroll areas.
+ *
+ * Our custom HTML tables/lists in dialogs use plain overflow:auto/scroll, so on macOS they
+ * get a thin, auto-hiding overlay scrollbar that is hard to click and drag. Tagging a
+ * container with `pratap-scroll` forces a classic, always-visible, thick (12px) scrollbar
+ * with a draggable thumb — matching the standard ERPNext child-table grid scrollbars.
+ *
+ * Applied to: MR custom Items table (.mr-pc-scroll), Create GRN History table,
+ * RFQ cards list (.rfq-cards-wrapper), Last Buying Rate table (.table-responsive).
+ */
+
+/* `.modal-body` is added so EVERY frappe dialog/popup body gets the same always-visible,
+   grabbable vertical scrollbar when the popup is taller than the screen. Purely cosmetic —
+   scrollbar appearance only; no behaviour changes. */
+.pratap-scroll,
+.modal-body {
+	/* Firefox: normal-width (not thin) scrollbar + themed colours. */
+	scrollbar-width: auto;
+	scrollbar-color: #b0b4ba #eef0f2;
+}
+
+/* WebKit / Blink (Chrome, Edge, Safari): custom styles force the classic always-on bar,
+   overriding the macOS auto-hiding overlay scrollbar. */
+.pratap-scroll::-webkit-scrollbar,
+.modal-body::-webkit-scrollbar {
+	width: 12px;
+	height: 12px;
+}
+
+.pratap-scroll::-webkit-scrollbar-track,
+.modal-body::-webkit-scrollbar-track {
+	background: #eef0f2;
+	border-radius: 8px;
+}
+
+.pratap-scroll::-webkit-scrollbar-thumb,
+.modal-body::-webkit-scrollbar-thumb {
+	background: #b0b4ba;
+	border-radius: 8px;
+	border: 2px solid #eef0f2; /* inset padding so the thumb reads as a pill */
+}
+
+.pratap-scroll::-webkit-scrollbar-thumb:hover,
+.modal-body::-webkit-scrollbar-thumb:hover {
+	background: #8a8f96;
+}
+
+.pratap-scroll::-webkit-scrollbar-thumb:active,
+.modal-body::-webkit-scrollbar-thumb:active {
+	background: #6c7278;
+}
+
+.pratap-scroll::-webkit-scrollbar-corner,
+.modal-body::-webkit-scrollbar-corner {
+	background: #eef0f2;
+}

@@ -25,7 +25,7 @@ app_license = "mit"
 # ------------------
 
 # include js, css files in header of desk.html
-# app_include_css = "/assets/pratap_dev/css/pratap_dev.css"
+app_include_css = ["/assets/pratap_dev/css/pratap_scrollbars.css"]
 
 app_include_js = ["/assets/pratap_dev/js/last_buying_rates.js"]
 

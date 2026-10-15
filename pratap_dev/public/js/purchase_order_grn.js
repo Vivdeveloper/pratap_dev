@@ -480,7 +480,7 @@ function render_grn_history(dialog, rows) {
 		.join("");
 
 	field.$wrapper.html(`
-		<div style="overflow-x:auto">
+		<div class="pratap-scroll" style="overflow-x:auto">
 			<table class="table table-bordered" style="font-size:12px; margin-bottom:0">
 				<thead><tr>
 					<th>${__("GRN")}</th>
