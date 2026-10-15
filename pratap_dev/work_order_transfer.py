@@ -1136,7 +1136,10 @@ def _qc_transfer_items(wo, qc):
 		# capped at the batch's available_qty so we never prefill more than exists.
 		prefill = None
 		batch_no = qc_batch
-		want = flt(rm.get("custom_batch_qty")) or flt(rm.get("custom_transfer_qty")) or flt(rm.get("total_req_qty"))
+		# The QC's required quantity (Total Req Qty, e.g. 0.500) is what should flow into the
+		# transfer row's Qty — NOT the whole captured Batch Qty. So prefer total_req_qty; fall
+		# back to the transfer/batch qty only when the QC has no required qty recorded.
+		want = flt(rm.get("total_req_qty")) or flt(rm.get("custom_transfer_qty")) or flt(rm.get("custom_batch_qty"))
 		if batch_no and want > 0 and not _rework_item_transfers(wo.name, qc.name, rm.item_code):
 			match = next((b for b in batches if b.get("batch_no") == batch_no), None)
 			std_pkg = flt(match.get("std_pkg")) if match else flt(
