@@ -1718,6 +1718,9 @@ function render_batch_readings_matrix(frm) {
 
 	const map = parse_batch_readings_map(frm.doc.batch_readings_json);
 	const is_read_only = frm.doc.docstatus === 1;
+	// Supplier COA (free text, per parameter) is only relevant for GRN QCs — same gate as the
+	// supplier_coa column on the standard Readings grid (see toggle_supplier_coa).
+	const show_coa = frm.doc.reference_type === "GRN";
 
 	// Batch quantity from Batch QC Details rows (composite key -> batch_qty).
 	const batch_qty_map = {};
@@ -1775,8 +1778,17 @@ function render_batch_readings_matrix(frm) {
 				: `<input type="text" class="bread-input bread-entry-input" data-row="${rIdx}" value="${cell_val}" placeholder="${__(
 						"Enter value"
 				  )}">`;
+			// Supplier COA — free text entered per parameter (not fetched from anywhere).
+			const coa_val = frappe.utils.escape_html(reading.supplier_coa || "");
+			const coa_html = is_read_only
+				? `<span class="bread-readonly-value">${coa_val || "—"}</span>`
+				: `<input type="text" class="bread-input bread-coa-input" data-row="${rIdx}" value="${coa_val}" placeholder="${__(
+						"Supplier COA"
+				  )}">`;
+			const coa_cell = show_coa ? `<td class="bread-entry-coa">${coa_html}</td>` : "";
 			return `<tr>
 				<td class="bread-entry-param"><span class="bread-param-name">${name}</span> ${type_badge}</td>
+				${coa_cell}
 				<td class="bread-entry-spec">${spec_html}</td>
 				<td class="bread-entry-criteria">${criteria_html}</td>
 				<td class="bread-entry-value">${input_html}</td>
@@ -1793,6 +1805,7 @@ function render_batch_readings_matrix(frm) {
 			<table class="bread-entry-table">
 				<thead><tr>
 					<th>${__("Parameter")}</th>
+					${show_coa ? `<th>${__("Supplier COA")}</th>` : ""}
 					<th>${__("Specifications")}</th>
 					<th>${__("Criteria")}</th>
 					<th>${__("Observed Value")}</th>
@@ -1893,6 +1906,14 @@ function bind_batch_readings_events(frm, $wrapper) {
 			set_batch_reading_value(frm, rIdx, $(this).val());
 		});
 
+	// Live-write Supplier COA (free text, per parameter) into the reading's supplier_coa field
+	$wrapper
+		.off("change", ".bread-coa-input")
+		.on("change", ".bread-coa-input", function () {
+			const rIdx = parseInt($(this).attr("data-row"), 10);
+			set_batch_reading_coa(frm, rIdx, $(this).val());
+		});
+
 	// Add / update the selected batch into the summary table
 	$wrapper
 		.off("click", ".bread-add-btn")
@@ -1924,6 +1945,16 @@ function set_batch_reading_value(frm, rIdx, value) {
 		return;
 	}
 	frappe.model.set_value(reading.doctype, reading.name, `reading_${col + 1}`, value);
+}
+
+// Supplier COA is a single free-text value per parameter (reading row), not per batch — so it
+// writes to the reading's supplier_coa field and shows the same across the batch selector.
+function set_batch_reading_coa(frm, rIdx, value) {
+	const reading = (frm.doc.readings || [])[rIdx];
+	if (!reading) {
+		return;
+	}
+	frappe.model.set_value(reading.doctype, reading.name, "supplier_coa", value);
 }
 
 // When a batch line's reading status is decided, auto-fill THAT line's Batch QC
