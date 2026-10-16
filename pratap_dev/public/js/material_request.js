@@ -19,12 +19,42 @@ function remove_mr_create_buttons(frm) {
 	}, 100);
 }
 
+// When Purpose is "Purchase", default the Set Warehouse to Main Store RM.
+const MR_PURCHASE_DEFAULT_WAREHOUSE = "Main Store RM - PTPL";
+
+// Keep the MR's Set Warehouse in sync with Purpose:
+//   Purpose = Purchase        -> Main Store RM
+//   Purpose = anything else    -> cleared (on an explicit purpose change)
+// on_purpose_change=true means the user just toggled the purpose. On load we only fill it
+// when empty (and never clear) so a saved/manual warehouse is not clobbered.
+function apply_purchase_default_warehouse(frm, on_purpose_change) {
+	if (frm.doc.docstatus !== 0) {
+		return; // never touch a submitted/cancelled MR
+	}
+	if (frm.doc.material_request_type === "Purchase") {
+		if (on_purpose_change || !frm.doc.set_warehouse) {
+			if (frm.doc.set_warehouse !== MR_PURCHASE_DEFAULT_WAREHOUSE) {
+				frm.set_value("set_warehouse", MR_PURCHASE_DEFAULT_WAREHOUSE);
+			}
+		}
+	} else if (on_purpose_change && frm.doc.set_warehouse) {
+		// Purpose toggled away from Purchase -> empty the warehouse again.
+		frm.set_value("set_warehouse", "");
+	}
+}
+
 frappe.ui.form.on("Material Request", {
 	onload(frm) {
 		// Default the Set Source Warehouse to Plant 1 WIP FG on new Material Requests.
 		// if (frm.is_new() && !frm.doc.set_from_warehouse) {
 		// 	frm.set_value("set_from_warehouse", MR_DEFAULT_SOURCE_WAREHOUSE);
 		// }
+		apply_purchase_default_warehouse(frm, false);
+	},
+
+	// Purpose field. For "Purchase", set the Set Warehouse to Main Store RM (only this purpose).
+	material_request_type(frm) {
+		apply_purchase_default_warehouse(frm, true);
 	},
 
 	refresh(frm) {
