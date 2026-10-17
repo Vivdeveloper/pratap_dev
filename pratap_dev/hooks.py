@@ -252,7 +252,7 @@ before_request = ["pratap_dev.stock_ledger_columns.ensure_patched"]
 fixtures = [
 	{
 		"dt": "Custom Field",
-		"filters": [["module", "=", "pratap"]],
+		"filters": [["module", "in", ["pratap", "Pratap Maintenance"]]],
 	},
 	# Ship these Client Scripts with the app so their fixes deploy everywhere
 	# (Client Scripts are otherwise per-site DB records that git/migrate won't carry).
@@ -327,6 +327,8 @@ doctype_js = {
         "public/js/bom_default_warning.js",
     ],
     "Batch": "public/js/batch.js",
+    "Asset Maintenance": "pratap_maintenance/client/asset_maintenance_checklist.js",
+    "Asset Maintenance Log": "pratap_maintenance/client/asset_maintenance_log_checklist.js",
     "Stock Entry": [
         "public/js/stock_entry_batch_entry.js",
         "public/js/stock_entry_bundle_details.js",
@@ -420,6 +422,13 @@ doc_events = {
     },
     "Custom Field": {
         "on_update": "pratap_dev.fixture_export.export_custom_field_on_save",
+    },
+    # Maintenance Checklist: copy the Asset Maintenance checklist into its (draft) logs.
+    "Asset Maintenance": {
+        "on_update": "pratap_dev.pratap_maintenance.server.asset_maintenance_checklist.sync_draft_log_checklists",
+    },
+    "Asset Maintenance Log": {
+        "validate": "pratap_dev.pratap_maintenance.server.asset_maintenance_checklist.fill_log_checklist",
     },
     "Material Request": {
         # Compute the Purchase MR pipeline columns (Pending PR for GRN / Pending for GRN

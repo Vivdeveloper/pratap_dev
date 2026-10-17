@@ -10,6 +10,8 @@ from frappe.core.doctype.data_import.data_import import import_doc
 from frappe.utils.fixtures import export_json
 
 PRATAP_MODULE = "pratap"
+# Modules whose Custom Fields ship in fixtures/custom_field.json (keep in sync with hooks.fixtures).
+CUSTOM_FIELD_MODULES = (PRATAP_MODULE, "Pratap Maintenance")
 APP_NAME = "pratap_dev"
 CUSTOM_FIELD_FIXTURE_FILE = "custom_field.json"
 
@@ -108,7 +110,7 @@ def export_custom_field_on_save(doc, method=None):
 	if doc.doctype != "Custom Field":
 		return
 
-	if (doc.module or "").strip().lower() != PRATAP_MODULE:
+	if (doc.module or "").strip().lower() not in {m.lower() for m in CUSTOM_FIELD_MODULES}:
 		return
 
 	if not frappe.conf.developer_mode:
@@ -131,6 +133,6 @@ def export_pratap_custom_field_fixtures():
 	export_json(
 		"Custom Field",
 		frappe.get_app_path(APP_NAME, "fixtures", CUSTOM_FIELD_FIXTURE_FILE),
-		filters=[["module", "=", PRATAP_MODULE]],
+		filters=[["module", "in", list(CUSTOM_FIELD_MODULES)]],
 		order_by="idx asc, creation asc",
 	)
