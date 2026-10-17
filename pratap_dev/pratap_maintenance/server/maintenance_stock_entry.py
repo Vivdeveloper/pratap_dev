@@ -1,29 +1,53 @@
 # Copyright (c) 2026, pratap_dev contributors
 # License: MIT
 
-# Asset Maintenance Log — Consumed Maintenance Items -> Material Issue Stock Entry.
-#   * validate: default the Source Warehouse from Pratap Asset Settings and refresh each
-#     row's Available Qty from the warehouse stock;
-#   * before_submit: Source Warehouse is required when items are consumed, it must belong
-#     to the Asset Maintenance's company, and (per settings) the consumed qty may not be
-#     more than the available stock;
-#   * on_submit: in "Auto" mode the Stock Entry (Pratap Asset Settings > Stock Entry Type,
-#     default "Material Issue Maintenance") is created — submitted or left as a draft;
-#     in "Manual" mode the log form shows a Create Stock Entry button instead.
-# Each Stock Entry item row links back to its log (custom_asset_maintenance_log) and the
-# consumed row (custom_asset_maintenance_log_item); when the Stock Entry is submitted (or
-# cancelled) every linked log's custom_stock_entry is set (or cleared).
+# Consumed Maintenance Items -> Material Issue Stock Entry, for every submittable document in
+# SOURCES (Asset Maintenance Log — via hooks; Pratap Downtime Entry — from its controller).
+#   * validate: default the Source Warehouse from Pratap Asset Settings, only allowed Item
+#     Groups, refresh each row's Available Qty;
+#   * before_submit (validate_ready): Source Warehouse required (not a group, right company)
+#     and, per settings, the consumed qty may not be more than the available stock;
+#   * on_submit (on_ready_create_stock_entry): in Auto mode the Stock Entry (Pratap Asset
+#     Settings > Stock Entry Type, default "Material Issue Maintenance") is created —
+#     submitted or as a draft. Otherwise (or after that Stock Entry is cancelled) the
+#     submitted document shows a Create Stock Entry button.
+# Each Stock Entry item row links back to its source and consumed row (item-level fields in
+# SOURCES); when the Stock Entry is submitted (or cancelled) every linked source's Stock
+# Entry field is set (or cleared).
 
 import frappe
 from frappe import _
 from frappe.utils import cint, flt, get_link_to_form
 
 SETTINGS = "Pratap Asset Settings"
-ITEMS_FIELD = "custom_consumed_items"
-WAREHOUSE_FIELD = "custom_source_warehouse"
-# Stock Entry Detail (item-level) back-references
-LOG_LINK_FIELD = "custom_asset_maintenance_log"
-LOG_ITEM_LINK_FIELD = "custom_asset_maintenance_log_item"
+
+
+def _log_company(doc):
+	return frappe.db.get_value("Asset Maintenance", doc.get("asset_maintenance"), "company")
+
+
+# Per source doctype: its own field names, the Stock Entry Detail back-references, the
+# company the warehouse must belong to, and the text for the Stock Entry remarks.
+SOURCES = {
+	"Asset Maintenance Log": frappe._dict(
+		items_field="custom_consumed_items",
+		warehouse_field="custom_source_warehouse",
+		stock_entry_field="custom_stock_entry",
+		link_field="custom_asset_maintenance_log",
+		link_item_field="custom_asset_maintenance_log_item",
+		company=_log_company,
+		describe=lambda doc: doc.get("item_name") or doc.get("asset_name"),
+	),
+	"Pratap Downtime Entry": frappe._dict(
+		items_field="consumed_items",
+		warehouse_field="source_warehouse",
+		stock_entry_field="stock_entry",
+		link_field="custom_pratap_downtime_entry",
+		link_item_field="custom_pratap_downtime_entry_item",
+		company=lambda doc: doc.get("company"),
+		describe=lambda doc: doc.get("asset_name") or doc.get("workstation"),
+	),
+}
 
 
 def get_settings():
@@ -52,17 +76,18 @@ def get_allowed_item_groups():
 	return sorted(allowed)
 
 
-# ---------------------------------------------------------------- Asset Maintenance Log
+# ---------------------------------------------------------------- source document events
 
 
 def validate_consumed_items(doc, method=None):
-	"""Asset Maintenance Log validate: allowed item groups, default warehouse, Available Qty."""
+	"""validate: default Source Warehouse, allowed Item Groups, Available Qty."""
 	if doc.docstatus != 0:
 		return
+	cfg = SOURCES[doc.doctype]
 	# Default Source Warehouse on every draft (also logs ERPNext creates, which have no items yet).
-	if not doc.get(WAREHOUSE_FIELD):
-		doc.set(WAREHOUSE_FIELD, get_settings().default_source_warehouse)
-	items = doc.get(ITEMS_FIELD)
+	if not doc.get(cfg.warehouse_field):
+		doc.set(cfg.warehouse_field, get_settings().default_source_warehouse)
+	items = doc.get(cfg.items_field)
 	if not items:
 		return
 	allowed = get_allowed_item_groups()
@@ -77,25 +102,27 @@ def validate_consumed_items(doc, method=None):
 				),
 				title=_("Item Not Allowed"),
 			)
-	warehouse = doc.get(WAREHOUSE_FIELD)
+	warehouse = doc.get(cfg.warehouse_field)
 	for row in items:
 		row.available_qty = _actual_qty(row.item_code, warehouse) if warehouse else 0
 
 
-def before_submit_consumed_items(doc, method=None):
-	"""Asset Maintenance Log before_submit: warehouse required, company match, enough stock."""
-	items = doc.get(ITEMS_FIELD)
+def validate_ready(doc, method=None):
+	"""before_submit: Source Warehouse required, not a group, right company, enough stock."""
+	cfg = SOURCES[doc.doctype]
+	items = doc.get(cfg.items_field)
 	if not items:
 		return
-	warehouse = doc.get(WAREHOUSE_FIELD)
+	warehouse = doc.get(cfg.warehouse_field)
 	if not warehouse:
 		frappe.throw(
 			_("Please select the Source Warehouse for the Consumed Maintenance Items before submitting."),
 			title=_("Source Warehouse Required"),
 		)
-
-	company = _log_company(doc)
-	warehouse_company = frappe.db.get_value("Warehouse", warehouse, "company")
+	warehouse_company, is_group = frappe.db.get_value("Warehouse", warehouse, ["company", "is_group"])
+	if cint(is_group):
+		frappe.throw(_("Source Warehouse {0} is a group warehouse; select a stock warehouse.").format(frappe.bold(warehouse)))
+	company = cfg.company(doc)
 	if company and warehouse_company != company:
 		frappe.throw(
 			_("Source Warehouse {0} belongs to {1}, not to {2}.").format(
@@ -108,15 +135,18 @@ def before_submit_consumed_items(doc, method=None):
 	):
 		return
 
+	precision = cint(frappe.db.get_default("float_precision")) or 3
 	needed = {}
 	for row in items:
 		needed[row.item_code] = needed.get(row.item_code, 0) + flt(row.qty)
 	short = []
 	for item_code, qty in needed.items():
 		available = _actual_qty(item_code, warehouse)
-		if flt(qty) > flt(available):
+		if flt(qty, precision) > flt(available, precision):
 			short.append(
-				_("{0}: needed {1}, available {2}").format(frappe.bold(item_code), flt(qty), flt(available))
+				_("{0}: needed {1}, available {2}").format(
+					frappe.bold(item_code), flt(qty, precision), flt(available, precision)
+				)
 			)
 	if short:
 		frappe.throw(
@@ -125,19 +155,22 @@ def before_submit_consumed_items(doc, method=None):
 		)
 
 
-def on_submit_consumed_items(doc, method=None):
-	"""Asset Maintenance Log on_submit: create the Stock Entry in Auto mode."""
-	if not doc.get(ITEMS_FIELD):
+def on_ready_create_stock_entry(doc, method=None):
+	"""on_submit: create the Stock Entry in Auto mode."""
+	cfg = SOURCES[doc.doctype]
+	if not doc.get(cfg.items_field):
 		return
 	settings = get_settings()
-	if settings.stock_entry_creation != "Auto":
+	if settings.stock_entry_creation != "Auto" or _open_stock_entry(doc.doctype, doc.name):
 		return
-	# System action on the log's submit: the technician need not hold Stock Entry rights.
+	# System action on the source's submit: the user need not hold Stock Entry rights.
 	se = _build_stock_entry(doc, settings)
 	se.flags.ignore_permissions = True
 	se.insert()
 	if settings.submit_auto_stock_entry:
 		se.submit()
+		# Keep the in-memory document (returned to the form) in step with the db link.
+		doc.set(cfg.stock_entry_field, se.name)
 	frappe.msgprint(
 		_("Stock Entry {0} created for the consumed items.").format(get_link_to_form("Stock Entry", se.name)),
 		alert=True,
@@ -145,32 +178,36 @@ def on_submit_consumed_items(doc, method=None):
 	)
 
 
-# ---------------------------------------------------------------- whitelisted (log form)
+# ---------------------------------------------------------------- whitelisted (forms)
 
 
 @frappe.whitelist()
-def get_stock_entry_state(log):
-	"""What the log form needs for its button: settings mode + any open Stock Entry."""
-	frappe.has_permission("Asset Maintenance Log", "read", log, throw=True)
+def get_stock_entry_state(doctype, name):
+	"""What the form needs for its button: settings mode + any open Stock Entry."""
+	_check_source(doctype)
+	frappe.has_permission(doctype, "read", name, throw=True)
 	return {
 		"mode": get_settings().stock_entry_creation,
-		"stock_entry": _open_stock_entry(log),
+		"stock_entry": _open_stock_entry(doctype, name),
 	}
 
 
 @frappe.whitelist()
-def make_stock_entry(log):
-	"""Manual mode: create a draft Stock Entry for a submitted log and return its name."""
-	doc = frappe.get_doc("Asset Maintenance Log", log)
+def make_stock_entry(doctype, name):
+	"""Create a draft Stock Entry for a submitted source and return its name."""
+	cfg = _check_source(doctype)
+	doc = frappe.get_doc(doctype, name)
 	doc.check_permission("read")
 	if doc.docstatus != 1:
-		frappe.throw(_("Submit the Asset Maintenance Log before creating its Stock Entry."))
-	if not doc.get(ITEMS_FIELD):
-		frappe.throw(_("There are no Consumed Maintenance Items on {0}.").format(log))
-	existing = _open_stock_entry(log)
+		frappe.throw(_("Submit {0} {1} before creating its Stock Entry.").format(_(doctype), name))
+	if not doc.get(cfg.items_field):
+		frappe.throw(_("There are no Consumed Maintenance Items on {0}.").format(name))
+	# Serialise concurrent clicks/users on the same source before the "already exists" check.
+	frappe.db.get_value(doctype, name, "name", for_update=True)
+	existing = _open_stock_entry(doctype, name)
 	if existing:
 		frappe.throw(
-			_("Stock Entry {0} already exists for this log.").format(get_link_to_form("Stock Entry", existing))
+			_("Stock Entry {0} already exists for {1}.").format(get_link_to_form("Stock Entry", existing), name)
 		)
 	se = _build_stock_entry(doc, get_settings())
 	se.insert()
@@ -178,10 +215,11 @@ def make_stock_entry(log):
 
 
 @frappe.whitelist()
-def get_consumed_item_settings():
-	"""For the log form: allowed Item Groups (with sub-groups; [] = every stock item) and the
+def get_consumed_item_settings(doctype):
+	"""For the forms: allowed Item Groups (with sub-groups; [] = every stock item) and the
 	default Source Warehouse — read here so users without access to the settings get them."""
-	frappe.has_permission("Asset Maintenance Log", "read", throw=True)
+	_check_source(doctype)
+	frappe.has_permission(doctype, "read", throw=True)
 	return {
 		"item_groups": get_allowed_item_groups(),
 		"default_source_warehouse": get_settings().default_source_warehouse,
@@ -189,9 +227,10 @@ def get_consumed_item_settings():
 
 
 @frappe.whitelist()
-def get_available_qty(warehouse, items):
+def get_available_qty(doctype, warehouse, items):
 	"""Available stock per item code in `warehouse` (for the Available Qty column)."""
-	frappe.has_permission("Asset Maintenance Log", "read", throw=True)
+	_check_source(doctype)
+	frappe.has_permission(doctype, "read", throw=True)
 	items = frappe.parse_json(items) or []
 	return {item: _actual_qty(item, warehouse) for item in set(items) if item}
 
@@ -200,37 +239,49 @@ def get_available_qty(warehouse, items):
 
 
 def stock_entry_on_submit(doc, method=None):
-	"""Stock Entry on_submit: record it on the Asset Maintenance Log(s) of its items."""
-	for log in _linked_logs(doc):
-		frappe.db.set_value("Asset Maintenance Log", log, "custom_stock_entry", doc.name)
+	"""Stock Entry on_submit: record it on the source document(s) of its items."""
+	for doctype, name in _linked_sources(doc):
+		# update_modified=False: an open source form must still save without a timestamp clash.
+		frappe.db.set_value(doctype, name, SOURCES[doctype].stock_entry_field, doc.name, update_modified=False)
 
 
 def stock_entry_on_cancel(doc, method=None):
-	"""Stock Entry on_cancel: clear it from the Asset Maintenance Log(s) of its items."""
-	for log in _linked_logs(doc):
-		if frappe.db.get_value("Asset Maintenance Log", log, "custom_stock_entry") == doc.name:
-			frappe.db.set_value("Asset Maintenance Log", log, "custom_stock_entry", None)
+	"""Stock Entry on_cancel: clear it from the source document(s) of its items."""
+	for doctype, name in _linked_sources(doc):
+		field = SOURCES[doctype].stock_entry_field
+		if frappe.db.get_value(doctype, name, field) == doc.name:
+			frappe.db.set_value(doctype, name, field, None, update_modified=False)
 
 
-def _linked_logs(stock_entry):
-	return {row.get(LOG_LINK_FIELD) for row in stock_entry.get("items") if row.get(LOG_LINK_FIELD)}
+def _linked_sources(stock_entry):
+	return {
+		(doctype, row.get(cfg.link_field))
+		for row in stock_entry.get("items")
+		for doctype, cfg in SOURCES.items()
+		if row.get(cfg.link_field)
+	}
 
 
 # ---------------------------------------------------------------- helpers
 
 
-def _build_stock_entry(log, settings):
-	warehouse = log.get(WAREHOUSE_FIELD)
+def _check_source(doctype):
+	if doctype not in SOURCES:
+		frappe.throw(_("Consumed items are not supported for {0}.").format(doctype))
+	return SOURCES[doctype]
+
+
+def _build_stock_entry(source, settings):
+	cfg = SOURCES[source.doctype]
+	warehouse = source.get(cfg.warehouse_field)
 	purpose = frappe.db.get_value("Stock Entry Type", settings.stock_entry_type, "purpose")
 	se = frappe.new_doc("Stock Entry")
 	se.stock_entry_type = settings.stock_entry_type
 	se.purpose = purpose or "Material Issue"
-	se.company = _log_company(log)
+	se.company = cfg.company(source) or frappe.db.get_value("Warehouse", warehouse, "company")
 	se.from_warehouse = warehouse
-	se.remarks = _("Items consumed in Asset Maintenance Log {0} ({1})").format(
-		log.name, log.item_name or log.asset_name or ""
-	)
-	for row in log.get(ITEMS_FIELD):
+	se.remarks = _("Items consumed in {0} {1} ({2})").format(source.doctype, source.name, cfg.describe(source) or "")
+	for row in source.get(cfg.items_field):
 		stock_uom = frappe.get_cached_value("Item", row.item_code, "stock_uom")
 		se.append(
 			"items",
@@ -242,27 +293,25 @@ def _build_stock_entry(log, settings):
 				"stock_uom": stock_uom,
 				"conversion_factor": 1,
 				"s_warehouse": warehouse,
-				LOG_LINK_FIELD: log.name,
-				LOG_ITEM_LINK_FIELD: row.name,
+				cfg.link_field: source.name,
+				cfg.link_item_field: row.name,
 			},
 		)
 	return se
 
 
-def _open_stock_entry(log):
-	"""Draft or submitted Stock Entry already made for this log (cancelled ones ignored)."""
+def _open_stock_entry(doctype, name):
+	"""Draft or submitted Stock Entry already made for this source (cancelled ones ignored)."""
+	if not name:
+		return None
 	rows = frappe.get_all(
 		"Stock Entry Detail",
-		filters={"parenttype": "Stock Entry", LOG_LINK_FIELD: log, "docstatus": ("<", 2)},
+		filters={"parenttype": "Stock Entry", SOURCES[doctype].link_field: name, "docstatus": ("<", 2)},
 		fields=["parent"],
 		order_by="creation desc",
 		limit=1,
 	)
 	return rows[0].parent if rows else None
-
-
-def _log_company(log):
-	return frappe.db.get_value("Asset Maintenance", log.asset_maintenance, "company")
 
 
 def _actual_qty(item_code, warehouse):

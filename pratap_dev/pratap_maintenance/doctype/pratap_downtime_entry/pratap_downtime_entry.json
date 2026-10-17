@@ -1,0 +1,352 @@
+{
+ "actions": [],
+ "autoname": "naming_series:",
+ "creation": "2026-10-17 08:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "downtime_type",
+  "status",
+  "company",
+  "column_break_main",
+  "workstation",
+  "asset",
+  "asset_name",
+  "column_break_operator",
+  "operator",
+  "operator_name",
+  "time_section",
+  "from_time",
+  "column_break_time",
+  "to_time",
+  "column_break_downtime",
+  "downtime",
+  "downtime_reason_section",
+  "stop_reason",
+  "ownership",
+  "column_break_reason",
+  "purchase_order",
+  "supplier_name",
+  "po_date",
+  "remarks_section",
+  "remarks",
+  "consumed_items_section",
+  "source_warehouse",
+  "column_break_consumed",
+  "stock_entry",
+  "consumed_items_table_section",
+  "consumed_items",
+  "amended_from"
+ ],
+ "fields": [
+  {
+   "default": "PDT-.YYYY.-",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "no_copy": 1,
+   "options": "PDT-.YYYY.-",
+   "print_hide": 1,
+   "reqd": 1,
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "downtime_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Downtime Type",
+   "options": "\nBreakdown\nWork Order",
+   "reqd": 1
+  },
+  {
+   "default": "Open",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "no_copy": 1,
+   "options": "Open\nCompleted\nCancelled",
+   "read_only": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company",
+   "remember_last_selected_value": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_main",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "workstation",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Workstation / Machine",
+   "options": "Workstation",
+   "reqd": 1
+  },
+  {
+   "fieldname": "asset",
+   "fieldtype": "Link",
+   "label": "Asset",
+   "options": "Asset"
+  },
+  {
+   "fetch_from": "asset.asset_name",
+   "fieldname": "asset_name",
+   "fieldtype": "Data",
+   "label": "Asset Name",
+   "read_only": 1,
+   "depends_on": "asset"
+  },
+  {
+   "fieldname": "column_break_operator",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "operator",
+   "fieldtype": "Link",
+   "label": "Operator",
+   "options": "Employee",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "operator.employee_name",
+   "fieldname": "operator_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Operator Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "time_section",
+   "fieldtype": "Section Break",
+   "label": "Time"
+  },
+  {
+   "fieldname": "from_time",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "From Time",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_time",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "to_time",
+   "fieldtype": "Datetime",
+   "label": "To Time",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_downtime",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "downtime",
+   "fieldtype": "Float",
+   "label": "Downtime (Minutes)",
+   "read_only": 1,
+   "precision": "2"
+  },
+  {
+   "fieldname": "downtime_reason_section",
+   "fieldtype": "Section Break",
+   "label": "Downtime Reason"
+  },
+  {
+   "fieldname": "stop_reason",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Stop Reason",
+   "options": "\nExcessive machine set up time\nUnplanned machine maintenance\nOn-machine press checks\nMachine operator errors\nMachine malfunction\nElectricity down\nOther",
+   "reqd": 1
+  },
+  {
+   "fieldname": "ownership",
+   "fieldtype": "Select",
+   "label": "Ownership",
+   "options": "\nSelf\nThird-Party"
+  },
+  {
+   "fieldname": "column_break_reason",
+   "fieldtype": "Column Break"
+  },
+  {
+   "depends_on": "eval:doc.ownership == 'Third-Party'",
+   "fieldname": "purchase_order",
+   "fieldtype": "Link",
+   "label": "Purchase Order",
+   "mandatory_depends_on": "eval:doc.ownership == 'Third-Party'",
+   "options": "Purchase Order"
+  },
+  {
+   "depends_on": "purchase_order",
+   "fetch_from": "purchase_order.supplier_name",
+   "fieldname": "supplier_name",
+   "fieldtype": "Data",
+   "label": "Supplier Name",
+   "read_only": 1
+  },
+  {
+   "depends_on": "purchase_order",
+   "fetch_from": "purchase_order.transaction_date",
+   "fieldname": "po_date",
+   "fieldtype": "Date",
+   "label": "PO Date",
+   "read_only": 1
+  },
+  {
+   "fieldname": "remarks_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "remarks",
+   "fieldtype": "Text",
+   "label": "Remarks"
+  },
+  {
+   "fieldname": "consumed_items_section",
+   "fieldtype": "Section Break",
+   "label": "Consumed Items"
+  },
+  {
+   "description": "Required before submit when consumed items are entered.",
+   "fieldname": "source_warehouse",
+   "fieldtype": "Link",
+   "label": "Source Warehouse",
+   "options": "Warehouse"
+  },
+  {
+   "fieldname": "column_break_consumed",
+   "fieldtype": "Column Break"
+  },
+  {
+   "allow_on_submit": 1,
+   "description": "Submitted Material Issue Stock Entry for the consumed items.",
+   "fieldname": "stock_entry",
+   "fieldtype": "Link",
+   "label": "Stock Entry",
+   "no_copy": 1,
+   "options": "Stock Entry",
+   "read_only": 1
+  },
+  {
+   "fieldname": "consumed_items_table_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "consumed_items",
+   "fieldtype": "Table",
+   "label": "Consumed Maintenance Items",
+   "options": "Pratap Downtime Consumed Item"
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "hidden": 1,
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Pratap Downtime Entry",
+   "print_hide": 1,
+   "read_only": 1,
+   "search_index": 1
+  }
+ ],
+ "is_submittable": 1,
+ "links": [],
+ "modified": "2026-10-17 08:00:00",
+ "modified_by": "Administrator",
+ "module": "Pratap Maintenance",
+ "name": "Pratap Downtime Entry",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1,
+   "cancel": 1,
+   "amend": 1,
+   "delete": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Manufacturing Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1,
+   "cancel": 1,
+   "amend": 1,
+   "delete": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Maintenance Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1,
+   "cancel": 1,
+   "amend": 1,
+   "delete": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Manufacturing User",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Maintenance User",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "search_fields": "workstation,operator_name,status",
+ "show_title_field_in_link": 0,
+ "sort_field": "from_time",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "workstation",
+ "track_changes": 1
+}

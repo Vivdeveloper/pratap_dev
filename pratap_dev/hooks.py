@@ -331,7 +331,12 @@ doctype_js = {
     "Asset Maintenance": "pratap_maintenance/client/asset_maintenance_checklist.js",
     "Asset Maintenance Log": [
         "pratap_maintenance/client/asset_maintenance_log_checklist.js",
+        "pratap_maintenance/client/consumed_items.js",
         "pratap_maintenance/client/asset_maintenance_log_consumed_items.js",
+    ],
+    "Pratap Downtime Entry": [
+        "pratap_maintenance/client/consumed_items.js",
+        "pratap_maintenance/client/pratap_downtime_entry_consumed_items.js",
     ],
     "Stock Entry": [
         "public/js/stock_entry_batch_entry.js",
@@ -445,8 +450,8 @@ doc_events = {
             "pratap_dev.pratap_maintenance.server.asset_maintenance_checklist.validate_unique_check_points",
             "pratap_dev.pratap_maintenance.server.maintenance_stock_entry.validate_consumed_items",
         ],
-        "before_submit": "pratap_dev.pratap_maintenance.server.maintenance_stock_entry.before_submit_consumed_items",
-        "on_submit": "pratap_dev.pratap_maintenance.server.maintenance_stock_entry.on_submit_consumed_items",
+        "before_submit": "pratap_dev.pratap_maintenance.server.maintenance_stock_entry.validate_ready",
+        "on_submit": "pratap_dev.pratap_maintenance.server.maintenance_stock_entry.on_ready_create_stock_entry",
     },
     "Material Request": {
         # Compute the Purchase MR pipeline columns (Pending PR for GRN / Pending for GRN
