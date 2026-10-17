@@ -29,3 +29,4 @@ pratap_dev.patches.prod_oct_field_hides_and_source
 pratap_dev.patches.cleanup_orphan_rfq_child_rows
 pratap_dev.patches.add_pr_transporter_vehicle_fields
 pratap_dev.patches.qc_move_sample_fields_top
+pratap_dev.patches.mr_item_source_warehouse_col

@@ -460,6 +460,9 @@ doc_events = {
         # on submitted MRs (fields are allow_on_submit).
         "validate": [
             "pratap_dev.material_request_stock.update_pipeline_fields",
+            # Material Transfer MRs: fill the per-item warehouse stock columns (Plant 1 WIP /
+            # Plant 2 WIP / Main Store / Source Warehouse) with actual on-hand of each warehouse.
+            "pratap_dev.material_request_stock.set_transfer_stock_columns",
             # runs AFTER pipeline fields are computed: removes already-fulfilled items from
             # the Items table (snapshotting them for the "Already Fulfilled" box below).
             "pratap_dev.material_request_stock.move_fulfilled_items",
@@ -471,6 +474,16 @@ doc_events = {
         # NOTE: no before_update_after_submit — the computed warehouse/qty columns are frozen
         # after submit (allow_on_submit removed), so they must NOT be recomputed post-submit.
         # This keeps the "Update" button from appearing on a submitted Material Request.
+        #
+        # When an MR is linked to a Work Order (mr.work_order), refresh that Work Order's
+        # Required Items MR Qty as soon as the MR is saved (even a DRAFT), submitted,
+        # cancelled or deleted — so the request reflects immediately and the Start gate opens.
+        "on_update": "pratap_dev.work_order_material_request.recompute_wo_mr_qty_from_mr",
+        "on_submit": "pratap_dev.work_order_material_request.recompute_wo_mr_qty_from_mr",
+        "on_cancel": "pratap_dev.work_order_material_request.recompute_wo_mr_qty_from_mr",
+        # after_delete (not on_trash): fire AFTER the MR row is gone so it is no longer counted,
+        # restoring the Work Order's MR Qty when a draft MR is deleted.
+        "after_delete": "pratap_dev.work_order_material_request.recompute_wo_mr_qty_from_mr",
     },
     "Request for Quotation": {
         "validate": [

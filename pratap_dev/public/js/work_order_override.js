@@ -32,6 +32,11 @@ frappe.ui.form.on("Work Order", {
         // BOM cascade settles).
         if (frm.doc.docstatus === 0 && frm.doc.production_item) {
             set_wip_from_item(frm, 600);
+            // Re-point Required Items rows to the Custom Source Warehouse after the item/BOM
+            // cascade settles (covers programmatic creation and reloads of a draft).
+            sync_required_items_source(frm, 900);
+            // Fill the warehouse stock columns live (no save / button needed).
+            autofill_wo_stock_columns(frm, 1000);
         }
         },
 
@@ -41,6 +46,11 @@ frappe.ui.form.on("Work Order", {
     // otherwise re-syncs the doc and wipes the value.
     production_item(frm) {
         set_wip_from_item(frm, 300);
+        // After ERPNext fetches Required Items (item default source), re-point them to the
+        // Custom Source Warehouse once the cascade settles.
+        sync_required_items_source(frm, 1200);
+        // Fill the warehouse stock columns live once the Required Items have loaded.
+        autofill_wo_stock_columns(frm, 1400);
     },
 
     // When the item / BOM / qty changes, ERPNext re-fetches Required Items from the BOM
@@ -54,11 +64,87 @@ frappe.ui.form.on("Work Order", {
         // The BOM cascade re-syncs the doc and can drop wip_warehouse; re-assert it
         // once that settles.
         set_wip_from_item(frm, 800);
+        // ERPNext re-fetches Required Items (with the item's default source warehouse) on a
+        // BOM change — re-point them to the Custom Source Warehouse once that settles.
+        sync_required_items_source(frm, 1200);
+        // Fill the warehouse stock columns live once the re-fetched rows settle.
+        autofill_wo_stock_columns(frm, 1400);
     },
     qty(frm) {
         populate_wo_instructions(frm, 1000);
     },
+
+    // Manual change of the Custom Source Warehouse -> re-point every Required Items row's
+    // Source Warehouse to it immediately (otherwise the rows keep the item's default, e.g.
+    // Main Store RM, until the next save). The server already lands the same on save.
+    custom_custom_source_warehouse(frm) {
+        sync_required_items_source(frm, 0);
+    },
 });
+
+// Fill the Plant 1 WIP / Plant 2 WIP / Main Store RM columns LIVE on a draft Work Order
+// (before save), so they never sit blank. One server call returns every required item's
+// stock in the three warehouses (same resolution the on-save hook uses), avoiding the
+// per-row, per-warehouse client fetches that could leave a column blank. Draft only.
+function autofill_wo_stock_columns(frm, delay) {
+    if (frm.doc.docstatus !== 0 || !frm.doc.company) {
+        return;
+    }
+    const run = () => {
+        const rows = frm.doc.required_items || [];
+        const items = [...new Set(rows.map((r) => r.item_code).filter(Boolean))];
+        if (!items.length) {
+            return;
+        }
+        frappe
+            .xcall("pratap_dev.work_order_material_request.get_wo_items_stock", {
+                items: JSON.stringify(items),
+                company: frm.doc.company,
+            })
+            .then((stock_by_item) => {
+                (frm.doc.required_items || []).forEach((row) => {
+                    const s = (stock_by_item || {})[row.item_code];
+                    if (!s) {
+                        return;
+                    }
+                    ["custom_plant_1_wip_rm", "custom_plant_2_wip_rm", "custom_main_store_rm"].forEach(
+                        (fn) => set_wo_qty_field(row.doctype, row.name, fn, s[fn])
+                    );
+                });
+            })
+            .catch(() => {});
+    };
+    if (delay) {
+        setTimeout(run, delay);
+    } else {
+        run();
+    }
+}
+
+// Point every Required Items row's Source Warehouse at the Work Order's Custom Source
+// Warehouse, so the rows show the chosen source (e.g. Plant 1 WIP RM) live instead of the
+// item's default (e.g. Main Store RM). Draft only; on-submit the rows are frozen.
+function sync_required_items_source(frm, delay) {
+    if (frm.doc.docstatus !== 0) {
+        return;
+    }
+    const run = () => {
+        const src = frm.doc.custom_custom_source_warehouse;
+        if (!src) {
+            return;
+        }
+        (frm.doc.required_items || []).forEach((row) => {
+            if (row.source_warehouse !== src) {
+                frappe.model.set_value(row.doctype, row.name, "source_warehouse", src);
+            }
+        });
+    };
+    if (delay) {
+        setTimeout(run, delay);
+    } else {
+        run();
+    }
+}
 
 // Warehouses that follow the production item master, fetched so they're never picked by
 // hand:

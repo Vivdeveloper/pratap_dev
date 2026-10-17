@@ -335,6 +335,50 @@ def update_pipeline_fields(doc, method=None):
         row.custom_pending_po_qty = max(flt(row.qty) - ordered, 0)
 
 
+def set_transfer_stock_columns(doc, method=None):
+    """For a Material Transfer MR, fill each item row's warehouse stock columns so they show
+    the ACTUAL on-hand of the right warehouse:
+
+      * custom_plant_1_wip_rm   — live stock in Plant 1 WIP RM
+      * custom_plant_2_wip_rm   — live stock in Plant 2 WIP RM
+      * custom_main_store_rm_qty— live stock in Main Store RM
+      * custom_total_stock_qty  — sum of the three above (the "RM Quantity" column)
+      * custom_wip_rm_qty       — "Source Warehouse" column: live stock at the HEADER's
+                                  Set Source Warehouse (set_from_warehouse), whatever it is.
+                                  Falls back to the row's own from_warehouse if the header is
+                                  blank. So the source column mirrors whichever warehouse is
+                                  selected as source (= the matching Plant/Main column when the
+                                  source is one of those three).
+
+    Runs on validate (drafts) only; frozen after submit (columns are allow_on_submit but we
+    skip post-submit to avoid the Update button + 'cannot change after submission').
+    """
+    if getattr(doc, "docstatus", 0) == 1:
+        return
+    if (doc.get("material_request_type") or "") != "Material Transfer":
+        return
+
+    from erpnext.stock.utils import get_latest_stock_qty
+
+    header_source = doc.get("set_from_warehouse")
+
+    for row in doc.get("items") or []:
+        if not row.item_code:
+            continue
+
+        stock = _rm_stock_breakdown(row.item_code, doc.company)
+        row.custom_main_store_rm_qty = stock["custom_main_store_rm_qty"]
+        row.custom_plant_1_wip_rm = stock["custom_plant_1_wip_rm"]
+        row.custom_plant_2_wip_rm = stock["custom_plant_2_wip_rm"]
+        row.custom_total_stock_qty = stock["total"]
+
+        # Source Warehouse column = live stock at the selected source warehouse (any warehouse).
+        source_wh = header_source or row.get("from_warehouse")
+        row.custom_wip_rm_qty = (
+            flt(get_latest_stock_qty(row.item_code, source_wh)) if source_wh else 0
+        )
+
+
 def move_fulfilled_items(doc, method=None):
     """For a Purchase Material Request, remove rows whose warehouse stock already covers the
     expected qty (the "Already Fulfilled — No PO" set) from the Items child table so they do
