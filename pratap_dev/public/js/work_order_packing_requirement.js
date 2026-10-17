@@ -49,6 +49,13 @@ function draw_packing_table(frm, $wrapper, data) {
 		`<th class="${right ? "text-right" : ""}" style="padding:6px 10px;">${label}</th>`;
 	const td = (val, right) =>
 		`<td class="${right ? "text-right" : ""}" style="padding:6px 10px;">${val}</td>`;
+	// Light-green header/cell for the "In Week" (received) columns, so they stand out next to
+	// the "MR Week" (requested) columns they are interleaved with.
+	const IN_GREEN = "background:#e6f4ea;";
+	const thg = (label) =>
+		`<th class="text-right" style="padding:6px 10px;${IN_GREEN}">${label}</th>`;
+	const tdg = (val) =>
+		`<td class="text-right" style="padding:6px 10px;${IN_GREEN}">${val}</td>`;
 
 	const fg = esc(data.fg || "");
 	const body = rows
@@ -82,13 +89,13 @@ function draw_packing_table(frm, $wrapper, data) {
 				${pack_cell}
 				${mrq_cell}
 				${td(fmt(d.mr_w1), true)}
+				${tdg(fmt(d.in_w1))}
 				${td(fmt(d.mr_w2), true)}
+				${tdg(fmt(d.in_w2))}
 				${td(fmt(d.mr_w3), true)}
+				${tdg(fmt(d.in_w3))}
 				${td(fmt(d.mr_w4), true)}
-				${td(fmt(d.in_w1), true)}
-				${td(fmt(d.in_w2), true)}
-				${td(fmt(d.in_w3), true)}
-				${td(fmt(d.in_w4), true)}
+				${tdg(fmt(d.in_w4))}
 			</tr>`;
 		})
 		.join("");
@@ -120,13 +127,13 @@ function draw_packing_table(frm, $wrapper, data) {
 					${th(__("Qty to Pack"), true)}
 					${th(__("MR Qty"), true)}
 					${th(__("MR Week 1"), true)}
+					${thg(__("In Week 1"))}
 					${th(__("MR Week 2"), true)}
+					${thg(__("In Week 2"))}
 					${th(__("MR Week 3"), true)}
+					${thg(__("In Week 3"))}
 					${th(__("MR Week 4"), true)}
-					${th(__("In Week 1"), true)}
-					${th(__("In Week 2"), true)}
-					${th(__("In Week 3"), true)}
-					${th(__("In Week 4"), true)}
+					${thg(__("In Week 4"))}
 				</tr></thead>
 				<tbody>${body}</tbody>
 			</table>
