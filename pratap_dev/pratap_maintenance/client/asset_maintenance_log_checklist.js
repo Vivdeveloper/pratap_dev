@@ -5,7 +5,9 @@
 
 frappe.ui.form.on("Asset Maintenance Log", {
 	setup(frm) {
-		frm.set_query("check_point", "maintenance_checklists", () => ({ filters: { disabled: 0 } }));
+		frm.set_query("check_point", "maintenance_checklists", (doc, cdt, cdn) =>
+			unused_check_point_query(doc.maintenance_checklists, cdn)
+		);
 	},
 
 	asset_maintenance(frm) {
@@ -39,3 +41,13 @@ frappe.ui.form.on("Asset Maintenance Log", {
 			});
 	},
 });
+
+// Enabled check points not already in the table (the row being edited keeps its own).
+function unused_check_point_query(rows, cdn) {
+	const used = (rows || []).filter((row) => row.name !== cdn && row.check_point).map((row) => row.check_point);
+	const filters = [["disabled", "=", 0]];
+	if (used.length) {
+		filters.push(["name", "not in", used]);
+	}
+	return { filters };
+}

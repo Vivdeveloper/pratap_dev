@@ -10,6 +10,7 @@
 # Submitted logs and logs where the technician has started recording are never touched.
 
 import frappe
+from frappe import _
 
 CHECKLIST_FIELD = "maintenance_checklists"
 # Child tables behind CHECKLIST_FIELD on Asset Maintenance (plan) and its Log (results).
@@ -47,6 +48,23 @@ def sync_draft_log_checklists(doc, method=None):
 			continue
 		_set_rows(log, rows)
 		log.save()
+
+
+def validate_unique_check_points(doc, method=None, table_field=CHECKLIST_FIELD):
+	"""A check point may appear only once per checklist table (template, Asset Maintenance, log)."""
+	seen = {}
+	for row in doc.get(table_field):
+		if not row.check_point:
+			continue
+		key = row.check_point.strip().casefold()
+		if key in seen:
+			frappe.throw(
+				_("Row #{0}: Check Point {1} is already in row #{2}.").format(
+					row.idx, frappe.bold(row.check_point), seen[key]
+				),
+				title=_("Duplicate Check Point"),
+			)
+		seen[key] = row.idx
 
 
 @frappe.whitelist()
