@@ -44,11 +44,18 @@ def get_work_orders_for_material_request():
         order_by="idx asc",
     )
 
+    items_by_wo = {}
+    for it in items:
+        items_by_wo.setdefault(it.parent, []).append(it)
+
     # Coverage from Material Requests already linked to these Work Orders:
-    #   * submitted MR qty nets off the picker qty (item disappears once fully covered);
-    #   * draft MRs don't reduce qty but are shown as an identifier/link so the user can
-    #     see it's already in a draft MR (and it drops off once that MR is submitted).
-    submitted_by_item, draft_mrs_by_wo_item = _mr_coverage(wo_names)
+    #   * submitted MR qty nets off the picker qty PER LINKED WORK ORDER — only MRs linked to
+    #     a specific WO (via custom_work_order_connection) reduce THAT WO's demand, so a brand-
+    #     new WO is never hidden by MRs raised for other WOs that share the same item.
+    #   * draft MRs don't reduce qty but are shown as an identifier/link (drops off on submit).
+    submitted_by_wo_item, draft_mrs_by_wo_item = _mr_coverage(
+        work_orders, items_by_wo
+    )
 
     grouped = {}
     for wo in work_orders:
@@ -61,25 +68,16 @@ def get_work_orders_for_material_request():
             "items": [],
         }
 
-    items_by_wo = {}
-    for it in items:
-        items_by_wo.setdefault(it.parent, []).append(it)
-
-    # Net off submitted MR qty per item, consumed greedily in Work Order fetch order, so
-    # a fully-requested item drops off the earlier WO(s) first and any leftover shows as
-    # the remaining short qty on the next WO.
-    pool = dict(submitted_by_item)
     for wo in work_orders:
         for it in items_by_wo.get(wo.name, []):
             expected = flt(it.custom_qty_amount)
             if expected <= 0:
                 continue  # nothing to request -> hide (expected/MR Qty = 0)
 
-            covered = min(expected, flt(pool.get(it.item_code, 0.0)))
-            pool[it.item_code] = flt(pool.get(it.item_code, 0.0)) - covered
+            covered = flt(submitted_by_wo_item.get((wo.name, it.item_code), 0.0))
             remaining = flt(expected - covered, 3)
             if remaining <= 0:
-                continue  # fully covered by submitted MRs -> hide
+                continue  # fully covered by submitted MRs linked to THIS WO -> hide
 
             grouped[wo.name]["items"].append(
                 {
@@ -94,21 +92,23 @@ def get_work_orders_for_material_request():
     return [g for g in grouped.values() if g["items"]]
 
 
-def _mr_coverage(wo_names):
+def _mr_coverage(work_orders, items_by_wo):
     """Material Request coverage for items linked to a set of Work Orders.
 
-    Links are read from Material Request Item.custom_work_order_connection (a comma-
-    separated list of Work Order names). Returns:
-        submitted_by_item      = {item_code: total qty in SUBMITTED MRs}
+    Links are read from Material Request Item.custom_work_order_connection (a comma-separated
+    list of Work Order names). Returns:
+        submitted_by_wo_item   = {(work_order, item_code): submitted qty NETTED to that WO}
         draft_mrs_by_wo_item   = {(work_order, item_code): [draft MR names]}
 
-    Submitted qty is counted once per (MR, item) even when the MR item links to several
-    Work Orders, so the netting never double-counts a combined MR row.
+    A submitted MR item nets off ONLY the Work Orders it is linked to — never an unrelated WO
+    that merely shares the same item. A combined MR row (linked to several WOs) has its qty
+    allocated greedily across just those linked WOs' demand, so it is never double-counted.
     """
-    submitted_by_item = {}
+    submitted_by_wo_item = {}
     draft_mrs_by_wo_item = {}
+    wo_names = [wo.name for wo in work_orders]
     if not wo_names:
-        return submitted_by_item, draft_mrs_by_wo_item
+        return submitted_by_wo_item, draft_mrs_by_wo_item
 
     rows = frappe.db.sql(
         """
@@ -123,7 +123,15 @@ def _mr_coverage(wo_names):
     )
 
     wo_set = set(wo_names)
-    counted = set()  # (mr_name, item_code) already added to submitted_by_item
+    # Fetch order so a combined MR covers the earlier WO(s) first (matches the card order).
+    wo_order = {wo.name: i for i, wo in enumerate(work_orders)}
+    # Per-WO per-item demand (MR Qty) used to cap greedy allocation of a submitted MR row.
+    demand = {}
+    for wo in work_orders:
+        for it in items_by_wo.get(wo.name, []):
+            demand[(wo.name, it.item_code)] = flt(it.custom_qty_amount)
+
+    counted = set()  # (mr_name, item_code) — one MR row contributes once
     for r in rows:
         linked = [w.strip() for w in (r.conn or "").split(",") if w.strip()]
         relevant = [w for w in linked if w in wo_set]
@@ -132,15 +140,26 @@ def _mr_coverage(wo_names):
 
         if r.docstatus == 1:
             key = (r.mr_name, r.item_code)
-            if key not in counted:
-                counted.add(key)
-                submitted_by_item[r.item_code] = (
-                    flt(submitted_by_item.get(r.item_code, 0.0)) + flt(r.qty)
-                )
+            if key in counted:
+                continue
+            counted.add(key)
+            # Allocate this MR row's qty greedily across ITS linked WOs only, capped at each
+            # WO's remaining demand so we never credit more than that WO actually needs.
+            remaining_qty = flt(r.qty)
+            for wo in sorted(relevant, key=lambda w: wo_order.get(w, 1e9)):
+                if remaining_qty <= 0:
+                    break
+                k = (wo, r.item_code)
+                already = flt(submitted_by_wo_item.get(k, 0.0))
+                need = max(0.0, flt(demand.get(k, 0.0)) - already)
+                take = min(remaining_qty, need)
+                if take > 0:
+                    submitted_by_wo_item[k] = already + take
+                    remaining_qty -= take
         else:
             for wo in relevant:
                 lst = draft_mrs_by_wo_item.setdefault((wo, r.item_code), [])
                 if r.mr_name not in lst:
                     lst.append(r.mr_name)
 
-    return submitted_by_item, draft_mrs_by_wo_item
+    return submitted_by_wo_item, draft_mrs_by_wo_item

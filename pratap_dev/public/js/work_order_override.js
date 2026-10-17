@@ -74,11 +74,56 @@ frappe.ui.form.on("Work Order", {
         populate_wo_instructions(frm, 1000);
     },
 
-    // Manual change of the Custom Source Warehouse -> re-point every Required Items row's
+    // Manual change of the Custom Source Warehouse — re-point every Required Items row's
     // Source Warehouse to it immediately (otherwise the rows keep the item's default, e.g.
     // Main Store RM, until the next save). The server already lands the same on save.
     custom_custom_source_warehouse(frm) {
         sync_required_items_source(frm, 0);
+    },
+});
+
+// Live English -> Marathi translation on the Required Items rows (same behaviour as the BOM
+// "English to Marathi in BOM" script). When the operator types in "Operation Instruction
+// English" and commits (Enter / blur), call the translation API and fill the Marathi cell —
+// no save or draft needed. The grid here is `required_items` (BOM uses `items`).
+frappe.ui.form.on("Work Order Item", {
+    custom_operation_instruction(frm, cdt, cdn) {
+        const row = locals[cdt][cdn];
+        if (!row.custom_operation_instruction) {
+            frappe.model.set_value(cdt, cdn, "custom_operation_instruction_marathi", "");
+            return;
+        }
+        const url =
+            "https://api.mymemory.translated.net/get?q=" +
+            encodeURIComponent(row.custom_operation_instruction) +
+            "&langpair=en|mr";
+        fetch(url)
+            .then((response) => response.json())
+            .then((data) => {
+                const translated =
+                    (data.responseData && data.responseData.translatedText) || "";
+                frappe.model
+                    .set_value(cdt, cdn, "custom_operation_instruction_marathi", translated)
+                    .then(() => {
+                        // Show the translation immediately without clicking into the cell.
+                        const grid =
+                            frm.fields_dict.required_items &&
+                            frm.fields_dict.required_items.grid;
+                        if (!grid) {
+                            return;
+                        }
+                        const grid_row =
+                            grid.grid_rows_by_docname && grid.grid_rows_by_docname[cdn];
+                        if (grid_row && grid_row.refresh_field) {
+                            grid_row.refresh_field("custom_operation_instruction_marathi");
+                        } else {
+                            grid.refresh();
+                        }
+                    });
+            })
+            .catch((err) => {
+                console.error("Translation error:", err);
+            });
     },
 });
 
@@ -204,9 +249,10 @@ function populate_wo_instructions(frm, delay) {
                     const source = instructions[row.item_code] || {};
                     WO_INSTRUCTION_FIELDS.forEach((fieldname) => {
                         const next_value = source[fieldname] || "";
-                        // Skip when unchanged — always writing here (even when equal)
-                        // marks the form dirty on every refresh with no real change.
-                        if ((row[fieldname] || "") === next_value) {
+                        // Only SEED from the BOM when the cell is still empty — the English
+                        // instruction is now editable, so a manual edit (and its live Marathi
+                        // translation) must survive later refreshes instead of being reverted.
+                        if ((row[fieldname] || "") !== "" || !next_value) {
                             return;
                         }
                         frappe.model.set_value(row.doctype, row.name, fieldname, next_value, null, true);
