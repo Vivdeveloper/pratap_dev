@@ -1,0 +1,118 @@
+{
+ "actions": [],
+ "creation": "2026-10-17 04:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "consumed_items_section",
+  "stock_entry_creation",
+  "submit_auto_stock_entry",
+  "column_break_stock",
+  "stock_entry_type",
+  "default_source_warehouse",
+  "consumed_items_filter_section",
+  "consumed_item_groups",
+  "stock_validation_section",
+  "validate_available_stock"
+ ],
+ "fields": [
+  {
+   "fieldname": "consumed_items_section",
+   "fieldtype": "Section Break",
+   "label": "Consumed Items Stock Entry"
+  },
+  {
+   "default": "Manual",
+   "description": "Manual: a Create Stock Entry button appears on a submitted Asset Maintenance Log that has consumed items.<br>Auto: the Stock Entry is created when the log is submitted.",
+   "fieldname": "stock_entry_creation",
+   "fieldtype": "Select",
+   "label": "Stock Entry Creation",
+   "options": "Manual\nAuto",
+   "reqd": 1
+  },
+  {
+   "default": "1",
+   "depends_on": "eval:doc.stock_entry_creation == 'Auto'",
+   "description": "Unticked: the auto Stock Entry is saved as a draft for review.",
+   "fieldname": "submit_auto_stock_entry",
+   "fieldtype": "Check",
+   "label": "Submit Auto Stock Entry"
+  },
+  {
+   "fieldname": "column_break_stock",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Material Issue Maintenance",
+   "fieldname": "stock_entry_type",
+   "fieldtype": "Link",
+   "label": "Stock Entry Type",
+   "options": "Stock Entry Type",
+   "reqd": 1
+  },
+  {
+   "description": "Filled into new Asset Maintenance Logs that have consumed items.",
+   "fieldname": "default_source_warehouse",
+   "fieldtype": "Link",
+   "label": "Default Source Warehouse",
+   "options": "Warehouse"
+  },
+  {
+   "fieldname": "consumed_items_filter_section",
+   "fieldtype": "Section Break",
+   "label": "Consumed Items Filter"
+  },
+  {
+   "description": "Only stock items in these Item Groups (and their sub-groups) can be added as Consumed Maintenance Items. Leave empty to allow every stock item.",
+   "fieldname": "consumed_item_groups",
+   "fieldtype": "Table MultiSelect",
+   "label": "Allowed Item Groups",
+   "options": "Pratap Asset Settings Item Group"
+  },
+  {
+   "fieldname": "stock_validation_section",
+   "fieldtype": "Section Break",
+   "label": "Stock Validation"
+  },
+  {
+   "default": "1",
+   "description": "Block submitting a log when a consumed qty is more than the stock in its Source Warehouse (skipped when Stock Settings allows negative stock).",
+   "fieldname": "validate_available_stock",
+   "fieldtype": "Check",
+   "label": "Validate Available Stock"
+  }
+ ],
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-10-17 05:00:00",
+ "modified_by": "Administrator",
+ "module": "Pratap Maintenance",
+ "name": "Pratap Asset Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Stock Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

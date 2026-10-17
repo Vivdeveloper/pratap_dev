@@ -252,7 +252,7 @@ before_request = ["pratap_dev.stock_ledger_columns.ensure_patched"]
 fixtures = [
 	{
 		"dt": "Custom Field",
-		"filters": [["module", "=", "pratap"]],
+		"filters": [["module", "in", ["pratap", "Pratap Maintenance"]]],
 	},
 	# Ship these Client Scripts with the app so their fixes deploy everywhere
 	# (Client Scripts are otherwise per-site DB records that git/migrate won't carry).
@@ -260,10 +260,11 @@ fixtures = [
 		"dt": "Client Script",
 		"filters": [["name", "in", ["English to Marathi in BOM", "Work Order Button"]]],
 	},
-	# Ship the rework transfer Stock Entry Type (master used by the QC -> rework draft SE).
+	# Ship the rework transfer Stock Entry Type (master used by the QC -> rework draft SE)
+	# and Material Issue Maintenance (consumed items on Asset Maintenance Log).
 	{
 		"dt": "Stock Entry Type",
-		"filters": [["name", "=", "Rework Material Transfer"]],
+		"filters": [["name", "in", ["Rework Material Transfer", "Material Issue Maintenance"]]],
 	},
 ]
 
@@ -327,6 +328,16 @@ doctype_js = {
         "public/js/bom_default_warning.js",
     ],
     "Batch": "public/js/batch.js",
+    "Asset Maintenance": "pratap_maintenance/client/asset_maintenance_checklist.js",
+    "Asset Maintenance Log": [
+        "pratap_maintenance/client/asset_maintenance_log_checklist.js",
+        "pratap_maintenance/client/consumed_items.js",
+        "pratap_maintenance/client/asset_maintenance_log_consumed_items.js",
+    ],
+    "Pratap Downtime Entry": [
+        "pratap_maintenance/client/consumed_items.js",
+        "pratap_maintenance/client/pratap_downtime_entry_consumed_items.js",
+    ],
     "Stock Entry": [
         "public/js/stock_entry_batch_entry.js",
         "public/js/stock_entry_bundle_details.js",
@@ -378,8 +389,14 @@ doc_events = {
             "pratap_dev.stock_entry_validation.validate_manufacture_batch_with_work_order",
             "pratap_dev.stock_entry_validation.prevent_over_transfer_for_manufacture",
         ],
-        "on_submit": "pratap_dev.batch_package_hooks.stock_entry_on_submit",
-        "on_cancel": "pratap_dev.batch_package_hooks.stock_entry_on_cancel",
+        "on_submit": [
+            "pratap_dev.batch_package_hooks.stock_entry_on_submit",
+            "pratap_dev.pratap_maintenance.server.maintenance_stock_entry.stock_entry_on_submit",
+        ],
+        "on_cancel": [
+            "pratap_dev.batch_package_hooks.stock_entry_on_cancel",
+            "pratap_dev.pratap_maintenance.server.maintenance_stock_entry.stock_entry_on_cancel",
+        ],
     },
     "Pratap Quality Inspection": {
         "validate": [
@@ -420,6 +437,21 @@ doc_events = {
     },
     "Custom Field": {
         "on_update": "pratap_dev.fixture_export.export_custom_field_on_save",
+    },
+    # Maintenance Checklist: copy the Asset Maintenance checklist into its (draft) logs.
+    "Asset Maintenance": {
+        "validate": "pratap_dev.pratap_maintenance.server.asset_maintenance_checklist.validate_unique_check_points",
+        "on_update": "pratap_dev.pratap_maintenance.server.asset_maintenance_checklist.sync_draft_log_checklists",
+    },
+    # Consumed Maintenance Items: stock check on submit + Material Issue Stock Entry.
+    "Asset Maintenance Log": {
+        "validate": [
+            "pratap_dev.pratap_maintenance.server.asset_maintenance_checklist.fill_log_checklist",
+            "pratap_dev.pratap_maintenance.server.asset_maintenance_checklist.validate_unique_check_points",
+            "pratap_dev.pratap_maintenance.server.maintenance_stock_entry.validate_consumed_items",
+        ],
+        "before_submit": "pratap_dev.pratap_maintenance.server.maintenance_stock_entry.validate_ready",
+        "on_submit": "pratap_dev.pratap_maintenance.server.maintenance_stock_entry.on_ready_create_stock_entry",
     },
     "Material Request": {
         # Compute the Purchase MR pipeline columns (Pending PR for GRN / Pending for GRN
